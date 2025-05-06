@@ -1,0 +1,19 @@
+[package]
+name = "finreport"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+config = "0.15.11"
+dotenv = "0.15.0"
+env_logger = "0.11.8"
+reqwest = {version =  "0.12.15" , features = ["native-tls","stream", "json"]}
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+tokio = { version = "1.44.2", features = ["full"]}
+uuid = { version = "1.16.0", features = ["v4"] }
+
+[[bin]]
+name = "import-transactions"
+path = "src/bin/import_transactions.rs"
+
