@@ -5,7 +5,7 @@ use tokio::io;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::sleep;
 use crate::comdirect::loader;
-use crate::comdirect::session_client::{ClientError, ComdirectClient, PersistentSession, SessionStatus, XOnceAuthenticationInfo};
+use crate::comdirect::session_client::{SessionClientError, SessionClient, Session, SessionStatus, XOnceAuthenticationInfo};
 use crate::settings::Settings;
 
 #[derive(Debug)]
@@ -19,8 +19,8 @@ impl Display for SessionError {
     }
 }
 
-impl From<ClientError> for SessionError {
-    fn from(value: ClientError) -> Self {
+impl From<SessionClientError> for SessionError {
+    fn from(value: SessionClientError) -> Self {
         SessionError::Error
     }
 }
@@ -35,19 +35,19 @@ impl std::error::Error for SessionError {}
 enum State {
     Start,
     NoSession,
-    SessionUnchecked(PersistentSession),
-    SessionValidationReady(PersistentSession),
-    SessionPatchReady(PersistentSession),
-    SessionPatchWaitingForTan(PersistentSession, XOnceAuthenticationInfo),
-    SessionPatchSession(PersistentSession, XOnceAuthenticationInfo),
-    SessionReady(PersistentSession),
-    SessionRefresh(PersistentSession),
-    Error(ClientError),
+    SessionUnchecked(Session),
+    SessionValidationReady(Session),
+    SessionPatchReady(Session),
+    SessionPatchWaitingForTan(Session, XOnceAuthenticationInfo),
+    SessionPatchSession(Session, XOnceAuthenticationInfo),
+    SessionReady(Session),
+    SessionRefresh(Session),
+    Error(SessionClientError),
 }
 
 
 
-pub async fn get_comdirect_session(client_settings: Settings) -> Result<PersistentSession, SessionError> {
+pub async fn get_comdirect_session(client_settings: Settings) -> Result<Session, SessionError> {
     let Settings {
         oauth_url,
         client_id,
@@ -61,7 +61,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
         .connection_verbose(false)
         .build()?;
 
-    let mut comdirect_client = ComdirectClient::new(
+    let mut comdirect_client = SessionClient::new(
         client_settings.url,
         oauth_url,
         client_id,
@@ -90,7 +90,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
             State::NoSession => {
                 println!("No session found, creating a new one.");
                 let oauth = comdirect_client.acquire_password_token().await?;
-                state = State::SessionUnchecked(PersistentSession::from_oauth(oauth))
+                state = State::SessionUnchecked(Session::from_oauth(oauth))
             }
 
             State::SessionUnchecked(session) => {
@@ -104,7 +104,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
                                 session_tan_active: true,
                                 activated_2fa: true,
                             } => {
-                                state = State::SessionRefresh(PersistentSession{
+                                state = State::SessionRefresh(Session {
                                     access_token: session.access_token,
                                     refresh_token: session.refresh_token,
                                     session_uuid: identifier,
@@ -115,7 +115,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
                                 session_tan_active: false,
                                 activated_2fa: false,
                             } => {
-                                state = State::SessionValidationReady(PersistentSession{
+                                state = State::SessionValidationReady(Session {
                                     access_token: session.access_token,
                                     refresh_token: session.refresh_token,
                                     session_uuid: identifier,
@@ -129,7 +129,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
                     }
                     Err(e) => {
                         println!("Error getting session status: {:?}", e);
-                        state = State::Error(ClientError::Unknown);
+                        state = State::Error(SessionClientError::Unknown);
                     }
                 }
 
@@ -175,7 +175,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
                     }
                     _ => {
                         println!("Session validation failed.");
-                        state = State::Error(ClientError::Unknown);
+                        state = State::Error(SessionClientError::Unknown);
                     }
                 }
             }
@@ -192,7 +192,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
                         state = State::SessionReady(session.refreshed_session(oauth));                    }
                     Err(e) => {
                         println!("Error refreshing session: {:?}", e);
-                        state = State::Error(ClientError::Unknown);
+                        state = State::Error(SessionClientError::Unknown);
                     }
                 }
             }
@@ -201,7 +201,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Persiste
                 let result = session_loader.save_session(&session).await;
                 if let Err(e) = result {
                     println!("Error saving session: {:?}", e);
-                    state = State::Error(ClientError::Unknown);
+                    state = State::Error(SessionClientError::Unknown);
                 } else {
                     break Ok(session);
                 }

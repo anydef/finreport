@@ -6,10 +6,10 @@ pub(crate) struct AccountType {
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct Account {
+pub struct Account {
     iban: String,
-    // #[serde(rename = "accountId")]
-    // account_id: String,
+    #[serde(rename = "accountId")]
+    pub account_id: String,
     // currency: String,
     // #[serde(rename = "accountType")]
     // account_type: String,
@@ -22,8 +22,8 @@ pub(crate) struct Balance {
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct AccountBalance {
-    account: Account,
+pub struct AccountBalance {
+    pub account: Account,
     #[serde(rename = "accountId")]
     account_id: String,
     balance: Balance,
@@ -31,8 +31,8 @@ pub(crate) struct AccountBalance {
     // available_cash_amount: Balance,
 }
 
-#[derive(Deserialize, Debug)]
-pub(crate) struct Paging {
+#[derive(Deserialize, Debug, Default)]
+pub struct Paging {
     index: i32,
     matches: i32,
 }
@@ -40,6 +40,6 @@ pub(crate) struct Paging {
 #[derive(Deserialize, Debug)]
 pub struct AccountsBalancesResponse {
     #[serde(rename = "values")]
-    accounts: Vec<AccountBalance>,
-    paging: Paging
+    pub accounts: Vec<AccountBalance>,
+    pub paging: Paging
 }

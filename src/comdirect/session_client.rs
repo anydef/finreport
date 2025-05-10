@@ -2,26 +2,32 @@ use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
-use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
+use crate::comdirect::utils;
 
 #[derive(Debug)]
-pub enum ClientError {
+pub enum SessionClientError {
     Unauthorized,
     Unknown,
 }
 
-impl Display for ClientError {
+impl Display for SessionClientError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "Client error: {:?}", self)
     }
 }
 
-impl std::error::Error for ClientError {}
+impl std::error::Error for SessionClientError {}
 
-type ClientResult<T> = Result<T, ClientError>;
+type SessionClientResult<T> = Result<T, SessionClientError>;
 
-pub struct ComdirectClient {
+#[derive(Serialize)]
+pub struct XOnceAuthenticationInfo {
+    #[serde(rename = "id")]
+    pub challenge_id: String,
+}
+
+pub struct SessionClient {
     client: Client,
 
     url: String,
@@ -33,7 +39,7 @@ pub struct ComdirectClient {
     session_id: String,
 }
 
-impl ComdirectClient {
+impl SessionClient {
     pub fn new(
         url: String,
         oauth_url: String,
@@ -56,11 +62,11 @@ impl ComdirectClient {
     }
 }
 
-impl ComdirectClient {
+impl SessionClient {
     pub async fn get_session_status(
         &mut self,
-        session: &PersistentSession,
-    ) -> ClientResult<SessionStatus> {
+        session: &Session,
+    ) -> SessionClientResult<SessionStatus> {
         let result = self
             .client
             .get(format!("{}/session/clients/user/v1/sessions", self.url))
@@ -81,33 +87,27 @@ impl ComdirectClient {
                         }
                         None => {
                             println!("Error: No Session status available");
-                            Err(ClientError::Unknown)
+                            Err(SessionClientError::Unknown)
                         }
                     }
                 }
-                StatusCode::UNAUTHORIZED => Err(ClientError::Unauthorized),
+                StatusCode::UNAUTHORIZED => Err(SessionClientError::Unauthorized),
                 _ => {
                     println!("Error: Could not get session status: {}", r.status());
-                    Err(ClientError::Unknown)
+                    Err(SessionClientError::Unknown)
                 }
             }
         } else {
-            Err(ClientError::Unknown)
+            Err(SessionClientError::Unknown)
         }
     }
 }
 
-#[derive(Serialize)]
-pub struct XOnceAuthenticationInfo {
-    #[serde(rename = "id")]
-    pub challenge_id: String,
-}
-
-impl ComdirectClient {
+impl SessionClient {
     pub async fn validate_session(
         &mut self,
-        session: &PersistentSession,
-    ) -> ClientResult<XOnceAuthenticationInfo> {
+        session: &Session,
+    ) -> SessionClientResult<XOnceAuthenticationInfo> {
         let patched_session = SessionStatus {
             identifier: session.session_uuid.clone(),
             session_tan_active: true,
@@ -140,21 +140,21 @@ impl ComdirectClient {
                     }
                     None => {
                         println!("Error: No authentication info available");
-                        Err(ClientError::Unknown)
+                        Err(SessionClientError::Unknown)
                     }
                 },
                 _ => {
                     println!("Error: Unexpected status code {}", r.status());
-                    Err(ClientError::Unknown)
+                    Err(SessionClientError::Unknown)
                 }
             },
-            Err(_) => Err(ClientError::Unknown),
+            Err(_) => Err(SessionClientError::Unknown),
         }
     }
 }
 
-impl ComdirectClient {
-    pub async fn acquire_password_token(&mut self) -> ClientResult<OAuthResponse> {
+impl SessionClient {
+    pub async fn acquire_password_token(&mut self) -> SessionClientResult<OAuthResponse> {
         let params = [
             ("client_id", self.client_id.clone()),
             ("client_secret", self.client_secret.clone()),
@@ -178,19 +178,19 @@ impl ComdirectClient {
                     let oauth_response: OAuthResponse = response.json().await.unwrap();
                     Ok(oauth_response)
                 }
-                false => Err(ClientError::Unknown),
+                false => Err(SessionClientError::Unknown),
             },
-            Err(_) => Err(ClientError::Unknown),
+            Err(_) => Err(SessionClientError::Unknown),
         }
     }
 }
 
-impl ComdirectClient {
+impl SessionClient {
     pub async fn patch_session(
         &mut self,
-        session: &PersistentSession,
+        session: &Session,
         x_once_oauth_info: &XOnceAuthenticationInfo,
-    ) -> ClientResult<SessionStatus> {
+    ) -> SessionClientResult<SessionStatus> {
         let patched = SessionStatus {
             identifier: session.session_uuid.clone(),
             session_tan_active: true,
@@ -228,27 +228,27 @@ impl ComdirectClient {
                         Ok(session_status)
                     } else {
                         println!("Error: No session status available");
-                        Err(ClientError::Unknown)
+                        Err(SessionClientError::Unknown)
                     }
                 }
                 _ => {
                     println!("Error: Unexpected status code {}", r.status());
-                    Err(ClientError::Unknown)
+                    Err(SessionClientError::Unknown)
                 }
             },
             Err(_) => {
                 println!("Error: Could not send request to validate session");
-                Err(ClientError::Unknown)
+                Err(SessionClientError::Unknown)
             }
         }
     }
 }
 
-impl ComdirectClient {
+impl SessionClient {
     pub async fn activate_secondary_flow(
         &mut self,
-        session: &PersistentSession,
-    ) -> ClientResult<PersistentSession> {
+        session: &Session,
+    ) -> SessionClientResult<Session> {
         let params = [
             ("client_id", self.client_id.clone()),
             ("client_secret", self.client_secret.clone()),
@@ -269,30 +269,30 @@ impl ComdirectClient {
                     let oauth_response: reqwest::Result<OAuthResponse> = r.json().await;
                     if let Ok(oauth_response) = oauth_response {
                         println!("Access Token: {}", oauth_response.access_token);
-                        Ok(PersistentSession::from_oauth(oauth_response))
+                        Ok(Session::from_oauth(oauth_response))
                     } else {
                         println!("Error: Could not parse JSON response");
-                        Err(ClientError::Unknown)
+                        Err(SessionClientError::Unknown)
                     }
                 }
                 _ => {
                     println!("Error: Unexpected status code {}", r.status());
-                    Err(ClientError::Unknown)
+                    Err(SessionClientError::Unknown)
                 }
             },
             Err(_) => {
                 println!("Error: Could not send request to validate session");
-                Err(ClientError::Unknown)
+                Err(SessionClientError::Unknown)
             }
         }
     }
 }
 
-impl ComdirectClient {
+impl SessionClient {
     pub async fn refresh_token_flow(
         &mut self,
-        session: &PersistentSession,
-    ) -> ClientResult<OAuthResponse> {
+        session: &Session,
+    ) -> SessionClientResult<OAuthResponse> {
         let params = [
             ("client_id", self.client_id.clone()),
             ("client_secret", self.client_secret.clone()),
@@ -316,39 +316,39 @@ impl ComdirectClient {
                         Ok(oauth_response)
                     } else {
                         println!("Error: Could not parse JSON response");
-                        Err(ClientError::Unknown)
+                        Err(SessionClientError::Unknown)
                     }
                 }
                 _ => {
                     println!("Error: Unexpected status code {}", r.status());
-                    Err(ClientError::Unknown)
+                    Err(SessionClientError::Unknown)
                 }
             },
             Err(_) => {
                 println!("Error: Could not send request to validate session");
-                Err(ClientError::Unknown)
+                Err(SessionClientError::Unknown)
             }
         }
     }
 }
 
-impl ComdirectClient {
+impl SessionClient {
     fn info_header(&self) -> String {
-        let info_header = HttpRequestInfoHeader::from(self.session_id.clone(), request_id());
+        let info_header = HttpRequestInfoHeader::from(self.session_id.clone(), utils::request_id());
         serde_json::to_string(&info_header).expect("Could not serialize info-header")
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Default, Clone)]
-pub struct PersistentSession {
+pub struct Session {
     pub access_token: String,
     pub session_uuid: String,
     pub refresh_token: String,
 }
 
-impl PersistentSession {
-    pub fn from_oauth(oauth_response: OAuthResponse) -> PersistentSession {
-        PersistentSession {
+impl Session {
+    pub fn from_oauth(oauth_response: OAuthResponse) -> Session {
+        Session {
             access_token: oauth_response.access_token,
             session_uuid: Uuid::new_v4().to_string(),
             refresh_token: oauth_response.refresh_token,
@@ -361,19 +361,6 @@ impl PersistentSession {
         new_session.refresh_token = oauth_response.refresh_token;
 
         new_session
-    }
-}
-
-fn request_id() -> String {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    let ts = now.as_millis().to_string();
-
-    // Extract the last 9 characters.
-    let len = ts.len();
-    if len > 9 {
-        ts[len - 9..].to_string()
-    } else {
-        ts
     }
 }
 

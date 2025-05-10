@@ -1,4 +1,4 @@
-use crate::comdirect::session_client::PersistentSession;
+use crate::comdirect::session_client::Session;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -11,11 +11,11 @@ impl SessionLoader {
         SessionLoader { path }
     }
 
-    pub async fn load_session(&self) -> Option<PersistentSession> {
+    pub async fn load_session(&self) -> Option<Session> {
         load_session_from_file(&self.path).await.ok()
     }
 
-    pub async fn save_session(&self, session: &PersistentSession) -> Result<(), Box<FileError>> {
+    pub async fn save_session(&self, session: &Session) -> Result<(), Box<FileError>> {
         save_session_to_file(session, &self.path).await
     }
 
@@ -33,7 +33,7 @@ pub enum FileError {
 }
 
 async fn save_session_to_file(
-    session: &PersistentSession,
+    session: &Session,
     path: &str,
 ) -> Result<(), Box<FileError>> {
     let json = serde_json::to_string(&session).map_err(|_| FileError::SerializeError)?;
@@ -47,7 +47,7 @@ async fn save_session_to_file(
     Ok(())
 }
 
-async fn load_session_from_file(path: &str) -> Result<PersistentSession, Box<FileError>> {
+async fn load_session_from_file(path: &str) -> Result<Session, Box<FileError>> {
     let mut file = File::open(path).await.map_err(|_| FileError::ReadError)?;
     let mut content = String::new();
 
@@ -55,7 +55,7 @@ async fn load_session_from_file(path: &str) -> Result<PersistentSession, Box<Fil
         .await
         .map_err(|_| FileError::ReadError)?;
 
-    let session: PersistentSession =
+    let session: Session =
         serde_json::from_reader(content.as_bytes()).map_err(|_| FileError::ReadError)?;
 
     Ok(session)
@@ -75,7 +75,7 @@ async fn delete_session_file(path: &str) {
 #[cfg(test)]
 mod test {
     use crate::comdirect::loader::SessionLoader;
-    use crate::comdirect::session_client::PersistentSession;
+    use crate::comdirect::session_client::Session;
     use std::path::Path;
     use tokio::fs;
     use uuid::Uuid;
@@ -88,7 +88,7 @@ mod test {
 
         let loader = SessionLoader::new(test_file_path.clone());
 
-        let original_session = PersistentSession {
+        let original_session = Session {
             access_token: "test_access_token".to_string(),
             refresh_token: "test_refresh_token".to_string(),
             session_uuid: "test_session_id".to_string(),
