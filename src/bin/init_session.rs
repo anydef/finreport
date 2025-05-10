@@ -1,10 +1,8 @@
 use dotenv::dotenv;
-use finreport::comdirect::session::Session;
+use finreport::comdirect::session::get_comdirect_session;
 use finreport::settings::Settings;
-use reqwest::header::HeaderMap;
 use std::env;
 use std::error::Error;
-use finreport::comdirect::balance::accounts_balances;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -21,29 +19,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .separator("__"),
         )
         .build()?;
-
-    let client = reqwest::Client::builder()
-        .connection_verbose(false)
-        .build()?;
-
-    let oauth_settings = settings
+    let client_settings = settings
         .try_deserialize::<Settings>()
         .expect("Could not load application settings");
 
-    let mut oauth_session = Session::new(oauth_settings, client);
-    oauth_session.login().await;
+    let session_result = get_comdirect_session(client_settings).await;
 
-    let balances = accounts_balances(oauth_session).await;
-    match balances {
-        Ok(balances) => {
-            println!("Balances: {:?}", balances);
-        }
-        Err(e) => {
-            println!("Error fetching balances: {:?}", e);
-        }
-    }
+    println!("Session status: {:?}", session_result);
 
     Ok(())
 }
-
-

@@ -8,6 +8,7 @@ pub struct Settings {
     pub pin: String,
     pub oauth_url: String,
     pub url: String,
+    pub save_file_path: String
 }
 
 

@@ -1,365 +1,218 @@
-use crate::comdirect::session::SessionState::NotInitialized;
-use crate::comdirect::session_model::{
-    AuthenticationInfo, HttpRequestInfoHeader, OAuthResponse, SessionStatus,
-};
+use std::fmt::{Display, Formatter};
+use std::time::Duration;
+use reqwest::Error;
+use tokio::io;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::time::sleep;
+use crate::comdirect::loader;
+use crate::comdirect::session_client::{ClientError, ComdirectClient, PersistentSession, SessionStatus, XOnceAuthenticationInfo};
 use crate::settings::Settings;
-use crate::utils::wait_user_input;
-use reqwest::StatusCode;
-use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Client, Error, Response};
-use std::cmp::PartialEq;
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
-use uuid::Uuid;
 
-#[derive(PartialOrd, PartialEq)]
-enum SessionState {
-    NotInitialized,
-    LoginSuccess(String),
-    SessionInactive,
-    SessionValidated,
-    SessionActivated,
-    SecondaryFlowSessionActivated,
-    Failed(String),
+#[derive(Debug)]
+pub enum SessionError {
+    Error,
 }
 
-trait AcquirePasswordToken {
-    async fn acquire_password_token(&mut self);
-}
-trait AuthSessionStatus {
-    async fn get_session_status(&mut self) -> SessionStatus;
-}
-trait ValidateSession {
-    async fn validate_session(&mut self);
-}
-trait ActivateSessionTan {
-    async fn activate_session_tan(&self);
-}
-trait SecondaryFlow {
-    async fn extend_session_cd_secondary_flow(&mut self);
-}
-pub trait ClientSession {
-    fn client(&self) -> &Client;
-    fn url(&self) -> String;
-}
-pub trait TokenAware {
-    fn access_token(&self) -> Option<String>;
-    fn info_header(&self) -> String;
-}
-
-pub struct Session {
-    state: SessionState,
-    client_id: String,
-    client_secret: String,
-    username: String,
-    password: String,
-    oauth_url: String,
-    url: String,
-    client: Client,
-    access_token: Option<String>,
-    session_id: Option<String>,
-    session_status: SessionStatus,
-    challenage_id: Option<String>,
-}
-
-impl TokenAware for Session {
-    fn access_token(&self) -> Option<String> {
-        self.access_token.clone()
-    }
-
-    fn info_header(&self) -> String {
-        let info_header =
-            HttpRequestInfoHeader::from(self.session_id.clone().unwrap_or_default(), request_id());
-        serde_json::to_string(&info_header).expect("Could not serialize info-header")
-    }
-}
-impl ClientSession for Session {
-    fn client(&self) -> &Client {
-        &self.client
-    }
-
-    fn url(&self) -> String {
-        self.url.clone()
+impl Display for SessionError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Client error: {:?}", self)
     }
 }
 
-impl Session {
-    pub fn new(settings: Settings, client: Client) -> Self {
-        Session {
-            state: NotInitialized,
-            client_id: settings.client_id,
-            client_secret: settings.client_secret,
-            username: settings.zugangsnummer,
-            password: settings.pin,
-            oauth_url: settings.oauth_url,
-            url: settings.url,
-            client,
-            access_token: None,
-            session_id: None,
-            session_status: SessionStatus::default(),
-            challenage_id: None,
-        }
+impl From<ClientError> for SessionError {
+    fn from(value: ClientError) -> Self {
+        SessionError::Error
+    }
+}
+impl From<reqwest::Error> for SessionError {
+    fn from(value: Error) -> Self {
+        SessionError::Error
     }
 }
 
-impl Session {
-    pub async fn login(&mut self) {
-        self.acquire_password_token().await;
-        let session_status = self.get_session_status().await;
+impl std::error::Error for SessionError {}
 
-        if !session_status.is_valid() {
-            self.validate_session().await;
-            wait_user_input()
-                .await
-                .expect("Failed waiting for user input");
-            self.activate_session_tan().await;
-        }
-        self.extend_session_cd_secondary_flow().await;
-    }
+enum State {
+    Start,
+    NoSession,
+    SessionUnchecked(PersistentSession),
+    SessionValidationReady(PersistentSession),
+    SessionPatchReady(PersistentSession),
+    SessionPatchWaitingForTan(PersistentSession, XOnceAuthenticationInfo),
+    SessionPatchSession(PersistentSession, XOnceAuthenticationInfo),
+    SessionReady(PersistentSession),
+    SessionRefresh(PersistentSession),
+    Error(ClientError),
 }
 
-impl AcquirePasswordToken for Session {
-    async fn acquire_password_token(&mut self) {
-        let params = [
-            ("client_id", self.client_id.clone()),
-            ("client_secret", self.client_secret.clone()),
-            ("username", self.username.clone()),
-            ("password", self.password.clone()),
-            ("grant_type", "password".to_string()),
-        ];
 
-        let result = self
-            .client
-            .post(format!("{}/oauth/token", self.oauth_url))
-            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .header(ACCEPT, "application/json")
-            .form(&params)
-            .send()
-            .await;
 
-        match result {
-            Ok(response) => match response.status().is_success() {
-                true => {
-                    let oauth_response: OAuthResponse = response.json().await.unwrap();
-                    self.access_token = Some(oauth_response.access_token.clone());
-                    println!("Access Token: {}", oauth_response.access_token);
+pub async fn get_comdirect_session(client_settings: Settings) -> Result<PersistentSession, SessionError> {
+    let Settings {
+        oauth_url,
+        client_id,
+        client_secret,
+        zugangsnummer,
+        pin,
+        ..
+    } = client_settings;
+
+    let client = reqwest::Client::builder()
+        .connection_verbose(false)
+        .build()?;
+
+    let mut comdirect_client = ComdirectClient::new(
+        client_settings.url,
+        oauth_url,
+        client_id,
+        client_secret,
+        zugangsnummer,
+        pin,
+        client,
+    );
+
+    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.to_string());
+    let mut state = State::Start;
+    let session_result = loop {
+        match state {
+            State::Start => {
+                println!("Starting session...");
+                let session_result = session_loader.load_session().await;
+                match session_result {
+                    Some(session) => {
+                        state = State::SessionUnchecked(session);
+                    }
+                    None => {
+                        state = State::NoSession;
+                    }
                 }
-                false => {
-                    println!("Error: Could not acquire password token");
-                    self.access_token.take();
-                }
-            },
-            Err(_) => {
-                self.access_token.take();
-                println!("Error: Could not send request");
             }
-        };
-    }
-}
+            State::NoSession => {
+                println!("No session found, creating a new one.");
+                let oauth = comdirect_client.acquire_password_token().await?;
+                state = State::SessionUnchecked(PersistentSession::from_oauth(oauth))
+            }
 
-impl AuthSessionStatus for Session {
-    async fn get_session_status(&mut self) -> SessionStatus {
-        let default_session = SessionStatus::default();
+            State::SessionUnchecked(session) => {
+                println!("Session unchecked. Checking status...");
+                let status = comdirect_client.get_session_status(&session).await;
+                match status {
+                    Ok(status) => {
+                        match status {
+                            SessionStatus {
+                                identifier,
+                                session_tan_active: true,
+                                activated_2fa: true,
+                            } => {
+                                state = State::SessionRefresh(PersistentSession{
+                                    access_token: session.access_token,
+                                    refresh_token: session.refresh_token,
+                                    session_uuid: identifier,
+                                });
+                            }
+                            SessionStatus {
+                                identifier,
+                                session_tan_active: false,
+                                activated_2fa: false,
+                            } => {
+                                state = State::SessionValidationReady(PersistentSession{
+                                    access_token: session.access_token,
+                                    refresh_token: session.refresh_token,
+                                    session_uuid: identifier,
+                                });
+                            }
+                            _ => {
+                                println!("Unknown session state.");
+                                state = State::NoSession;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        println!("Error getting session status: {:?}", e);
+                        state = State::Error(ClientError::Unknown);
+                    }
+                }
 
-        if let Some(token) = &self.access_token {
-            let session_id = Uuid::new_v4().to_string();
-            self.session_id = Some(session_id.clone());
-            let info_header = HttpRequestInfoHeader::from(session_id.clone(), request_id());
+            }
+            State::SessionValidationReady(session) => {
+                //validate session POST
+                println!("Validating session...");
+                let auth_info = comdirect_client.validate_session(&session).await?;
+                state = State::SessionPatchWaitingForTan(session, auth_info);
+            }
 
-            let info_header_json =
-                serde_json::to_string(&info_header).expect("Could not serialize info-header");
-            let session_status_response = self
-                .client
-                .get(format!("{}/session/clients/user/v1/sessions", self.url))
-                .header(ACCEPT, "application/json")
-                .header(AUTHORIZATION, format!("Bearer {}", token))
-                .header("x-http-request-info", info_header_json.clone())
-                .send()
-                .await;
-            let session_status = if let Ok(r) = session_status_response {
-                match r.status() {
-                    StatusCode::OK => {
-                        println!("Session status: {:?}", r.status());
-                        let session_status: Vec<SessionStatus> =
-                            r.json().await.unwrap_or_else(|e| {
-                                println!("Error: Could not parse JSON response: {:}", e);
-                                vec![]
-                            });
-                        let current_session =
-                            session_status.first().cloned().unwrap_or_else(|| {
-                                println!("Error: No Session status available",);
-                                default_session
-                            });
-                        current_session
+            State::SessionPatchWaitingForTan(session, auth_info) => {
+                // wait a minute for the user to enter the TAN
+                println!("Waiting for TAN...");
+                println!("Press Enter to continue...");
+
+                let mut stdin = BufReader::new(io::stdin());
+                let mut line = String::new();
+                tokio::select! {
+                            _ = stdin.read_line(&mut line) => {
+                                println!("Enter pressed. Continuing execution.");
+                            }
+                            _ = sleep(Duration::from_secs(599)) => {
+                                println!("5 Minutes timeout reached. Continuing execution.");
+                            }
+                }
+
+                // Wait for the user to type a line and press Enter
+                state = State::SessionPatchSession(session,auth_info);
+            }
+
+            State::SessionPatchSession(session, auth_info) => {
+                //validate session PATCH
+                let patched_session = comdirect_client.patch_session(&session, &auth_info).await?;
+                match patched_session {
+                    SessionStatus {
+                        identifier: _identifier,
+                        session_tan_active: true,
+                        activated_2fa: true,
+                    } => {
+                        println!("Session is valid.");
+                        state = State::SessionPatchReady(session);
                     }
                     _ => {
-                        println!("Error: Could not get session status: {}", r.status());
-                        default_session
+                        println!("Session validation failed.");
+                        state = State::Error(ClientError::Unknown);
                     }
                 }
-            } else {
-                default_session
-            };
-            self.session_status = session_status.clone();
-            session_status
-        } else {
-            println!("Error: No access token available",);
-
-            SessionStatus::default()
-        }
-    }
-}
-impl ValidateSession for Session {
-    async fn validate_session(&mut self) {
-        let patched_session = SessionStatus {
-            identifier: self.session_status.identifier.clone(),
-            session_tan_active: true,
-            activated_2fa: true,
-        };
-        let token = self.access_token.clone().unwrap_or_default();
-        let session_id = self.session_id.clone().unwrap_or_default();
-        let info_header = HttpRequestInfoHeader::from(session_id, request_id());
-
-        let validated_session_result = self
-            .client
-            .post(format!(
-                "{}/session/clients/user/v1/sessions/{}/validate",
-                self.url, self.session_status.identifier
-            ))
-            .json(&patched_session)
-            .header(ACCEPT, "application/json")
-            .header("x-http-request-info", info_header.to_json())
-            .header(AUTHORIZATION, format!("Bearer {}", token))
-            .send()
-            .await;
-
-        match validated_session_result {
-            Ok(r) => match r.status() {
-                StatusCode::CREATED => {
-                    println!("Session validated successfully: {:?}", r.status());
-                    match r.headers().get("x-once-authentication-info") {
-                        Some(header) => {
-                            let header_str = header.to_str().unwrap_or_default();
-                            let authentication_info: AuthenticationInfo =
-                                serde_json::from_str(header_str).unwrap();
-                            println!("Authentication Info: {:?}", authentication_info.clone());
-                            self.challenage_id = Some(authentication_info.challenge_id);
-                        }
-                        None => {
-                            println!("Error: No authentication info available");
-                        }
+            }
+            State::SessionPatchReady(session) => {
+                //activate cd secondary flow
+                let session = comdirect_client.activate_secondary_flow(&session).await?;
+                state = State::SessionReady(session);
+            }
+            State::SessionRefresh(session) => {
+                let oauth_result = comdirect_client.refresh_token_flow(&session).await;
+                match oauth_result {
+                    Ok(oauth) => {
+                        println!("Session refreshed successfully.");
+                        state = State::SessionReady(session.refreshed_session(oauth));                    }
+                    Err(e) => {
+                        println!("Error refreshing session: {:?}", e);
+                        state = State::Error(ClientError::Unknown);
                     }
                 }
-                _ => {
-                    println!("Error: Unexpected status code {}", r.status())
+            }
+
+            State::SessionReady(session) => {
+                let result = session_loader.save_session(&session).await;
+                if let Err(e) = result {
+                    println!("Error saving session: {:?}", e);
+                    state = State::Error(ClientError::Unknown);
+                } else {
+                    break Ok(session);
                 }
-            },
-            Err(_) => {
-                println!("Error: Could not send request to validate session");
+            }
+            State::Error(e) => {
+                session_loader.clear_session().await;
+                println!("Error occurred: {:?}", e);
+                break Err(e);
             }
         };
-    }
-}
-impl ActivateSessionTan for Session {
-    async fn activate_session_tan(&self) {
-        let patched = SessionStatus {
-            identifier: self.session_status.identifier.clone(),
-            session_tan_active: true,
-            activated_2fa: true,
-        };
-        let info_header =
-            HttpRequestInfoHeader::from(self.session_id.clone().unwrap_or_default(), request_id());
-        let mut challenge = HashMap::new();
-        challenge.insert("id", self.challenage_id.clone().unwrap_or_default());
+    };
 
-        let patched_session = self
-            .client
-            .patch(format!(
-                "{}/session/clients/user/v1/sessions/{}",
-                self.url,
-                self.session_status.identifier.clone()
-            ))
-            .json(&patched)
-            .header(
-                AUTHORIZATION,
-                format!("Bearer {}", self.access_token.clone().unwrap_or_default()),
-            )
-            // .header(CONTENT_TYPE, "application/json")
-            .header(
-                "x-once-authentication-info",
-                serde_json::to_string(&challenge).expect("Failed to serialize challenge"),
-            )
-            .header(ACCEPT, "application/json")
-            .header("x-http-request-info", info_header.to_json())
-            .header("x-once-authentication", "000000")
-            .send()
-            .await;
-
-        match patched_session {
-            Ok(r) => match r.status() {
-                StatusCode::OK => {
-                    println!(
-                        "activate_session_tan Session activated successfully: {:?}",
-                        r.status()
-                    );
-                }
-                _ => {
-                    println!(
-                        "activate_session_tan Error: Unexpected status code {}",
-                        r.status()
-                    );
-                }
-            },
-            Err(_) => {
-                println!("activate_session_tan Error: Could not send request to validate session");
-            }
-        }
-    }
-}
-
-impl SecondaryFlow for Session {
-    async fn extend_session_cd_secondary_flow(&mut self) {
-        let params = [
-            ("client_id", self.client_id.clone()),
-            ("client_secret", self.client_secret.clone()),
-            ("token", self.access_token.clone().unwrap_or_default()),
-            ("grant_type", "cd_secondary".to_string()),
-        ];
-        let oauth_cd_secondary_flow = self
-            .client
-            .post(format!("{}/oauth/token", self.oauth_url))
-            .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
-            .header("Accept", "application/json")
-            .form(&params)
-            .send()
-            .await;
-        match oauth_cd_secondary_flow {
-            Ok(r) => match r.status() {
-                StatusCode::OK => {
-                    let oauth_response: OAuthResponse = r.json().await.unwrap();
-                    self.access_token = Some(oauth_response.access_token.clone());
-                    println!("Access Token: {}", oauth_response.access_token);
-                }
-                _ => {
-                    println!("Error: Unexpected status code {}", r.status())
-                }
-            },
-            Err(_) => {
-                println!("Error: Could not send request to validate session");
-            }
-        };
-    }
-}
-
-fn request_id() -> String {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
-    let ts = now.as_millis().to_string();
-
-    // Extract the last 9 characters.
-    let len = ts.len();
-    if len > 9 {
-        ts[len - 9..].to_string()
-    } else {
-        ts
-    }
+    Ok(session_result?)
 }
