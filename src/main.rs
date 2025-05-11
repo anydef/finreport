@@ -1,3 +1,4 @@
+#[warn(dead_code)]
 mod comdirect;
 mod settings;
 mod utils;

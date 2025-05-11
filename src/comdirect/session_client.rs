@@ -409,12 +409,6 @@ pub struct SessionStatus {
     pub activated_2fa: bool,
 }
 
-impl SessionStatus {
-    pub(crate) fn is_valid(&self) -> bool {
-        self.session_tan_active && self.activated_2fa
-    }
-}
-
 #[derive(Deserialize, Debug, Serialize)]
 pub struct ClientRequestId {
     #[serde(rename = "sessionId")]

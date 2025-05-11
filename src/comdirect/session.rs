@@ -1,12 +1,14 @@
+use crate::comdirect::loader;
+use crate::comdirect::session_client::{
+    Session, SessionClient, SessionClientError, SessionStatus, XOnceAuthenticationInfo,
+};
+use crate::settings::Settings;
+use reqwest::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
-use reqwest::Error;
 use tokio::io;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::sleep;
-use crate::comdirect::loader;
-use crate::comdirect::session_client::{SessionClientError, SessionClient, Session, SessionStatus, XOnceAuthenticationInfo};
-use crate::settings::Settings;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -20,12 +22,12 @@ impl Display for SessionError {
 }
 
 impl From<SessionClientError> for SessionError {
-    fn from(value: SessionClientError) -> Self {
+    fn from(_: SessionClientError) -> Self {
         SessionError::Error
     }
 }
-impl From<reqwest::Error> for SessionError {
-    fn from(value: Error) -> Self {
+impl From<Error> for SessionError {
+    fn from(_: Error) -> Self {
         SessionError::Error
     }
 }
@@ -95,42 +97,39 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Session,
                 println!("Session unchecked. Checking status...");
                 let status = comdirect_client.get_session_status(&session).await;
                 match status {
-                    Ok(status) => {
-                        match status {
-                            SessionStatus {
-                                identifier,
-                                session_tan_active: true,
-                                activated_2fa: true,
-                            } => {
-                                state = State::SessionRefresh(Session {
-                                    access_token: session.access_token,
-                                    refresh_token: session.refresh_token,
-                                    session_uuid: identifier,
-                                });
-                            }
-                            SessionStatus {
-                                identifier,
-                                session_tan_active: false,
-                                activated_2fa: false,
-                            } => {
-                                state = State::SessionValidationReady(Session {
-                                    access_token: session.access_token,
-                                    refresh_token: session.refresh_token,
-                                    session_uuid: identifier,
-                                });
-                            }
-                            _ => {
-                                println!("Unknown session state.");
-                                state = State::NoSession;
-                            }
+                    Ok(status) => match status {
+                        SessionStatus {
+                            identifier,
+                            session_tan_active: true,
+                            activated_2fa: true,
+                        } => {
+                            state = State::SessionRefresh(Session {
+                                access_token: session.access_token,
+                                refresh_token: session.refresh_token,
+                                session_uuid: identifier,
+                            });
                         }
-                    }
+                        SessionStatus {
+                            identifier,
+                            session_tan_active: false,
+                            activated_2fa: false,
+                        } => {
+                            state = State::SessionValidationReady(Session {
+                                access_token: session.access_token,
+                                refresh_token: session.refresh_token,
+                                session_uuid: identifier,
+                            });
+                        }
+                        _ => {
+                            println!("Unknown session state.");
+                            state = State::NoSession;
+                        }
+                    },
                     Err(e) => {
                         println!("Error getting session status: {:?}", e);
                         state = State::Error(SessionClientError::Unknown);
                     }
                 }
-
             }
             State::SessionValidationReady(session) => {
                 //validate session POST
@@ -156,7 +155,7 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Session,
                 }
 
                 // Wait for the user to type a line and press Enter
-                state = State::SessionPatchSession(session,auth_info);
+                state = State::SessionPatchSession(session, auth_info);
             }
 
             State::SessionPatchSession(session, auth_info) => {
@@ -187,7 +186,8 @@ pub async fn get_comdirect_session(client_settings: Settings) -> Result<Session,
                 match oauth_result {
                     Ok(oauth) => {
                         println!("Session refreshed successfully.");
-                        state = State::SessionReady(session.refreshed_session(oauth));                    }
+                        state = State::SessionReady(session.refreshed_session(oauth));
+                    }
                     Err(e) => {
                         println!("Error refreshing session: {:?}", e);
                         state = State::Error(SessionClientError::Unknown);

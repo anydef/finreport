@@ -1,14 +1,13 @@
 use crate::comdirect::balance_model::AccountsBalancesResponse;
 use crate::comdirect::session_client::HttpRequestInfoHeader;
 use crate::comdirect::session_client::Session;
+use crate::comdirect::transaction::TransactionsResponse;
 use crate::comdirect::utils::request_id;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use std::fmt::{Display, Formatter};
-use std::thread::sleep;
 use uuid::Uuid;
-use crate::comdirect::transaction::TransactionsResponse;
 
 #[derive(Debug)]
 pub enum AccountClientError {
@@ -88,39 +87,45 @@ impl AccountClient {
         }
     }
 
-    pub async fn get_account_transactions(&self, account_id: &str, index: u32) -> AccountClientResult<TransactionsResponse> {
-            let url = format!(
-                "{}/banking/v1/accounts/{}/transactions?transactionState={}&paging-first={}",
-                self.url,
-                account_id,
-                "BOOKED".to_string(),
-                index
-            );
+    pub async fn get_account_transactions(
+        &self,
+        account_id: &str,
+        index: u32,
+    ) -> AccountClientResult<TransactionsResponse> {
+        let url = format!(
+            "{}/banking/v1/accounts/{}/transactions?transactionState={}&paging-first={}",
+            self.url,
+            account_id,
+            "BOOKED".to_string(),
+            index
+        );
 
-            let response = self.client
-                .get(&url)
-                .header(ACCEPT, "application/json")
-                .header(CONTENT_TYPE, "application/json")
-                .header(AUTHORIZATION, format!("Bearer {}", self.session.access_token))
-                .header("x-http-request-info", self.info_header())
-                .send().await;
+        let response = self
+            .client
+            .get(&url)
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .header(
+                AUTHORIZATION,
+                format!("Bearer {}", self.session.access_token),
+            )
+            .header("x-http-request-info", self.info_header())
+            .send()
+            .await;
 
-            match response {
-                Ok(res) => {
-                    if res.status() == StatusCode::OK {
-                        let transactions: TransactionsResponse = res.json().await?;
-                        Ok(transactions)
-                    } else {
-                        Err(AccountClientError::Unknown)
-                    }
-                }
-                Err(e) => {
+        match response {
+            Ok(res) => {
+                if res.status() == StatusCode::OK {
+                    let transactions: TransactionsResponse = res.json().await?;
+                    Ok(transactions)
+                } else {
                     Err(AccountClientError::Unknown)
                 }
             }
+            Err(_) => Err(AccountClientError::Unknown),
+        }
 
-            // Ok(TransactionsResponse {})
-
+        // Ok(TransactionsResponse {})
     }
 }
 
