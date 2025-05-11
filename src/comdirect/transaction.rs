@@ -66,9 +66,11 @@ pub struct TransactionType {
 }
 #[derive(Debug, Deserialize, Default)]
 pub struct TransactionsResponse {
-    paging: Paging,
-    values: Vec<Transaction>,
+    pub paging: Paging,
+    pub values: Vec<Transaction>,
 }
+
+
 
 // pub async fn transaction(
 //     session: &(impl TokenAware + ClientSession),

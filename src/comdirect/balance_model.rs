@@ -25,7 +25,7 @@ pub(crate) struct Balance {
 pub struct AccountBalance {
     pub account: Account,
     #[serde(rename = "accountId")]
-    account_id: String,
+    pub account_id: String,
     balance: Balance,
     // #[serde(rename = "availableCashAmount")]
     // available_cash_amount: Balance,
@@ -34,7 +34,7 @@ pub struct AccountBalance {
 #[derive(Deserialize, Debug, Default)]
 pub struct Paging {
     index: i32,
-    matches: i32,
+    pub(crate) matches: i32,
 }
 
 #[derive(Deserialize, Debug)]

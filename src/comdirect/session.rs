@@ -45,8 +45,6 @@ enum State {
     Error(SessionClientError),
 }
 
-
-
 pub async fn get_comdirect_session(client_settings: Settings) -> Result<Session, SessionError> {
     let Settings {
         oauth_url,

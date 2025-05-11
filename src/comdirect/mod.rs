@@ -5,4 +5,5 @@ pub mod loader;
 pub mod session;
 pub mod session_client;
 pub mod transaction;
-mod utils;
+pub mod utils;
+pub mod accounts;
