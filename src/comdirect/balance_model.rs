@@ -10,6 +10,8 @@ pub struct Account {
     iban: String,
     #[serde(rename = "accountId")]
     pub account_id: String,
+    #[serde(rename = "accountDisplayId")]
+    pub display_id: String,
     // currency: String,
     // #[serde(rename = "accountType")]
     // account_type: String,
@@ -26,6 +28,7 @@ pub struct AccountBalance {
     pub account: Account,
     #[serde(rename = "accountId")]
     pub account_id: String,
+
     balance: Balance,
     // #[serde(rename = "availableCashAmount")]
     // available_cash_amount: Balance,

@@ -19,14 +19,14 @@ pub async fn get_accounts(
 pub async fn get_account_transactions(
     session: Session,
     client_settings: Settings,
-    account: Account,
+    account: &Account,
 ) -> AccountClientResult<Vec<Transaction>> {
     let Settings { url, .. } = client_settings;
 
     let account_client = AccountClient::new(session, reqwest::Client::new(), url);
     let mut all_transactions: Vec<Transaction> = vec![];
 
-    let account_id = account.account_id;
+    let account_id = &account.account_id;
     let transactions_response = account_client
         .get_account_transactions(&account_id, 0)
         .await?;

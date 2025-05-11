@@ -4,6 +4,9 @@ use finreport::comdirect::session::get_comdirect_session;
 use finreport::settings::Settings;
 use std::env;
 use std::error::Error;
+use std::path::Path;
+use tokio::fs;
+use finreport::comdirect::transaction::Transaction;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -31,9 +34,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     for account in accounts.accounts {
         println!("Account: {:?}", account.account_id);
         let transactions =
-            get_account_transactions(session.clone(), client_settings.clone(), account.account).await?;
+            get_account_transactions(session.clone(), client_settings.clone(), &account.account).await?;
+
+        save_transactions_to_file(&*transactions, format!("transactions-{}.json", &account.account.display_id)).await?;
         println!("Transactions: {:?}", transactions.len());
     }
+
+
+
+    Ok(())
+}
+
+async fn save_transactions_to_file(
+    transactions: &[Transaction],
+    file_path: impl AsRef<Path>
+) -> Result<(), Box<dyn Error>> {
+    // Serialize transactions to JSON
+    let json = serde_json::to_string(&transactions)?;
+
+    // Write to file asynchronously
+    fs::write(file_path, json).await?;
 
     Ok(())
 }
