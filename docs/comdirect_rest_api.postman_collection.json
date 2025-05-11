@@ -1,0 +1,3728 @@
+{
+	"info": {
+		"_postman_id": "8ee96e8c-17fb-453b-9500-e46581a1da85",
+		"name": "comdirect REST API (April 2025)",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "36183916"
+	},
+	"item": [
+		{
+			"name": "2 So geht es los",
+			"item": [
+				{
+					"name": "2.1 OAuth2 Resource Owner Password Credentials Flow",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"/****************************************************************************************************************************************/",
+									"/***    ________  ________  _____ ______   ________  ___  ________  _______   ________ _________        ________  ________  ___       ***/",
+									"/***   |\\   ____\\|\\   __  \\|\\   _ \\  _   \\|\\   ___ \\|\\  \\|\\   __  \\|\\  ___ \\ |\\   ____\\\\___   ___\\     |\\   __  \\|\\   __  \\|\\  \\      ***/",
+									"/***   \\ \\  \\___|\\ \\  \\|\\  \\ \\  \\\\\\__\\ \\  \\ \\  \\_|\\ \\ \\  \\ \\  \\|\\  \\ \\   __/|\\ \\  \\___\\|___ \\  \\_|     \\ \\  \\|\\  \\ \\  \\|\\  \\ \\  \\     ***/",
+									"/***    \\ \\  \\    \\ \\  \\\\\\  \\ \\  \\\\|__| \\  \\ \\  \\ \\\\ \\ \\  \\ \\   _  _\\ \\  \\_|/_\\ \\  \\       \\ \\  \\       \\ \\   __  \\ \\   ____\\ \\  \\    ***/",
+									"/***     \\ \\  \\____\\ \\  \\\\\\  \\ \\  \\    \\ \\  \\ \\  \\_\\\\ \\ \\  \\ \\  \\\\  \\\\ \\  \\_|\\ \\ \\  \\____   \\ \\  \\       \\ \\  \\ \\  \\ \\  \\___|\\ \\  \\   ***/",
+									"/***      \\ \\_______\\ \\_______\\ \\__\\    \\ \\__\\ \\_______\\ \\__\\ \\__\\\\ _\\\\ \\_______\\ \\_______\\  \\ \\__\\       \\ \\__\\ \\__\\ \\__\\    \\ \\__\\  ***/",
+									"/***       \\|_______|\\|_______|\\|__|     \\|__|\\|_______|\\|__|\\|__|\\|__|\\|_______|\\|_______|   \\|__|        \\|__|\\|__|\\|__|     \\|__|  ***/",
+									"/***                                                                                                                                  ***/",
+									"/***  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - ***/",
+									"/***        Anleitung Password-Flow                                                                                                   ***/",
+									"/***                                                                                                                                  ***/",
+									"/***        1) Im Environment unter \"CURRENT VALUE\" die OAuth Credentials und Zugangsdaten eingeben                                   ***/",
+									"/***        2) Send-Button anklicken                                                                                                  ***/",
+									"/***                                                                                                                                  ***/",
+									"/****************************************************************************************************************************************/",
+									"",
+									"",
+									"/**********************************************************/",
+									"/***      Ab hier nichts mehr ändern!                   ***/",
+									"/**********************************************************/",
+									"pm.environment.set('url','https://api.comdirect.de/api');",
+									"pm.environment.set('oauth_url','https://api.comdirect.de');",
+									"",
+									"pm.environment.set(\"session_id\", guid());",
+									"",
+									"// Request ID aus den letzten 9 Zeichen des aktuellen Timestamps in ms.",
+									"var ts = _.now().toString();",
+									"pm.environment.set(\"request_id\", ts.substring(ts.length-9, ts.length));",
+									"",
+									"// Generate a GUID for this session only",
+									"function guid() {",
+									"    function _p8(s) {",
+									"        var p = (Math.random().toString(16)+\"000000000\").substr(2,8);",
+									"        return s ? \"-\" + p.substr(0,4) + \"-\" + p.substr(4,4) : p ;",
+									"    }",
+									"    return _p8() + _p8(true) + _p8(true) + _p8();",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token); ",
+									"    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+									"}",
+									"",
+									"",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "client_id",
+									"value": "{{client_id}}",
+									"type": "text"
+								},
+								{
+									"key": "client_secret",
+									"value": "{{client_secret}}",
+									"type": "text"
+								},
+								{
+									"key": "grant_type",
+									"value": "password",
+									"type": "text"
+								},
+								{
+									"key": "username",
+									"value": "{{zugangsnummer}}",
+									"type": "text"
+								},
+								{
+									"key": "password",
+									"value": "{{pin}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{oauth_url}}/oauth/token",
+							"host": [
+								"{{oauth_url}}"
+							],
+							"path": [
+								"oauth",
+								"token"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.2 Session-Status",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 200) {",
+									"        pm.environment.set(\"sessionUUID\", pm.response.json()[0].identifier);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/session/clients/user/v1/sessions",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"session",
+								"clients",
+								"user",
+								"v1",
+								"sessions"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.3 Anlage Validierung einer Session-TAN",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.test('Status is 201', function(){",
+									"    pm.response.code === 201;",
+									"});",
+									"  ",
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    ",
+									"    pm.test('SESSION-TAN active', function() {",
+									"       jsonData.sessionTanActive === true;",
+									"    });",
+									"    ",
+									"// ----- Methode für das TAN-Handling",
+									"    pm.test('TAN-Header is available', function() {",
+									"        pm.response.to.have.header('x-once-authentication-info');",
+									"    });",
+									"    var header = JSON.parse(pm.response.headers.get('x-once-authentication-info'));",
+									"",
+									"    pm.test('TAN-Header contains all data', function() {",
+									"        pm.expect(header.id).to.exist;",
+									"        pm.expect(header.typ).to.exist;",
+									"    });",
+									"",
+									"    pm.environment.set('challenge_id', header.id);",
+									"",
+									"    if (header.typ===\"P_TAN\") {",
+									"                var image = 'data:image/png;base64,';",
+									"                image += header.challenge;",
+									"                var template = `<img src={{{data}}}></img>`;",
+									"                pm.visualizer.set(template, {data: image});",
+									"    }       ",
+									"    ",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n        \"identifier\" : \"{{sessionUUID}}\",\r\n        \"sessionTanActive\": true,\r\n        \"activated2FA\": true\r\n}"
+						},
+						"url": {
+							"raw": "{{url}}/session/clients/user/v1/sessions/{{sessionUUID}}/validate",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"session",
+								"clients",
+								"user",
+								"v1",
+								"sessions",
+								"{{sessionUUID}}",
+								"validate"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.4 Aktivierung einer Session-TAN",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//bitte die TAN entsprechend des Response-Headers aus Kapitel 2.3 ermitteln und hier eintragen",
+									"pm.environment.set(\"tan\", \"000000\");"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 200) {",
+									"        pm.environment.set(\"sessionUUID\", pm.response.json().identifier);",
+									"        tests[\"SESSION-TAN active\"] = pm.response.json().sessionTanActive === true;",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = responseCode.code === 201;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-once-authentication-info",
+								"value": "{\"id\":\"{{challenge_id}}\"}"
+							},
+							{
+								"key": "x-once-authentication",
+								"value": "{{tan}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "    {\r\n        \"identifier\" : \"{{sessionUUID}}\",\r\n        \"sessionTanActive\" : true,\r\n        \"activated2FA\": true\r\n    }\r\n"
+						},
+						"url": {
+							"raw": "{{url}}/session/clients/user/v1/sessions/{{sessionUUID}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"session",
+								"clients",
+								"user",
+								"v1",
+								"sessions",
+								"{{sessionUUID}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "2.5 OAuth2 CD Secondary-Flow",
+					"event": [
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token); ",
+									"    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "client_id",
+									"value": "{{client_id}}",
+									"type": "text"
+								},
+								{
+									"key": "client_secret",
+									"value": "{{client_secret}}",
+									"type": "text"
+								},
+								{
+									"key": "grant_type",
+									"value": "cd_secondary",
+									"type": "text"
+								},
+								{
+									"key": "token",
+									"value": "{{access_token}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{oauth_url}}/oauth/token",
+							"host": [
+								"{{oauth_url}}"
+							],
+							"path": [
+								"oauth",
+								"token"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "3 So geht es weiter",
+			"item": [
+				{
+					"name": "3.1.1 Refresh-Token-Flow",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"access_token\", jsonData.access_token); ",
+									"    pm.environment.set(\"refresh_token\", jsonData.refresh_token);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded",
+								"type": "text"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "urlencoded",
+							"urlencoded": [
+								{
+									"key": "client_id",
+									"value": "{{client_id}}",
+									"type": "text"
+								},
+								{
+									"key": "client_secret",
+									"value": "{{client_secret}}",
+									"type": "text"
+								},
+								{
+									"key": "grant_type",
+									"value": "refresh_token",
+									"type": "text"
+								},
+								{
+									"key": "refresh_token",
+									"value": "{{refresh_token}}",
+									"type": "text"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{oauth_url}}/oauth/token",
+							"host": [
+								"{{oauth_url}}"
+							],
+							"path": [
+								"oauth",
+								"token"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "3.1.2 Revoke-Token",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 204\"] = pm.response.code === 204; ",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/x-www-form-urlencoded"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{oauth_url}}/oauth/revoke",
+							"host": [
+								"{{oauth_url}}"
+							],
+							"path": [
+								"oauth",
+								"revoke"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "4 ACCOUNT",
+			"item": [
+				{
+					"name": "4.1.1 Abruf AccountBalances alle Konten",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.environment.unset(\"accountUUID\"); // löscht die Variable \"accountUUID\"",
+									"",
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.test(\"AccountUUID available\", function() {",
+									"            pm.response.to.have.jsonBody(\"values[0].accountId\");",
+									"        });",
+									"    ",
+									"    //die UUID des ersten Kontos im Response wird in der Variable \"accountUUID\" gespeichert",
+									"    pm.environment.set(\"accountUUID\",jsonData.values[0].accountId);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									" "
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/banking/clients/user/v2/accounts/balances",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"banking",
+								"clients",
+								"user",
+								"v2",
+								"accounts",
+								"balances"
+							],
+							"query": [
+								{
+									"key": "without-attr",
+									"value": "account",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.1.2 Abruf AccountBalances (ein Konto)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									"",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/banking/v2/accounts/{{accountUUID}}/balances",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"banking",
+								"v2",
+								"accounts",
+								"{{accountUUID}}",
+								"balances"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "4.1.3 Abruf Kontoumsätze",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/banking/v1/accounts/{{accountUUID}}/transactions",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"banking",
+								"v1",
+								"accounts",
+								"{{accountUUID}}",
+								"transactions"
+							],
+							"query": [
+								{
+									"key": "with-attr",
+									"value": "account",
+									"disabled": true
+								},
+								{
+									"key": "transactionState",
+									"value": "",
+									"description": "Buchungsstatus: BOOKED; NOTBOOKED",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"name": "4.1.3 Abruf Kontoumsätze",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"url": {
+									"raw": "{{url}}/banking/v1/accounts/{{accountUUID}}/transactions?transactionState=BOOKED&paging-first=0",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"banking",
+										"v1",
+										"accounts",
+										"{{accountUUID}}",
+										"transactions"
+									],
+									"query": [
+										{
+											"key": "transactionState",
+											"value": "BOOKED"
+										},
+										{
+											"key": "with-attr",
+											"value": "account",
+											"disabled": true
+										},
+										{
+											"key": "paging-first",
+											"value": "0"
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Server",
+									"value": "nginx"
+								},
+								{
+									"key": "Date",
+									"value": "Fri, 02 May 2025 10:08:47 GMT"
+								},
+								{
+									"key": "Content-Type",
+									"value": "application/json;charset=UTF-8"
+								},
+								{
+									"key": "Connection",
+									"value": "keep-alive"
+								},
+								{
+									"key": "Vary",
+									"value": "Accept-Encoding"
+								},
+								{
+									"key": "Vary",
+									"value": "Origin"
+								},
+								{
+									"key": "Vary",
+									"value": "Access-Control-Request-Method"
+								},
+								{
+									"key": "Vary",
+									"value": "Access-Control-Request-Headers"
+								},
+								{
+									"key": "X-Content-Type-Options",
+									"value": "nosniff"
+								},
+								{
+									"key": "X-Total-Count",
+									"value": "632"
+								},
+								{
+									"key": "Cache-Control",
+									"value": "no-cache, no-store, max-age=0"
+								},
+								{
+									"key": "Referrer-Policy",
+									"value": "strict-origin-when-cross-origin"
+								},
+								{
+									"key": "Strict-Transport-Security",
+									"value": "max-age=31536000; includeSubDomains"
+								},
+								{
+									"key": "X-XSS-Protection",
+									"value": "1; mode=block"
+								},
+								{
+									"key": "Content-Language",
+									"value": "en-US"
+								},
+								{
+									"key": "Content-Encoding",
+									"value": "gzip"
+								},
+								{
+									"key": "Transfer-Encoding",
+									"value": "chunked"
+								}
+							],
+							"cookie": [],
+							"body": "{\n    \"paging\": {\n        \"index\": 0,\n        \"matches\": 632\n    },\n    \"aggregated\": {\n        \"account\": null,\n        \"accountId\": \"CA7AFE4A3BC548C69F984B3964ED20CC\",\n        \"bookingDateLatestTransaction\": \"2025-04-30\",\n        \"referenceLatestTransaction\": \"8172146717\",\n        \"latestTransactionIncluded\": false,\n        \"pagingTimestamp\": \"2025-05-02T12:08:47+02\"\n    },\n    \"values\": [\n        {\n            \"reference\": \"562C21DY2F85JFYQ/52851\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-80.07\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"UNICR.W/COUCHE-TARD\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": null,\n            \"newTransaction\": true,\n            \"remittanceInfo\": \"01ELAN Service Station//NORDERSTEDT/D022025-04-30T20:09:06 KFN 1  VJ 2712 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"562C21DY2F85JFYQ/23906\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-20.79\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"LIDL SAGT DANKE\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": null,\n            \"newTransaction\": true,\n            \"remittanceInfo\": \"01LIDL SAGT DANKE//Norderstedt/DE    022025-04-30T10:49:21 KFN 0  VJ 2712 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"562C21DY2F85JFYQ/6104\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-15.88\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Penny Glashuetter Markt\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": null,\n            \"newTransaction\": true,\n            \"remittanceInfo\": \"01PENNY SAGT DANKE. 31300446//Norders022025-04-30T20:21:43 KFN 1  VJ 2712 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"562C21DY2F85JFYQ/6523\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-15.96\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Penny Marktplatz\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": null,\n            \"newTransaction\": true,\n            \"remittanceInfo\": \"01PENNY SAGT DANKE. 31300010//Norders022025-04-30T17:27:34 KFN 1  VJ 2712 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"HU22512203914297/2\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-65\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": null,\n            \"deptor\": null,\n            \"creditor\": {\n                \"holderName\": \"Vereinigung Ukrainer Norddeutschlands\",\n                \"iban\": \"DE74206905000001569449\",\n                \"bic\": \"GENODEF1S11\"\n            },\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": \"nicht angegeben\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Ukrainische Schule. Marko und Eva F02edyna. Mai 2025                    03End-to-End-Ref.:                   04nicht angegeben                    \",\n            \"transactionType\": {\n                \"key\": \"TRANSFER\",\n                \"text\": \"Transfer\"\n            }\n        },\n        {\n            \"reference\": \"JB22512203408819/2\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-400\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": null,\n            \"deptor\": null,\n            \"creditor\": {\n                \"holderName\": \"Pavlo Fedyna\",\n                \"iban\": \"DE33200411440892932500\",\n                \"bic\": \"COBADEHD044\"\n            },\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": \"nicht angegeben\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Taschen/Spargeld                   02End-to-End-Ref.:                   03nicht angegeben                    \",\n            \"transactionType\": {\n                \"key\": \"TRANSFER\",\n                \"text\": \"Transfer\"\n            }\n        },\n        {\n            \"reference\": \"872C21BX3156JMO9/8915\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-120\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Naturwerke GmbH\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": \"DE08ZZZ00002614848\",\n            \"directDebitMandateId\": \"150000104417-01-1\",\n            \"endToEndReference\": \"2420264720\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01ABSCHLAG Strom 05/25 VK: 15000010440217 Naturwerke GmbH                 03End-to-End-Ref.:                   042420264720                         05CORE / Mandatsref.:                06150000104417-01-1                  07Gläubiger-ID:                      08DE08ZZZ00002614848                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"4T2C21BY20LZHI2T/60145\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-17.47\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Allianz Private Krankenv.\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": \"DE40ZZZ00000063851\",\n            \"directDebitMandateId\": \"VVKA000000008395875\",\n            \"endToEndReference\": \"AB225115-E03484393\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Vertrag AK-6327553386              02Private Krankenversicherung        0301.05.25 - 31.05.25                04End-to-End-Ref.:                   05AB225115-E03484393                 06CORE / Mandatsref.:                07VVKA000000008395875                08Gläubiger-ID:                      09DE40ZZZ00000063851                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"7L2C21BY31AYF064/44785\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-59.95\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Anna Musci\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": \"DE07TBM00000516174\",\n            \"directDebitMandateId\": \"TBMKK441255225\",\n            \"endToEndReference\": \"nicht angegeben\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Tanzstudio Musci Monatsbeitrag Eva 02End-to-End-Ref.:                   03nicht angegeben                    04CORE / Mandatsref.:                05TBMKK441255225                     06Gläubiger-ID:                      07DE07TBM00000516174                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"582C21BY3VJMEZOB/20230\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-05-02\",\n            \"amount\": {\n                \"value\": \"-157.2\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Yamaha Music School Norderstedt\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-05-02\",\n            \"directDebitCreditorId\": \"DE03ZZZ00000675326\",\n            \"directDebitMandateId\": \"3523\",\n            \"endToEndReference\": \"122499\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Eva Klavier 05/25, Marko Gitarre 0502/25                                03End-to-End-Ref.:                   04122499                             05CORE / Mandatsref.:                063523                               07Gläubiger-ID:                      08DE03ZZZ00000675326                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"CU5C21BY2FFI3L1Q/1\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-600\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": null,\n            \"deptor\": null,\n            \"creditor\": {\n                \"holderName\": \"Pavlo Fedyna, Olga Fedyna\",\n                \"iban\": \"DE05200411330455031505\",\n                \"bic\": \"COBADEHD001\"\n            },\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": \"nicht angegeben\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Harz Urlaub abgaben                02End-to-End-Ref.:                   03nicht angegeben                    \",\n            \"transactionType\": {\n                \"key\": \"TRANSFER\",\n                \"text\": \"Transfer\"\n            }\n        },\n        {\n            \"reference\": \"DA5C21BY2FDOKIW1/1\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-300\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": null,\n            \"deptor\": null,\n            \"creditor\": {\n                \"holderName\": \"Pavlo Fedyna\",\n                \"iban\": \"DE33200411440892932500\",\n                \"bic\": \"COBADEHD044\"\n            },\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": \"nicht angegeben\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Ausgleich Abgaben                  02End-to-End-Ref.:                   03nicht angegeben                    \",\n            \"transactionType\": {\n                \"key\": \"TRANSFER\",\n                \"text\": \"Transfer\"\n            }\n        },\n        {\n            \"reference\": \"I6225120B1906448/2\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-80\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": null,\n            \"deptor\": null,\n            \"creditor\": {\n                \"holderName\": \"SG Wasserratten Norderstedt\",\n                \"iban\": \"DE77201901090082801932\",\n                \"bic\": \"GENODEF1HH4\"\n            },\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": \"nicht angegeben\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Eva Fedyna                         02End-to-End-Ref.:                   03nicht angegeben                    \",\n            \"transactionType\": {\n                \"key\": \"TRANSFER\",\n                \"text\": \"Transfer\"\n            }\n        },\n        {\n            \"reference\": \"082C21BY296VDM4S/10791\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-44.86\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"ALDI SE + Co. KG BARGTEHEIDE\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": null,\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01ALDI SAGT DANKE 16 015//Hamburg/DE 022025-04-29T19:38:44 KFN 1  VJ 2712 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"J022512014053064/2\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-400\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": null,\n            \"deptor\": null,\n            \"creditor\": {\n                \"holderName\": \"Pavlo und Olga Fedyna\",\n                \"iban\": \"DE05200411330455031505\",\n                \"bic\": \"COBADEHD001\"\n            },\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": null,\n            \"directDebitMandateId\": null,\n            \"endToEndReference\": \"nicht angegeben\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Spargeld                           02End-to-End-Ref.:                   03nicht angegeben                    \",\n            \"transactionType\": {\n                \"key\": \"TRANSFER\",\n                \"text\": \"Transfer\"\n            }\n        },\n        {\n            \"reference\": \"8U2C21BW08AO0418/59569\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-135.5\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Norderstedter Sport- und Freizeit-Verein e.V.\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": \"DE20ZZZ00000146273\",\n            \"directDebitMandateId\": \"0000139941\",\n            \"endToEndReference\": \"20250408-C000000005\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01Beitragseinzug Norderstedter Sport 02und Freizeit Verein e.V. (20250408-03C000000005)                        04End-to-End-Ref.:                   0520250408-C000000005                06CORE / Mandatsref.:                070000139941                         08Gläubiger-ID:                      09DE20ZZZ00000146273                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"0R2C21BW2N33KI4K/71759\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-307.17\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"IB SH\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": \"DE55ZZZ00000393187\",\n            \"directDebitMandateId\": \"N300045594500020002\",\n            \"endToEndReference\": \"0010/4000339521/2025\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01VERTRAG 7001582661 FAELLIGKEIT: 30.0204.2025                            03End-to-End-Ref.:                   040010/4000339521/2025               05CORE / Mandatsref.:                06N300045594500020002                07Gläubiger-ID:                      08DE55ZZZ00000393187                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"3M2C21BX1ROOAXI6/72959\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-12.45\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"BAUHAUS HAMBURG\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": \"DE16ZZZ00000020245\",\n            \"directDebitMandateId\": \"G030488780662408241722\",\n            \"endToEndReference\": \"28041413126613827120108581665435360\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01BAUHAUS HAMBURG 28041413126613827120201085816 ELV65435360 28.04 14.13   03End-to-End-Ref.:                   042804141312661382712010858166543536005CORE / Mandatsref.:                06G030488780662408241722             07Gläubiger-ID:                      08DE16ZZZ00000020245                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"8Q2C21BX1U585UFA/17493\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-38\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"Kreis Herzogtum Lauenburg\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": \"DE65RZ100000018975\",\n            \"directDebitMandateId\": \"933-SE-2425-177440\",\n            \"endToEndReference\": \"933-SE-2425-177440\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01933-SE-2425-177440 Marko Fedyna SJ 022024/25 Selbstzahleranteil Schueler03fahrkarte                          04End-to-End-Ref.:                   05933-SE-2425-177440                 06CORE / Mandatsref.:                07933-SE-2425-177440                 08Gläubiger-ID:                      09DE65RZ100000018975                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        },\n        {\n            \"reference\": \"2H2C21BX2DALI968/10642\",\n            \"bookingStatus\": \"BOOKED\",\n            \"bookingDate\": \"2025-04-30\",\n            \"amount\": {\n                \"value\": \"-9.99\",\n                \"unit\": \"EUR\"\n            },\n            \"remitter\": {\n                \"holderName\": \"AMAZON DIGITAL GERMANY GMBH\"\n            },\n            \"deptor\": null,\n            \"creditor\": null,\n            \"valutaDate\": \"2025-04-30\",\n            \"directDebitCreditorId\": \"DE96ZZZ00000594888\",\n            \"directDebitMandateId\": \"9)bURHn1?02NaBkFqE8TWoAkQdU+PU\",\n            \"endToEndReference\": \"6MK1NZI7A5XRNP78\",\n            \"newTransaction\": false,\n            \"remittanceInfo\": \"01D01-3420247-0968609 Amazon Music 6M02K1NZI7A5XRNP78                     03End-to-End-Ref.:                   046MK1NZI7A5XRNP78                   05CORE / Mandatsref.:                069)bURHn1?02NaBkFqE8TWoAkQdU+PU     07Gläubiger-ID:                      08DE96ZZZ00000594888                 \",\n            \"transactionType\": {\n                \"key\": \"DIRECT_DEBIT\",\n                \"text\": \"Direct Debit\"\n            }\n        }\n    ]\n}"
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "5 DEPOT",
+			"item": [
+				{
+					"name": "5.1.1 Abruf Depots",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.environment.unset(\"depotUUID\");",
+									"pm.environment.unset(\"settlementAccountUUID\");",
+									"",
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 200) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"DepotUUID available\"] = pm.response.to.have.jsonBody(\"values[0].depotId\");",
+									"        pm.environment.set(\"depotUUID\", jsonData.values[0].depotId);",
+									"        pm.environment.set(\"settlementAccountUUID\", jsonData.values[0].defaultSettlementAccountId);",
+									"} ",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/clients/user/v3/depots",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"clients",
+								"user",
+								"v3",
+								"depots"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5.1.2 Abruf Depotbestand und/oder Positionen",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.environment.unset(\"positionUUID\");",
+									"",
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    ",
+									"    //erste Position wird in Variable \"positionUUID\" gespeichert, falls Positionen Bestandteil des Responses sind",
+									"    if (!(pm.request.url.query.has(\"without-attr\",\"positions\") || pm.request.url.query.has(\"without-attr\",\"depot,positions\") || pm.request.url.query.has(\"without-attr\",\"positions,depot\"))) {",
+									"            tests[\"PositionUUID available\"] = jsonData.values[0].positionId;",
+									"            pm.environment.set(\"positionUUID\",jsonData.values[0].positionId);",
+									"    }",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									"",
+									"",
+									"",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/v3/depots/{{depotUUID}}/positions",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"depots",
+								"{{depotUUID}}",
+								"positions"
+							],
+							"query": [
+								{
+									"key": "without-attr",
+									"value": "depot",
+									"description": "depot; positions; depot,positions",
+									"disabled": true
+								},
+								{
+									"key": "with-attr",
+									"value": "instrument",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5.1.3 Abruf einer Position des Depots",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/v3/depots/{{depotUUID}}/positions/{{positionUUID}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"depots",
+								"{{depotUUID}}",
+								"positions",
+								"{{positionUUID}}"
+							],
+							"query": [
+								{
+									"key": "with-attr",
+									"value": "instrument",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "5.1.4 Abruf Depotumsätze",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/v3/depots/{{depotUUID}}/transactions",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"depots",
+								"{{depotUUID}}",
+								"transactions"
+							],
+							"query": [
+								{
+									"key": "wkn",
+									"value": "",
+									"description": "WKN",
+									"disabled": true
+								},
+								{
+									"key": "isin",
+									"value": "",
+									"description": "ISIN",
+									"disabled": true
+								},
+								{
+									"key": "instrumentId",
+									"value": "",
+									"description": "InstrumentUUID",
+									"disabled": true
+								},
+								{
+									"key": "bookingStatus",
+									"value": "",
+									"description": "Buchungsstatus: BOOKED; NOTBOOKED; BOTH",
+									"disabled": true
+								},
+								{
+									"key": "max-bookingDate",
+									"value": "",
+									"description": "Maximaler Buchungstag: Format JJJJ-MM-TT",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "6 INSTRUMENT",
+			"item": [
+				{
+					"name": "6.1.1 Abruf Instrument",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"pm.environment.set(\"instrument\",\"WKN123\"); //hier WKN, ISIN oder MNEOMIC eintragen (Großschreibung beachten)"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/v1/instruments/{{instrument}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v1",
+								"instruments",
+								"{{instrument}}"
+							],
+							"query": [
+								{
+									"key": "with-attr",
+									"value": "orderDimensions",
+									"description": "orderDimensions; derivativeData; fundDistribution (auch kommaseparierte Auswahl ist möglich)",
+									"disabled": true
+								},
+								{
+									"key": "without-attr",
+									"value": "staticData",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "7 ORDER",
+			"item": [
+				{
+					"name": "11.2\tBeispiele für die Orderanlage / Ordertypen",
+					"item": [
+						{
+							"name": "11.2.1 OrderValidation MARKET Order",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"tests[\"Status is 201\"] = pm.response.code === 201;",
+											"if (pm.response.code === 201) {",
+											"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+											"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+											"",
+											"    pm.environment.set(\"challenge_id\", jsonData.id);",
+											"}",
+											"",
+											"if (pm.response.code === 422) {",
+											"    var jsonData = pm.response.json();",
+											"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+											"}",
+											""
+										],
+										"type": "text/javascript"
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											"var body = {",
+											"    \"depotId\" : \"{{depotUUID}}\",",
+											"    \"side\" : \"BUY\",",
+											"    \"instrumentId\" : \"WKN123\",",
+											"    \"orderType\" : \"MARKET\",",
+											"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+											"    \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+											"    \"validityType\" : \"GFD\"",
+											"};",
+											"",
+											"var body_str = JSON.stringify(body); ",
+											"pm.environment.set('order_request_body', body_str); ",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{order_request_body}}"
+								},
+								"url": {
+									"raw": "{{url}}/brokerage/v3/orders/validation",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"brokerage",
+										"v3",
+										"orders",
+										"validation"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "11.2.2 Tagesgültige Limit Order",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"tests[\"Status is 201\"] = pm.response.code === 201;",
+											"if (pm.response.code === 201) {",
+											"    var jsonData2 = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+											"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+											"",
+											"    pm.environment.set(\"challenge_id\", jsonData2.id);",
+											"}",
+											"",
+											"if (pm.response.code === 422) {",
+											"    var jsonData = pm.response.json();",
+											"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											"var body = {",
+											"    \"depotId\" : \"{{depotUUID}}\",",
+											"    \"side\" : \"BUY\",",
+											"    \"instrumentId\" : \"WKN123\",",
+											"    \"orderType\" : \"LIMIT\",",
+											"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+											"    \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+											"    \"limit\" : {\"value\":\"0.01\", \"unit\": \"EUR\"},    ",
+											"    \"validityType\" : \"GFD\"",
+											"};",
+											"",
+											"var body_str = JSON.stringify(body); ",
+											"pm.environment.set('order_request_body', body_str); ",
+											"",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{order_request_body}}"
+								},
+								"url": {
+									"raw": "{{url}}/brokerage/v3/orders/validation",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"brokerage",
+										"v3",
+										"orders",
+										"validation"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "11.2.3 OrderValidation Tagesgültige Stop Limit Order",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"tests[\"Status is 201\"] = pm.response.code === 201;",
+											"if (pm.response.code === 201) {",
+											"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+											"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+											"",
+											"    pm.environment.set(\"challenge_id\", jsonData.id);",
+											"}",
+											"",
+											"if (pm.response.code === 422) {",
+											"    var jsonData = pm.response.json();",
+											"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											"var body = {",
+											"    \"depotId\" : \"{{depotUUID}}\",",
+											"    \"side\" : \"SELL\",",
+											"    \"instrumentId\" : \"WKN123\",",
+											"    \"orderType\" : \"STOP_LIMIT\",",
+											"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+											"    \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+											"    \"triggerLimit\" : {\"value\":\"500.00\", \"unit\": \"EUR\"},",
+											"    \"limit\": {\"value\":\"499.00\",\"unit\":\"EUR\"},",
+											"    \"validityType\" : \"GFD\"",
+											"};",
+											"",
+											"var body_str = JSON.stringify(body); ",
+											"pm.environment.set('order_request_body', body_str); ",
+											"",
+											"",
+											"",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{order_request_body}}"
+								},
+								"url": {
+									"raw": "{{url}}/brokerage/v3/orders/validation",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"brokerage",
+										"v3",
+										"orders",
+										"validation"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "11.2.4 OrderValidation Trailing Stop Market Verkaufsorder mit absolutem Abstand",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"tests[\"Status is 201\"] = pm.response.code === 201;",
+											"if (pm.response.code === 201) {",
+											"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+											"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+											"",
+											"    pm.environment.set(\"challenge_id\", jsonData.id);",
+											"}",
+											"",
+											"if (pm.response.code === 422) {",
+											"    var jsonData = pm.response.json();",
+											"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+											"}",
+											"",
+											""
+										],
+										"type": "text/javascript"
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											"var body = {",
+											"    \"depotId\" : \"{{depotUUID}}\",",
+											"    \"side\" : \"SELL\",",
+											"    \"instrumentId\" : \"WKN123\",",
+											"    \"orderType\" : \"TRAILING_STOP_MARKET\",",
+											"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+											"    \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+											"    \"triggerLimit\" : {\"value\":\"0.01\", \"unit\": \"EUR\"}, ",
+											"    \"trailingLimitDistAbs\" : {\"value\":\"5.00\", \"unit\": \"EUR\"},",
+											"    \"validityType\" : \"GFD\"",
+											"};",
+											"",
+											"var body_str = JSON.stringify(body); ",
+											"pm.environment.set('order_request_body', body_str); "
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{order_request_body}}"
+								},
+								"url": {
+									"raw": "{{url}}/brokerage/v3/orders/validation",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"brokerage",
+										"v3",
+										"orders",
+										"validation"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "11.2.5 OrderValidation Trailing Stop Limit Verkaufsorder mit relativem Abstand",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"tests[\"Status is 201\"] = pm.response.code === 201;",
+											"  if (pm.response.code === 201) {",
+											"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+											"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+											"",
+											"    pm.environment.set(\"challenge_id\", jsonData.id);",
+											"}",
+											"",
+											"if (pm.response.code === 422) {",
+											"    var jsonData = pm.response.json();",
+											"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+											"}"
+										],
+										"type": "text/javascript"
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											"var body = {",
+											"    \"depotId\" : \"{{depotUUID}}\",",
+											"    \"side\" : \"SELL\",",
+											"    \"instrumentId\" : \"WKN123\",",
+											"    \"orderType\" : \"TRAILING_STOP_LIMIT\",",
+											"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+											"    \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+											"    \"limit\" : {\"value\":\"500.00\", \"unit\": \"EUR\"},",
+											"    \"triggerLimit\" : {\"value\":\"550.00\", \"unit\": \"EUR\"},",
+											"    \"trailingLimitDistRel\" : {\"preDecimalPlaces\": \"1\", \"decimalPlaces\": \"2\"},",
+											"    \"validityType\" : \"GFD\"",
+											"};",
+											"",
+											"var body_str = JSON.stringify(body); ",
+											"pm.environment.set('order_request_body', body_str); ",
+											"",
+											"",
+											""
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{order_request_body}}"
+								},
+								"url": {
+									"raw": "{{url}}/brokerage/v3/orders/validation",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"brokerage",
+										"v3",
+										"orders",
+										"validation"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "11.2.6 OrderValidation Kombinationsorder des Typs One Cancels Other (OCO)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"tests[\"Status is 201\"] = pm.response.code === 201;",
+											"if (pm.response.code === 201) {",
+											"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+											"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+											"",
+											"    pm.environment.set(\"challenge_id\", jsonData.id);",
+											"}",
+											"",
+											"if (pm.response.code === 422) {",
+											"    var jsonData = pm.response.json();",
+											"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+											"}",
+											""
+										],
+										"type": "text/javascript"
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											"var body = {",
+											"    \"depotId\" : \"{{depotUUID}}\",",
+											"    \"orderType\" : \"ONE_CANCELS_OTHER\",",
+											"    \"subOrders\" : [",
+											"        {",
+											"            \"depotId\" : \"{{depotUUID}}\",",
+											"            \"side\" : \"SELL\",",
+											"            \"instrumentId\": \"WKN123\",",
+											"            \"orderType\": \"STOP_MARKET\",",
+											"            \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+											"            \"triggerLimit\": {\"value\": \"0.01\",\"unit\": \"EUR\"},",
+											"            \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+											"            \"validityType\": \"GTD\",",
+											"            \"validity\" : \"20YY-MM-DD\", ",
+											"        },",
+											"        {",
+											"            \"depotId\" : \"{{depotUUID}}\",",
+											"            \"side\": \"SELL\",",
+											"            \"instrumentId\": \"WKN123\",",
+											"            \"orderType\": \"LIMIT\",",
+											"            \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+											"            \"limit\" : {\"value\":\"500.00\", \"unit\": \"EUR\"},",
+											"            \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+											"            \"validityType\": \"GTD\",",
+											"            \"validity\" : \"20YY-MM-DD\",",
+											"        }",
+											"    ]",
+											"};",
+											"",
+											"var body_str = JSON.stringify(body); ",
+											"pm.environment.set('order_request_body', body_str);"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{order_request_body}}"
+								},
+								"url": {
+									"raw": "{{url}}/brokerage/v3/orders/validation",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"brokerage",
+										"v3",
+										"orders",
+										"validation"
+									]
+								}
+							},
+							"response": []
+						},
+						{
+							"name": "11.2.7 OrderValidationKombinationsorder des Typs Next Order  (NeO)",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"tests[\"Status is 201\"] = pm.response.code === 201;",
+											"if (pm.response.code === 201) {",
+											"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+											"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+											"",
+											"    pm.environment.set(\"challenge_id\", jsonData.id);",
+											"}",
+											"",
+											"if (pm.response.code === 422) {",
+											"    var jsonData = pm.response.json();",
+											"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+											"}",
+											""
+										],
+										"type": "text/javascript"
+									}
+								},
+								{
+									"listen": "prerequest",
+									"script": {
+										"exec": [
+											"var body = {",
+											"    \"depotId\": \"{{depotUUID}}\",",
+											"    \"orderType\": \"NEXT_ORDER\",",
+											"    \"subOrders\": [{",
+											"        \"depotId\": \"{{depotUUID}}\",",
+											"        \"side\": \"BUY\",",
+											"        \"instrumentId\": \"WKN123\",",
+											"        \"orderType\": \"LIMIT\",",
+											"        \"quantity\": {",
+											"            \"value\": \"1\",",
+											"            \"unit\": \"XXX\"",
+											"        },",
+											"        \"limit\": {",
+											"            \"value\": \"0.01\",",
+											"            \"unit\": \"EUR\"",
+											"        },",
+											"        \"venueId\": \"{{venueUUID_Handelsplatz}}\",",
+											"        \"validityType\": \"GTD\",",
+											"        \"validity\": \"20YY-MM-DD\",",
+											"    },",
+											"    {",
+											"        \"depotId\": \"{{depotUUID}}\",",
+											"        \"side\": \"SELL\",",
+											"        \"instrumentId\": \"WKN123\",",
+											"        \"orderType\": \"STOP_MARKET\",",
+											"        \"quantity\": {",
+											"            \"value\": \"1\",",
+											"            \"unit\": \"XXX\"",
+											"        },",
+											"        \"triggerLimit\": {",
+											"            \"value\": \"0.01\",",
+											"            \"unit\": \"EUR\"",
+											"        },",
+											"        \"venueId\": \"{{venueUUID_Handelsplatz}}\", ",
+											"        \"validityType\": \"GFD\",",
+											"    }]",
+											"};",
+											"",
+											"var body_str = JSON.stringify(body); ",
+											"pm.environment.set('order_request_body', body_str);"
+										],
+										"type": "text/javascript"
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{
+										"key": "Accept",
+										"value": "application/json"
+									},
+									{
+										"key": "Authorization",
+										"value": "Bearer {{access_token}}"
+									},
+									{
+										"key": "x-http-request-info",
+										"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+									},
+									{
+										"key": "Content-Type",
+										"value": "application/json"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{{order_request_body}}"
+								},
+								"url": {
+									"raw": "{{url}}/brokerage/v3/orders/validation",
+									"host": [
+										"{{url}}"
+									],
+									"path": [
+										"brokerage",
+										"v3",
+										"orders",
+										"validation"
+									]
+								}
+							},
+							"response": []
+						}
+					]
+				},
+				{
+					"name": "7.1.1 Abruf OrderDimensionen",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"",
+									"    //Erzeugung von Environment-Variablen für jeden Handelsplatz",
+									"    var data = jsonData.values[0].venues; ",
+									"    for(var i = 0, len = data.length; i < len; i++) {",
+									"",
+									"        if (data[i].name == \"Tradegate\") {",
+									"            if (data[i].orderTypes.QUOTE) {",
+									"                pm.environment.set(\"venueUUID_Tradegate_LT\", data[i].venueId);",
+									"           } else {",
+									"                pm.environment.set(\"venueUUID_\"+data[i].name, data[i].venueId);",
+									"           }",
+									"        } else {",
+									"            pm.environment.set(\"venueUUID_\"+data[i].name, data[i].venueId);",
+									"        }",
+									"            ",
+									"    }",
+									"} ",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/dimensions",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"dimensions"
+							],
+							"query": [
+								{
+									"key": "instrumentId",
+									"value": "",
+									"description": "UUID des Instruments",
+									"disabled": true
+								},
+								{
+									"key": "wkn",
+									"value": "",
+									"description": "WKN",
+									"disabled": true
+								},
+								{
+									"key": "isin",
+									"value": "",
+									"description": "ISIN",
+									"disabled": true
+								},
+								{
+									"key": "mneomic",
+									"value": "",
+									"description": "Tickersymbol",
+									"disabled": true
+								},
+								{
+									"key": "venueId",
+									"value": "",
+									"description": "UUID des Handelsplatzes",
+									"disabled": true
+								},
+								{
+									"key": "orderType",
+									"value": "",
+									"description": "Ordertyp: LIMIT; MARKET; QUOTE; STOP_MARKET; STOP_LIMIT; TRAILING_STOP_MARKET; TRAILING_STOP_LIMIT; ONE_CANCELS_OTHER; NEXT_ORDER",
+									"disabled": true
+								},
+								{
+									"key": "side",
+									"value": "",
+									"description": "Geschäftsart: BUY; SELL",
+									"disabled": true
+								},
+								{
+									"key": "type",
+									"value": "",
+									"description": "Handelsart: EXCHANGE; OFF",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.2 Abruf Orders (Orderbuch)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"if (pm.response.code === 200) {",
+									"        var jsonData = pm.response.json();",
+									"        if (jsonData.paging.matches > 0) ",
+									"            pm.environment.set(\"orderUUID\", jsonData.values[0].orderId);",
+									"        else ",
+									"            pm.environment.unset(\"orderUUID\");",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/depots/{{depotUUID}}/v3/orders",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"depots",
+								"{{depotUUID}}",
+								"v3",
+								"orders"
+							],
+							"query": [
+								{
+									"key": "with-attr",
+									"value": "instrument",
+									"disabled": true
+								},
+								{
+									"key": "without-attr",
+									"value": "executions",
+									"disabled": true
+								},
+								{
+									"key": "orderStatus",
+									"value": "",
+									"description": "Order Status: PENDING; OPEN; EXECUTED;SETTLED; EXPIRED; CANCELLED_USER; CANNCELLED_TRADE; CANCELLED_SYSTEM; PARTIALLY_EXECUTED; WAITING",
+									"disabled": true
+								},
+								{
+									"key": "venueId",
+									"value": "",
+									"description": "UUID des Handelsplatzes",
+									"disabled": true
+								},
+								{
+									"key": "side",
+									"value": "",
+									"description": "Geschäftsart: BUY; SELL",
+									"disabled": true
+								},
+								{
+									"key": "orderType",
+									"value": "",
+									"description": "Ordertyp: LIMIT; MARKET; QUOTE; STOP_MARKET; STOP_LIMIT; TRAILING_STOP_MARKET; TRAILING_STOP_LIMIT; ONE_CANCELS_OTHER; NEXT_ORDER",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.3 Abruf Order (Einzelorder)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/{{orderUUID}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"{{orderUUID}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.4 Anlage Prevalidation Orderanlage",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"var body = {",
+									"    \"depotId\" : \"{{depotUUID}}\",",
+									"    \"side\" : \"BUY\",",
+									"    \"instrumentId\" : \"WKN123\",",
+									"    \"orderType\" : \"LIMIT\",",
+									"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+									"    \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+									"    \"limit\" : {\"value\":\"0.01\", \"unit\": \"EUR\"},",
+									"    \"validityType\" : \"GFD\"",
+									"};",
+									"",
+									"var body_str = JSON.stringify(body); ",
+									"pm.environment.set('order_request_body', body_str); ",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/prevalidation",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"prevalidation"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.5 Anlage Validation Orderanlage",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"if (pm.response.code === 201) {",
+									"    var jsonData2 = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+									"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+									"",
+									"    pm.environment.set(\"challenge_id\", jsonData2.id);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									"",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"var body = {",
+									"    \"depotId\" : \"{{depotUUID}}\",",
+									"    \"side\" : \"BUY\",",
+									"    \"instrumentId\" : \"WKN123\",",
+									"    \"orderType\" : \"LIMIT\",",
+									"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+									"    \"venueId\" : \"{{venueUUID_Handelsplatz}}\",",
+									"    \"limit\" : {\"value\":\"0.01\", \"unit\": \"EUR\"},    ",
+									"    \"validityType\" : \"GTD\",",
+									"    \"validity\" : \"20YY-MM-DD\"",
+									"};",
+									"",
+									"var body_str = JSON.stringify(body); ",
+									"pm.environment.set('order_request_body', body_str); ",
+									"",
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/validation",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"validation"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.6 Anlage Ex-Ante Kostenausweis für eine Orderanlage",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//es wird der identische Body verwendet wie in der Validation-Schnittstelle (siehe Schnittstelle 7.1.5 Anlage Validation Orderanlage)"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/costindicationexante",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"costindicationexante"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.7 Anlage Order",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"  if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"orderUUID\", jsonData.orderId);",
+									"} ",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//es wird der identische Body verwendet wie in der Validation-Schnittstelle (siehe Schnittstelle 7.1.5 Anlage Validation Orderanlage)",
+									"//aufgrund der aktiven Session-TAN wird im Header-Feld \"x-once-authentication\" der Wert \"TAN_FREI\" übergeben"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-once-authentication-info",
+								"value": "{\"id\":\"{{challenge_id}}\"}"
+							},
+							{
+								"key": "x-once-authentication",
+								"value": "TAN_FREI"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.8 Anlage Prevalidation Orderänderung",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"var body = {",
+									"    \"depotId\" : \"{{depotUUID}}\",",
+									"    \"orderId\" : \"{{orderUUID}}\",",
+									"    \"limit\" : {\"value\":\"0.02\", \"unit\": \"EUR\"},",
+									"    \"validityType\" : \"GFD\"",
+									"};",
+									"",
+									"var body_str = JSON.stringify(body); ",
+									"pm.environment.set('change_order_request_body', body_str); "
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{change_order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/{{orderUUID}}/prevalidation",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"{{orderUUID}}",
+								"prevalidation"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.9 Anlage Validation Orderänderung",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"if (pm.response.code === 201) {",
+									"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+									"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+									"",
+									"    pm.environment.set(\"challenge_id\", jsonData.id);",
+									"}",
+									" ",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									"",
+									"",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"var body = {",
+									"    \"depotId\" : \"{{depotUUID}}\",",
+									"    \"orderId\" : \"{{orderUUID}}\",",
+									"    \"limit\" : {\"value\":\"0.02\", \"unit\": \"EUR\"},",
+									"    \"validityType\" : \"GTD\",",
+									"    \"validity\" : \"20YY-MM-DD\"",
+									"};",
+									"",
+									"var body_str = JSON.stringify(body); ",
+									"pm.environment.set('change_order_request_body', body_str); "
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{change_order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/{{orderUUID}}/validation",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"{{orderUUID}}",
+								"validation"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.9 Anlage Validation Orderlöschung",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"if (pm.response.code === 201) {",
+									"    var jsonData = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+									"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+									"",
+									"    pm.environment.set(\"challenge_id\", jsonData.id);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									""
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\r\n}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/{{orderUUID}}/validation",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"{{orderUUID}}",
+								"validation"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.10 Anlage Ex-Ante Kostenausweis für eine Orderänderung",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									"",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//es wird der identische Body verwendet wie in der Validation-Schnittstelle (siehe Schnittstelle 7.1.9 Anlage Validation Orderänderung)"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{change_order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/{{orderUUID}}/costindicationexante",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"{{orderUUID}}",
+								"costindicationexante"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.11 Änderung der Order",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//es wird der identische Body verwendet wie in der Validation-Schnittstelle (siehe Schnittstelle 7.1.9 Anlage Validation Orderänderung)",
+									"//aufgrund der aktiven Session-TAN wird im Header-Feld \"x-once-authentication\" der Wert \"TAN_FREI\" übergeben"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-once-authentication-info",
+								"value": "{\"id\":\"{{challenge_id}}\"}"
+							},
+							{
+								"key": "x-once-authentication",
+								"value": "TAN_FREI"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{change_order_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/{{orderUUID}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"{{orderUUID}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "7.1.12 Löschung der Order",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//aufgrund der aktiven Session-TAN wird im Header-Feld \"x-once-authentication\" der Wert \"TAN_FREI\" übergeben"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "DELETE",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-once-authentication-info",
+								"value": "{\"id\":\"{{challenge_id}}\"}"
+							},
+							{
+								"key": "x-once-authentication",
+								"value": "TAN_FREI"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/{{orderUUID}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"{{orderUUID}}"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "8 QUOTE",
+			"item": [
+				{
+					"name": "8.1.1 Anlage Validierung Quote Request-Initialisierung",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"if (pm.response.code === 201) {",
+									"",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"quoteTicketUUID\", jsonData.quoteTicketId);",
+									"    ",
+									"    var jsonData2 = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+									"    tests[\"TAN-Challenge created\"] = pm.response.headers.get(\"x-once-authentication-info\").includes(\"id\");",
+									"",
+									"    pm.environment.set(\"challenge_id\", jsonData2.id);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"var body = {",
+									"    \"depotId\" : \"{{depotUUID}}\",",
+									"    \"orderType\" : \"QUOTE\",",
+									"    \"side\" : \"BUY\",",
+									"    \"instrumentId\" : \"WKN123\",",
+									"    \"quantity\" : {\"value\":\"1\", \"unit\": \"XXX\"},",
+									"    \"venueId\" : \"{{venueUUID_LT-Handelsplatz}}\",",
+									"};",
+									"",
+									"var body_str = JSON.stringify(body); ",
+									"pm.environment.set('quote_request_body', body_str); "
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{quote_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/quoteticket",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"quoteticket"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "8.1.2 Änderung Validierung Quote Request-Initialisierung mit TAN",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 204\"] = responseCode.code === 204;",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//aufgrund der aktiven Session-TAN wird im Header-Feld \"x-once-authentication\" der Wert \"TAN_FREI\" übergeben"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "PATCH",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-once-authentication-info",
+								"value": "{\"id\":\"{{challenge_id}}\"}"
+							},
+							{
+								"key": "x-once-authentication",
+								"value": "TAN_FREI"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": ""
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/quoteticket/{{quoteTicketUUID}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"quoteticket",
+								"{{quoteTicketUUID}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "8.1.3 Anlage Quote Request",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"  if (pm.response.code === 200) {",
+									"    var jsonData = pm.response.json();",
+									"    ",
+									"    pm.environment.set(\"quoteUUID\", jsonData.quoteId);",
+									"    pm.environment.set(\"quotePrice\", JSON.stringify(jsonData.limit));",
+									"    pm.environment.set(\"quoteTimeStamp\", jsonData.creationDateTimeStamp);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//es wird der identische Body verwendet wie in der Validation-Schnittstelle (siehe Schnittstelle 8.1.1 Anlage Validierung Quote Request-Initialisierung)"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{quote_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/quotes",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"quotes"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "8.1.4 Orderanlage der Quote-Order (Validation)",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = responseCode.code === 201;",
+									"if (pm.response.code === 201) {",
+									"    var jsonData2 = JSON.parse(pm.response.headers.get(\"x-once-authentication-info\"));",
+									"    tests[\"TAN-Challenge is TAN-frei\"] = (jsonData2.typ === \"TAN_FREI\");",
+									"",
+									"    pm.environment.set(\"challenge_id\", jsonData2.id);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//der zur Orderanlage verwendete Body wird ausgelesen",
+									"var jsonDATA = JSON.parse(pm.environment.get(\"quote_request_body\"));",
+									"",
+									"jsonDATA.quoteId = pm.environment.get(\"quoteUUID\");",
+									"jsonDATA.quoteTicketId = pm.environment.get(\"quoteTicketUUID\");",
+									"jsonDATA.limit = JSON.parse(pm.environment.get(\"quotePrice\"));",
+									"jsonDATA.creationTimestamp = pm.environment.get(\"quoteTimeStamp\");",
+									"",
+									"pm.environment.set('quote_request_body', JSON.stringify(jsonDATA));"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{quote_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders/validation",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders",
+								"validation"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "8.1.4 Orderanlage der Quote-Order",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 201\"] = pm.response.code === 201;",
+									"if (pm.response.code === 201) {",
+									"    var jsonData = pm.response.json();",
+									"    pm.environment.set(\"orderUUID\", jsonData.orderId);",
+									"} ",
+									"",
+									"if (pm.response.code === 422) {",
+									"    var jsonData = pm.response.json();",
+									"    tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									""
+								],
+								"type": "text/javascript"
+							}
+						},
+						{
+							"listen": "prerequest",
+							"script": {
+								"exec": [
+									"//es wird der identische Body verwendet wie in der Validation-Schnittstelle (siehe Schnittstelle 8.1.4 Orderanlage der Quote-Order (Validation))",
+									"//aufgrund der aktiven Session-TAN wird im Header-Feld \"x-once-authentication\" der Wert \"TAN_FREI\" übergeben"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "x-once-authentication-info",
+								"value": "{\"id\":\"{{challenge_id}}\"}"
+							},
+							{
+								"key": "x-once-authentication",
+								"value": "TAN_FREI"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{{quote_request_body}}"
+						},
+						"url": {
+							"raw": "{{url}}/brokerage/v3/orders",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"brokerage",
+								"v3",
+								"orders"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "9 DOCUMENTS",
+			"item": [
+				{
+					"name": "9.1.1 Abruf PostBox",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"pm.environment.unset(\"documentUUID\");",
+									"",
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 200) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"DocumentUUID available\"] = pm.response.to.have.jsonBody(\"values[0].documentId\");",
+									"        pm.environment.set(\"documentUUID\", jsonData.values[0].documentId);",
+									"}",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/messages/clients/user/v2/documents",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"messages",
+								"clients",
+								"user",
+								"v2",
+								"documents"
+							],
+							"query": [
+								{
+									"key": "paging-first",
+									"value": "",
+									"description": "0 (Default)",
+									"disabled": true
+								},
+								{
+									"key": "paging-count",
+									"value": "",
+									"description": "20 (Default)",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "9.1.2 Abruf eines Dokuments",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/pdf"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/messages/v2/documents/{{documentUUID}}",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"messages",
+								"v2",
+								"documents",
+								"{{documentUUID}}"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "9.1.3 Abruf Dokument-Vorschaltseite",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200; ",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}"
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/pdf"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/messages/v2/documents/{{documentUUID}}/predocument",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"messages",
+								"v2",
+								"documents",
+								"{{documentUUID}}",
+								"predocument"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "10 REPORTS",
+			"item": [
+				{
+					"name": "10.1 .1 Abruf Salden sämtlicher comdirect-Produkte",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"tests[\"Status is 200\"] = pm.response.code === 200;",
+									"",
+									"if (pm.response.code === 422) {",
+									"        var jsonData = pm.response.json();",
+									"        tests[\"Fehler: \"+jsonData.messages[0].key+\" / \"+jsonData.messages[0].message+\" \"] = false;",
+									"}",
+									" "
+								],
+								"type": "text/javascript"
+							}
+						}
+					],
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							},
+							{
+								"key": "Authorization",
+								"value": "Bearer {{access_token}}"
+							},
+							{
+								"key": "x-http-request-info",
+								"value": "{\"clientRequestId\":{\"sessionId\":\"{{session_id}}\",\"requestId\":\"{{request_id}}\"}}"
+							},
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{url}}/reports/participants/user/v1/allbalances",
+							"host": [
+								"{{url}}"
+							],
+							"path": [
+								"reports",
+								"participants",
+								"user",
+								"v1",
+								"allbalances"
+							],
+							"query": [
+								{
+									"key": "clientConnectionType",
+									"value": "",
+									"description": "CURRENT_CLIENT oder OTHER_COMDIRECT",
+									"disabled": true
+								},
+								{
+									"key": "productType",
+									"value": "",
+									"description": "ACCOUNT, CARD, DEPOT, LOAN, SAVINGS (auch kommaseparierte Auswahl ist möglich)",
+									"disabled": true
+								},
+								{
+									"key": "targetClientId",
+									"value": "",
+									"disabled": true
+								},
+								{
+									"key": "without-attr",
+									"value": "balance.staticdata",
+									"disabled": true
+								}
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		}
+	]
+}
