@@ -60,7 +60,7 @@ pub struct Remitter {
 #[derive(Debug, Deserialize, Serialize)]
 pub struct Creditor {
     #[serde(rename = "holderName")]
-    holder_name: String,
+    pub holder_name: String,
     iban: String,
     bic: String,
 }

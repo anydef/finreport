@@ -1,0 +1,121 @@
+[
+  {
+    "category": "housing",
+    "subcategories": [
+      "mortgage",
+      "property_taxes",
+      "household_repairs",
+      "home_insurance"
+    ]
+  },
+  {
+    "category": "transportation",
+    "subcategories": [
+      "tax",
+      "gas",
+      "tires",
+      "maintenance",
+      "parking",
+      "repairs",
+      "car_insurance"
+    ]
+  },
+  {
+    "category": "food",
+    "subcategories": [
+      "groceries",
+      "restaurants"
+    ]
+  },
+  {
+    "category": "utilities",
+    "subcategories": [
+      "electricity",
+      "water",
+      "garbage",
+      "phones",
+      "cable",
+      "internet",
+      "rundfunk"
+    ]
+  },
+  {
+    "category": "clothing",
+    "subcategories": [
+      "clothing"
+    ]
+  },
+  {
+    "category": "medical",
+    "subcategories": [
+      "health_care",
+      "medications"
+    ]
+  },
+  {
+    "category": "insurance",
+    "subcategories": [
+      "dentist_insurance",
+      "auto_insurance",
+      "life_insurance"
+    ]
+  },
+  {
+    "category": "household_items_supplies",
+    "subcategories": [
+      "toiletries",
+      "cleaning",
+      "tools"
+    ]
+  },
+  {
+    "category": "personal",
+    "subcategories": [
+      "gym",
+      "haircuts",
+      "salon",
+      "cosmetics"
+    ]
+  },
+  {
+    "category": "debt",
+    "subcategories": [
+      "credit_card",
+      "other"
+    ]
+  },
+  {
+    "category": "education",
+    "subcategories": [
+      "courses",
+      "materials_books"
+    ]
+  },
+  {
+    "category": "savings",
+    "subcategories": [
+      "emergency_fund",
+      "stocks_etfs",
+      "child savings"
+    ]
+  },
+  {
+    "category": "gifts_donations",
+    "subcategories": [
+      "birthday",
+      "holiday",
+      "charity",
+      "special_occasion"
+    ]
+  },
+  {
+    "category": "entertainment",
+    "subcategories": [
+      "games",
+      "movies_concerts",
+      "vacations",
+      "library",
+      "subscriptions"
+    ]
+  }
+]
