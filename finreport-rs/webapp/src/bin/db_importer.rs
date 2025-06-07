@@ -1,6 +1,6 @@
 use std::error::Error;
-use finreport::comdirect::transaction::Transaction;
-use finreport::db::{Persistence, DB_URL};
+use comdirect_rs::comdirect::transaction::Transaction;
+use webapp::db::{Persistence, DB_URL};
 use sqlx::{migrate::MigrateDatabase, Sqlite};
 use tokio::fs;
 

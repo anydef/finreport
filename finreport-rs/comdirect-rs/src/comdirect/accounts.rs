@@ -2,7 +2,7 @@ use crate::comdirect::account_client::{AccountClient, AccountClientResult};
 use crate::comdirect::balance_model::{Account, AccountsBalancesResponse};
 use crate::comdirect::session_client::Session;
 use crate::comdirect::transaction::Transaction;
-use crate::settings::Settings;
+use utils::settings::Settings;
 
 pub async fn get_accounts(
     session: Session,

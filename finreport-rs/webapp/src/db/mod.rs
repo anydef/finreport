@@ -1,7 +1,8 @@
-use crate::categorize::{CategorizeAiResponse, Category};
-use crate::comdirect::transaction::Transaction;
+use categorizer::categorize::{CategorizeAiResponse, Category};
+
 use sqlx::{Connection, Row, SqliteConnection};
 use std::error::Error;
+use comdirect_rs::comdirect::transaction::Transaction;
 
 pub const DB_URL: &str = "sqlite://sqlite.db";
 
@@ -12,7 +13,7 @@ pub struct Persistence {
 
 impl Persistence {
     pub async fn new(db_path: &str) -> Result<Self, Box<dyn Error>> {
-        let mut db = SqliteConnection::connect(db_path)
+        let db = SqliteConnection::connect(db_path)
             .await
             .expect("Failed to open database");
         let mut persistence = Self { db };

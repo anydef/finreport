@@ -1,12 +1,12 @@
 use dotenv::dotenv;
-use finreport::comdirect::accounts::{get_account_transactions, get_accounts};
-use finreport::comdirect::session::get_comdirect_session;
-use finreport::comdirect::transaction::Transaction;
-use finreport::settings::Settings;
+use comdirect_rs::comdirect::accounts::{get_account_transactions, get_accounts};
+use comdirect_rs::comdirect::session::get_comdirect_session;
+use comdirect_rs::comdirect::transaction::Transaction;
 use std::env;
 use std::error::Error;
 use std::path::Path;
 use tokio::fs;
+use utils::settings::Settings;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {

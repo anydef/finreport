@@ -1,14 +1,14 @@
-use finreport::categorize::{CategorizeAiResponse, Category};
-use finreport::comdirect::transaction::Transaction;
-use finreport::db::{Persistence, DB_URL};
+use categorizer::categorize::{CategorizeAiResponse, Category};
 use rig::{completion::Prompt, providers::openai};
 use serde_json::json;
 use tokio::fs;
 use tokio::io::{AsyncBufReadExt, BufReader};
+use comdirect_rs::comdirect::transaction::Transaction;
+use webapp::db::{Persistence, DB_URL};
 
 #[tokio::main]
 async fn main() {
-    let key = finreport::categorize::settings()
+    let key = categorizer::categorize::settings()
         .await
         .expect("Failed to load settings")
         .openai_key;

@@ -2,13 +2,13 @@ use crate::comdirect::loader;
 use crate::comdirect::session_client::{
     Session, SessionClient, SessionClientError, SessionStatus, XOnceAuthenticationInfo,
 };
-use crate::settings::Settings;
 use reqwest::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use tokio::io;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::sleep;
+use utils::settings::Settings;
 
 #[derive(Debug)]
 pub enum SessionError {

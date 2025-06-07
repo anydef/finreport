@@ -1,0 +1,10 @@
+[package]
+name = "categorizer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dotenv = "0.15.0"
+serde = { version = "1.0.219", features = ["derive"] }
+env_logger = "0.11.8"
+config = "0.15.11"

@@ -1,6 +1,6 @@
 use dotenv::dotenv;
-use finreport::comdirect::session::get_comdirect_session;
-use finreport::settings::Settings;
+use comdirect_rs::comdirect::session::get_comdirect_session;
+use utils::settings::Settings;
 use std::env;
 use std::error::Error;
 
