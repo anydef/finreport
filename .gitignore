@@ -2,3 +2,4 @@
 /.env
 *.iml
 /.session.json
+/finreport-rs/target/
