@@ -1,0 +1,11 @@
+query MyQuery {
+#    hello
+    reports(month: "10", year: "2025") {
+        __typename,
+        month,
+        year,
+        category,
+        totalIncome,
+        totalExpenses
+    }
+}
