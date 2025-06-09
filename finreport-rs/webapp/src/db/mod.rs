@@ -1,3 +1,5 @@
+pub mod seaql;
+
 use categorizer::categorize::{CategorizeAiResponse, Category};
 
 use sqlx::{Connection, Row, SqliteConnection};

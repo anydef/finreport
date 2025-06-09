@@ -1,25 +1,29 @@
 use serde::Deserialize;
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct AccountType {
-    text: String,
+pub struct AccountType {
+    pub text: String,
 }
 
 #[derive(Deserialize, Debug)]
 pub struct Account {
-    iban: String,
+    pub iban: String,
+    pub bic: String,
     #[serde(rename = "accountId")]
     pub account_id: String,
     #[serde(rename = "accountDisplayId")]
     pub display_id: String,
+
+    #[serde(rename = "accountType")]
+    pub account_type: AccountType
     // currency: String,
     // #[serde(rename = "accountType")]
     // account_type: String,
 }
 
 #[derive(Deserialize, Debug)]
-pub(crate) struct Balance {
-    value: String,
+pub struct Balance {
+    pub value: String,
     unit: String,
 }
 
@@ -29,7 +33,7 @@ pub struct AccountBalance {
     #[serde(rename = "accountId")]
     pub account_id: String,
 
-    balance: Balance,
+    pub balance: Balance,
     // #[serde(rename = "availableCashAmount")]
     // available_cash_amount: Balance,
 }

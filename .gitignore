@@ -1,5 +1,6 @@
 /target
-/.env
+/finreport-rs/.env
 *.iml
 /.session.json
 /finreport-rs/target/
+/finreport-rs/.session.json

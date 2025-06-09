@@ -4,6 +4,11 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+comdirect-rs = { path = "../comdirect-rs" }
+categorizer = {path = "../categorizer"}
+migration = { path = "../migration" }
+entity = { path = "../entity" }
+
 config = "0.15.11"
 dotenv = "0.15.0"
 env_logger = "0.11.8"
@@ -17,13 +22,13 @@ tokio = { version = "1.44.2", features = ["full"]}
 uuid = { version = "1.16.0", features = ["v4"] }
 actix-web = "4.11.0"
 actix-files = "0.6.6"
-
-comdirect-rs = { path = "../comdirect-rs" }
-categorizer = {path = "../categorizer"}
 utils = {path = "../utils"}
 async-graphql = "7.0.17"
 async-graphql-actix-web = "7.0.17"
 actix-cors = "0.7.1"
+sea-orm = { version = "1.1.12", features = ["runtime-tokio", "sqlx-postgres", "macros", "mock", "debug-print", "with-json"] }
+chrono = "0.4.41"
+
 
 [[bin]]
 name = "import-transactions"
