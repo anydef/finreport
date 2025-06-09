@@ -4,3 +4,4 @@
 /.session.json
 /finreport-rs/target/
 /finreport-rs/.session.json
+**/target/
