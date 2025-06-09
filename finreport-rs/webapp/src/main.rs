@@ -53,6 +53,17 @@ async fn playground() -> HttpResponse {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+
+    tokio::spawn(async {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+
+        loop {
+            interval.tick().await;
+            // Place the code to execute every minute here
+            println!("Running scheduled task every minute");
+        }
+    });
+
     let schema = create_schema();
     HttpServer::new(move || {
         App::new()
