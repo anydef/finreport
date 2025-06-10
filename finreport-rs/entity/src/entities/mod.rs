@@ -4,6 +4,7 @@ pub mod prelude;
 
 pub mod account;
 pub mod account_balance;
+pub mod account_transactions;
 pub mod categories;
 pub mod mandate_categories;
 pub mod transaction_categories;

@@ -1,6 +1,5 @@
-use comdirect_rs::comdirect::accounts::get_accounts;
+use comdirect_rs::comdirect::accounts::{get_account_transactions, get_accounts};
 use comdirect_rs::comdirect::session::load_comdirect_session;
-use comdirect_rs::comdirect::transaction::Transaction;
 use dotenv::dotenv;
 use entities::{account, account_balance};
 use entity::entities;
@@ -8,8 +7,6 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{ActiveModelTrait, DbConn, EntityTrait, Set, Unchanged};
 use std::env;
 use std::error::Error;
-use std::path::Path;
-use tokio::fs;
 use utils::settings::Settings;
 use webapp::db::seaql;
 
@@ -42,9 +39,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let account_orm = account::ActiveModel {
             account_id: Unchanged(account.account.account_id.clone()),
             display_id: Unchanged(account.account.display_id.to_owned()),
-            account_type: Unchanged(account.account.account_type.text),
-            iban: Unchanged(account.account.iban),
-            bic: Unchanged(account.account.bic),
+            account_type: Unchanged(account.account.account_type.text.to_owned()),
+            iban: Unchanged(account.account.iban.to_owned()),
+            bic: Unchanged(account.account.bic.to_owned()),
             institute: Unchanged("COMDIRECT".to_string()),
             ..Default::default()
         };
@@ -74,7 +71,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         let balance_orm = account_balance::ActiveModel {
-            account_id: Set(account.account.account_id),
+            account_id: Set(account.account.account_id.to_owned()),
             amount: Set(account.balance.value.parse().unwrap_or_else(|_| 0.0)),
             date: Set(chrono::Local::now().date_naive()),
             ..Default::default()
@@ -106,57 +103,70 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 );
             }
         }
+        println!("Account: {:?}", account.account_id);
+        let transactions =
+            get_account_transactions(session.clone(), client_settings.clone(), &account.account)
+                .await?;
 
-        // println!("Account: {:?}", account.account_id);
-        // let transactions =
-        //     get_account_transactions(session.clone(), client_settings.clone(), &account.account)
-        //         .await?;
-        //
-        // save_transactions_to_file(
-        //     &*transactions,
-        //     format!("transactions-{}.json", &account.account.display_id),
-        // )
-        // .await?;
-        // save_transactions_to_ndjson(
-        //     &*transactions,
-        //     format!("transactions-{}.ndjson", &account.account.display_id),
-        // )
-        // .await?;
+        for transaction in transactions {
+            let transaction_orm = entities::account_transactions::ActiveModel {
+                reference: Set(transaction.reference.to_owned()),
+                account_id: Set(account.account.account_id.to_owned()),
+                booking_status: Set(transaction.booking_status),
+                booking_date: Set(transaction.booking_date.parse().unwrap()),
+                amount: Set(transaction.amount.value.parse().unwrap_or_else(|_| 0.0)),
+                remitter: Set(transaction.remitter.unwrap_or_default().holder_name),
+                deptor: Set(transaction.deptor.unwrap_or_default()),
+                creditor: Set(transaction
+                    .creditor
+                    .unwrap_or_default()
+                    .holder_name
+                    .to_owned()),
+                creditor_id: Set(transaction.direct_debit_creditor_id.unwrap_or_default()),
+                creditor_mandate_id: Set(transaction.direct_debit_mandate_id.unwrap_or_default()),
+                remittance_info: Set(transaction.remittance_info),
+                transaction_type: Set(transaction.transaction_type.text),
+                ..Default::default()
+            };
 
-        // println!("Transactions: {:?}", transactions.len());
+            let transaction_res =
+                entities::account_transactions::Entity::insert(transaction_orm.to_owned())
+                    .on_conflict(
+                        OnConflict::column(entities::account_transactions::Column::Reference)
+                            .update_columns([
+                                entities::account_transactions::Column::BookingStatus,
+                                entities::account_transactions::Column::BookingDate,
+                                entities::account_transactions::Column::Amount,
+                                entities::account_transactions::Column::Remitter,
+                                entities::account_transactions::Column::Deptor,
+                                entities::account_transactions::Column::Creditor,
+                                entities::account_transactions::Column::CreditorId,
+                                entities::account_transactions::Column::CreditorMandateId,
+                                entities::account_transactions::Column::RemittanceInfo,
+                                entities::account_transactions::Column::TransactionType,
+                            ])
+                            .to_owned(),
+                    )
+                    .exec(&conn)
+                    .await;
+
+            match transaction_res {
+                Ok(_) => {
+                    println!(
+                        "Inserted transaction with reference: {}",
+                        transaction.reference.to_owned()
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "Failed to insert transaction with reference {}: {}",
+                        transaction.reference.to_owned(),
+                        e
+                    );
+                }
+            }
+        }
     }
-
-    Ok(())
-}
-
-async fn save_transactions_to_file(
-    transactions: &[Transaction],
-    file_path: impl AsRef<Path>,
-) -> Result<(), Box<dyn Error>> {
-    // Serialize transactions to JSON
-    let json = serde_json::to_string(&transactions)?;
-
-    // Write to file asynchronously
-    fs::write(file_path, json).await?;
-
-    Ok(())
-}
-
-async fn save_transactions_to_ndjson(
-    transactions: &[Transaction],
-    file_path: impl AsRef<Path>,
-) -> Result<(), Box<dyn Error>> {
-    let mut ndjson = String::new();
-
-    // Process each transaction as a separate JSON line
-    for transaction in transactions {
-        let json_line = serde_json::to_string(transaction)?;
-        ndjson.push_str(&json_line);
-        ndjson.push('\n');
-    }
-
-    // Write to file asynchronously
-    fs::write(file_path, ndjson).await?;
 
     Ok(())
 }

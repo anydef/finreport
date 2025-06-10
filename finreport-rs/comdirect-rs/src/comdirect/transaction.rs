@@ -51,17 +51,17 @@ pub struct Amount {
     pub unit: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct Remitter {
     #[serde(rename = "holderName")]
     pub holder_name: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct Creditor {
     #[serde(rename = "holderName")]
     pub holder_name: String,
-    iban: String,
+    pub iban: String,
     bic: String,
 }
 

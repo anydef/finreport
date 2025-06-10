@@ -2,6 +2,7 @@
 
 pub use super::account::Entity as Account;
 pub use super::account_balance::Entity as AccountBalance;
+pub use super::account_transactions::Entity as AccountTransactions;
 pub use super::categories::Entity as Categories;
 pub use super::mandate_categories::Entity as MandateCategories;
 pub use super::transaction_categories::Entity as TransactionCategories;

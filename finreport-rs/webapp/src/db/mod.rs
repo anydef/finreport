@@ -115,7 +115,7 @@ impl Persistence {
                 .bind(&transaction.deptor.as_ref().unwrap_or(&empty_string))
                 .bind(&transaction.creditor.as_ref().map(|c| &c.holder_name).unwrap_or(&empty_string))
                 .bind(&transaction.direct_debit_creditor_id)
-                .bind(&transaction.direct_debit_creditor_id)
+                .bind(&transaction.direct_debit_mandate_id)
                 .bind(&transaction.remittance_info)
                 .bind(&transaction.transaction_type.key)
                 .execute(&mut *tx)
