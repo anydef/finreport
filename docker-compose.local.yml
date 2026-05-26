@@ -24,6 +24,7 @@ services:
       finreport-be-postgres:
         condition: service_healthy
     environment:
+      RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
       APP_oauth_url: https://api.comdirect.de/api
       APP_url: https://api.comdirect.de/api
