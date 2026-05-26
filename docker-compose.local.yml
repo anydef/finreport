@@ -1,5 +1,5 @@
 services:
-  postgres:
+  finreport-be-postgres:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
