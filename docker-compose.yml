@@ -43,7 +43,7 @@ services:
       APP_zugangsnummer: ${APP_zugangsnummer}
       APP_pin: ${APP_pin}
     ports:
-      - "8080:8080"
+      - "9040:8080"
     networks:
       finreport-be-net:
       services-lan:
@@ -51,7 +51,7 @@ services:
     volumes:
       - /mnt/user/appdata/finreport-be:/app/data
     labels:
-      - "net.unraid.docker.webui=http://192.168.100.32:8080"
+      - "net.unraid.docker.webui=http://192.168.100.32:9040"
       - "net.unraid.docker.managed=composeman"
       - "net.unraid.docker.shell=bash"
       - "net.unraid.docker.icon=https://raw.githubusercontent.com/docker-library/docs/refs/heads/master/mediawiki/logo.svg"
