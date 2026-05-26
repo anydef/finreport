@@ -115,17 +115,35 @@ impl AccountClient {
 
         match response {
             Ok(res) => {
-                if res.status() == StatusCode::OK {
-                    let transactions: TransactionsResponse = res.json().await?;
-                    Ok(transactions)
+                let status = res.status();
+                if status == StatusCode::OK {
+                    match res.json::<TransactionsResponse>().await {
+                        Ok(transactions) => Ok(transactions),
+                        Err(e) => {
+                            eprintln!(
+                                "get_account_transactions[{} idx={}]: parse failed: {e}",
+                                account_id, index
+                            );
+                            Err(AccountClientError::Unknown)
+                        }
+                    }
                 } else {
+                    let body = res.text().await.unwrap_or_default();
+                    eprintln!(
+                        "get_account_transactions[{} idx={}]: {} → {}",
+                        account_id, index, status, body
+                    );
                     Err(AccountClientError::Unknown)
                 }
             }
-            Err(_) => Err(AccountClientError::Unknown),
+            Err(e) => {
+                eprintln!(
+                    "get_account_transactions[{} idx={}]: request failed: {e}",
+                    account_id, index
+                );
+                Err(AccountClientError::Unknown)
+            }
         }
-
-        // Ok(TransactionsResponse {})
     }
 }
 

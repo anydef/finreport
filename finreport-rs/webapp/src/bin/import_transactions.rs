@@ -30,10 +30,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("Could not load application settings");
 
     let session = load_comdirect_session(client_settings.clone()).await?;
+    println!("[step] Comdirect session ready.");
 
     let accounts = get_accounts(session.clone(), client_settings.clone()).await?;
+    println!("[step] Loaded {} account(s) from Comdirect.", accounts.accounts.len());
 
+    println!("[step] Connecting to database at {}", client_settings.database_url);
     let conn: DbConn = seaql::init_db(&client_settings.database_url).await?;
+    println!("[step] Database connected, migrations applied.");
 
     for account in accounts.accounts {
         let account_orm = account::ActiveModel {

@@ -26,7 +26,7 @@ services:
     environment:
       RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
-      APP_oauth_url: https://api.comdirect.de/api
+      APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
       APP_client_id: ${APP_client_id:-}
@@ -35,6 +35,28 @@ services:
       APP_pin: ${APP_pin:-}
     ports:
       - "8080:8080"
+    volumes:
+      - finreport-data:/app/data
+
+  finreport-be-importer:
+    build:
+      context: .
+    profiles: ["importer"]
+    entrypoint: ["finreport-be-importer"]
+    restart: "no"
+    depends_on:
+      finreport-be-postgres:
+        condition: service_healthy
+    environment:
+      RUST_LOG: info
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
+      APP_oauth_url: https://api.comdirect.de
+      APP_url: https://api.comdirect.de/api
+      APP_save_file_path: /app/data/.session.json
+      APP_client_id: ${APP_client_id:-}
+      APP_client_secret: ${APP_client_secret:-}
+      APP_zugangsnummer: ${APP_zugangsnummer:-}
+      APP_pin: ${APP_pin:-}
     volumes:
       - finreport-data:/app/data
 

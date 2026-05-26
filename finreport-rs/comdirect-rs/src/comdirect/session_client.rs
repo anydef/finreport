@@ -25,6 +25,10 @@ type SessionClientResult<T> = Result<T, SessionClientError>;
 pub struct XOnceAuthenticationInfo {
     #[serde(rename = "id")]
     pub challenge_id: String,
+    /// Absolute path returned by Comdirect (`link.href`) for polling the
+    /// authentication state. Not serialized into the header.
+    #[serde(skip_serializing)]
+    pub poll_href: String,
 }
 
 pub struct SessionClient {
@@ -135,8 +139,10 @@ impl SessionClient {
                         let authentication_info: AuthenticationInfo =
                             serde_json::from_str(header_str).unwrap();
                         println!("Authentication Info: {:?}", authentication_info.clone());
-                        let challenge_id = authentication_info.challenge_id;
-                        Ok(XOnceAuthenticationInfo { challenge_id })
+                        Ok(XOnceAuthenticationInfo {
+                            challenge_id: authentication_info.challenge_id,
+                            poll_href: authentication_info.link.href,
+                        })
                     }
                     None => {
                         println!("Error: No authentication info available");
@@ -168,24 +174,88 @@ impl SessionClient {
             .post(format!("{}/oauth/token", self.oauth_url))
             .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
             .header(ACCEPT, "application/json")
+            .header("x-http-request-info", self.info_header())
             .form(&params)
             .send()
             .await;
 
         match result {
-            Ok(response) => match response.status().is_success() {
-                true => {
-                    let oauth_response: OAuthResponse = response.json().await.unwrap();
-                    Ok(oauth_response)
+            Ok(response) => {
+                let status = response.status();
+                if status.is_success() {
+                    match response.json::<OAuthResponse>().await {
+                        Ok(oauth_response) => Ok(oauth_response),
+                        Err(e) => {
+                            eprintln!("acquire_password_token: failed to parse OAuth response: {e}");
+                            Err(SessionClientError::Unknown)
+                        }
+                    }
+                } else {
+                    let body = response.text().await.unwrap_or_default();
+                    eprintln!(
+                        "acquire_password_token: {} POST {}/oauth/token failed: {}",
+                        status, self.oauth_url, body
+                    );
+                    Err(SessionClientError::Unknown)
                 }
-                false => Err(SessionClientError::Unknown),
-            },
-            Err(_) => Err(SessionClientError::Unknown),
+            }
+            Err(e) => {
+                eprintln!("acquire_password_token: request failed: {e}");
+                Err(SessionClientError::Unknown)
+            }
         }
     }
 }
 
 impl SessionClient {
+    /// Polls the authentication state at the `link.href` returned from
+    /// `validate_session`. Returns the current status (`PENDING`, `AUTHENTICATED`,
+    /// etc. — values come straight from Comdirect).
+    pub async fn get_authentication_status(
+        &mut self,
+        session: &Session,
+        x_once_oauth_info: &XOnceAuthenticationInfo,
+    ) -> SessionClientResult<AuthenticationStatusResponse> {
+        // poll_href is an absolute path like `/api/session/v1/authentications/<id>`.
+        // self.url is like `https://api.comdirect.de/api`, so trim the trailing
+        // `/api` before concatenating to avoid duplication.
+        let origin = self.url.trim_end_matches("/api");
+        let url = format!("{}{}", origin, x_once_oauth_info.poll_href);
+
+        let result = self
+            .client
+            .get(&url)
+            .header(ACCEPT, "application/json")
+            .header(AUTHORIZATION, format!("Bearer {}", session.access_token))
+            .header("x-http-request-info", self.info_header())
+            .header(
+                "x-once-authentication-info",
+                serde_json::to_string(x_once_oauth_info)
+                    .expect("Failed to serialize challenge"),
+            )
+            .send()
+            .await;
+
+        match result {
+            Ok(r) => {
+                let http_status = r.status();
+                if !http_status.is_success() {
+                    let body = r.text().await.unwrap_or_default();
+                    eprintln!("get_authentication_status: {} → {}", http_status, body);
+                    return Err(SessionClientError::Unknown);
+                }
+                r.json::<AuthenticationStatusResponse>().await.map_err(|e| {
+                    eprintln!("get_authentication_status: failed to parse: {e}");
+                    SessionClientError::Unknown
+                })
+            }
+            Err(e) => {
+                eprintln!("get_authentication_status: request failed: {e}");
+                Err(SessionClientError::Unknown)
+            }
+        }
+    }
+
     pub async fn patch_session(
         &mut self,
         session: &Session,
@@ -231,8 +301,9 @@ impl SessionClient {
                         Err(SessionClientError::Unknown)
                     }
                 }
-                _ => {
-                    println!("Error: Unexpected status code {}", r.status());
+                status => {
+                    let body = r.text().await.unwrap_or_default();
+                    eprintln!("patch_session: {} → {}", status, body);
                     Err(SessionClientError::Unknown)
                 }
             },
@@ -417,6 +488,16 @@ pub struct ClientRequestId {
     request_id: String,
 }
 
+#[derive(Deserialize, Debug)]
+pub struct AuthenticationStatusResponse {
+    #[serde(rename = "authenticationId")]
+    pub authentication_id: String,
+    /// Comdirect values: `PENDING`, `AUTHENTICATED`. Other values
+    /// (e.g. `REJECTED`, `EXPIRED`) may exist — treat anything that isn't
+    /// `AUTHENTICATED` as not-yet-approved.
+    pub status: String,
+}
+
 #[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct AuthenticationInfo {
     #[serde(rename = "id")]
@@ -429,6 +510,7 @@ pub struct AuthenticationInfo {
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
 struct AuthenticationInfoLink {
+    href: String,
     rel: String,
     method: String,
     #[serde(rename = "type")]

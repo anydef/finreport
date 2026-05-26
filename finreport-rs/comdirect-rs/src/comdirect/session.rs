@@ -5,8 +5,6 @@ use crate::comdirect::session_client::{
 use reqwest::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
-use tokio::io;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::time::sleep;
 use utils::settings::Settings;
 
@@ -41,7 +39,6 @@ enum State {
     SessionValidationReady(Session),
     SessionPatchReady(Session),
     SessionPatchWaitingForTan(Session, XOnceAuthenticationInfo),
-    SessionPatchSession(Session, XOnceAuthenticationInfo),
     SessionReady(Session),
     SessionRefresh(Session),
     Error(SessionClientError),
@@ -139,42 +136,59 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
             }
 
             State::SessionPatchWaitingForTan(session, auth_info) => {
-                // wait a minute for the user to enter the TAN
-                println!("Waiting for TAN...");
-                println!("Press Enter to continue...");
+                // Comdirect's push-TAN flow:
+                //   1. Poll GET link.href until the response indicates the user
+                //      has approved on their phone (status field flips).
+                //   2. Then call patch_session exactly once to activate the session.
+                // The PATCH consumes the challenge regardless of state, so we
+                // must NOT patch until polling confirms approval.
+                let interval = Duration::from_secs(3);
+                let max_attempts: u32 = 200; // 3s × 200 = 10 min
+                println!(
+                    "Approve the push-TAN notification on your phone (polling every {}s, max {} min)...",
+                    interval.as_secs(),
+                    (interval.as_secs() * max_attempts as u64) / 60
+                );
 
-                let mut stdin = BufReader::new(io::stdin());
-                let mut line = String::new();
-                tokio::select! {
-                            _ = stdin.read_line(&mut line) => {
-                                println!("Enter pressed. Continuing execution.");
-                            }
-                            _ = sleep(Duration::from_secs(599)) => {
-                                println!("5 Minutes timeout reached. Continuing execution.");
-                            }
+                let mut approved = false;
+                let mut last_status: Option<String> = None;
+                for _ in 1..=max_attempts {
+                    sleep(interval).await;
+                    if let Ok(resp) = comdirect_client
+                        .get_authentication_status(&session, &auth_info)
+                        .await
+                    {
+                        if last_status.as_deref() != Some(resp.status.as_str()) {
+                            println!("Authentication status: {}", resp.status);
+                            last_status = Some(resp.status.clone());
+                        }
+                        if resp.status == "AUTHENTICATED" {
+                            approved = true;
+                            break;
+                        }
+                    }
                 }
 
-                // Wait for the user to type a line and press Enter
-                state = State::SessionPatchSession(session, auth_info);
-            }
+                if !approved {
+                    println!("TAN not approved within timeout.");
+                    state = State::Error(SessionClientError::Unknown);
+                    continue;
+                }
 
-            State::SessionPatchSession(session, auth_info) => {
-                //validate session PATCH
-                let patched_session = comdirect_client.patch_session(&session, &auth_info).await?;
-                match patched_session {
-                    SessionStatus {
-                        identifier: _identifier,
+                state = match comdirect_client.patch_session(&session, &auth_info).await {
+                    Ok(SessionStatus {
                         session_tan_active: true,
                         activated_2fa: true,
-                    } => {
-                        println!("Session is valid.");
-                        state = State::SessionPatchReady(session);
+                        ..
+                    }) => {
+                        println!("TAN activated.");
+                        State::SessionPatchReady(session)
                     }
                     _ => {
-                        println!("Session validation failed.");
-                        state = State::Error(SessionClientError::Unknown);
+                        println!("patch_session failed after TAN approval.");
+                        State::Error(SessionClientError::Unknown)
                     }
-                }
+                };
             }
             State::SessionPatchReady(session) => {
                 //activate cd secondary flow

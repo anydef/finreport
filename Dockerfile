@@ -15,15 +15,17 @@ COPY finreport-rs/ ./
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     --mount=type=cache,target=/build/target \
-    cargo build --release --package webapp --bin webapp && \
-    cp /build/target/release/webapp /usr/local/bin/finreport-be
+    cargo build --release --package webapp --bin webapp --bin import-transactions && \
+    cp /build/target/release/webapp            /usr/local/bin/finreport-be && \
+    cp /build/target/release/import-transactions /usr/local/bin/finreport-be-importer
 
 # ── Runtime stage ─────────────────────────────────────────────────────
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /usr/local/bin/finreport-be /usr/local/bin/finreport-be
+COPY --from=builder /usr/local/bin/finreport-be          /usr/local/bin/finreport-be
+COPY --from=builder /usr/local/bin/finreport-be-importer /usr/local/bin/finreport-be-importer
 
 # webapp reads `../assets/*` relative to its cwd — mirror the source layout
 # so the relative paths resolve inside the container.

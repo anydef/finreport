@@ -9,10 +9,12 @@ on:
 jobs:
   build-deploy:
     name: Build and Deploy
-    runs-on: ubuntu-latest
+    runs-on: rust-web
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - run: cargo build --release
+      - run: sccache --show-stats
 
       - name: Install just
         run: |

@@ -5,7 +5,9 @@ pub async fn init_db(database_url: &str) -> Result<DatabaseConnection, std::io::
     let conn = Database::connect(database_url)
         .await
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-    Migrator::up(&conn, None).await;
+    Migrator::up(&conn, None)
+        .await
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
 
     Ok(conn)
 }

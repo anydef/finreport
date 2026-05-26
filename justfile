@@ -32,3 +32,23 @@ _bootstrap:
 # Run Rust unit + integration tests across the workspace
 test:
     cargo test --manifest-path finreport-rs/Cargo.toml
+
+# Start local Postgres (via compose) in the background.
+db-up:
+    op run --env-file .env.tpl -- \
+        docker compose -f docker-compose.local.yml up finreport-be-postgres -d --wait
+
+# Stop the local Postgres started by `db-up`.
+db-down:
+    docker compose -f docker-compose.local.yml down
+
+# Run the importer locally against the Postgres started by `db-up`.
+# Comdirect creds are pulled from 1Password via .env.tpl.
+import-local:
+    APP_database_url='postgresql://finreport:finreport@127.0.0.1:5432/finreport' \
+        APP_oauth_url='https://api.comdirect.de' \
+        APP_url='https://api.comdirect.de/api' \
+        APP_save_file_path='.session.json' \
+        RUST_LOG=info \
+        op run --env-file .env.tpl -- \
+        cargo run --manifest-path finreport-rs/Cargo.toml --bin import-transactions
