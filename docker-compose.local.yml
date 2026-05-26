@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: finreport
+      POSTGRES_USER: finreport
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finreport}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finreport"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  finreport-be:
+    build:
+      context: .
+      dockerfile: Dockerfile.local
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@postgres:5432/finreport
+      APP_oauth_url: https://api.comdirect.de/api
+      APP_url: https://api.comdirect.de/api
+      APP_save_file_path: /app/data/.session.json
+      APP_client_id: ${APP_client_id:-}
+      APP_client_secret: ${APP_client_secret:-}
+      APP_zugangsnummer: ${APP_zugangsnummer:-}
+      APP_pin: ${APP_pin:-}
+    ports:
+      - "8080:8080"
+    volumes:
+      - finreport-data:/app/data
+
+volumes:
+  pgdata:
+  finreport-data:

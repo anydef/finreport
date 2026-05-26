@@ -1,0 +1,63 @@
+version: '3.8'
+
+name: finreport-be
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: finreport-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: finreport
+      POSTGRES_USER: finreport
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - /mnt/user/appdata/finreport-be/pgdata:/var/lib/postgresql/data
+    networks:
+      finreport-be-net:
+      services-lan:
+        ipv4_address: 192.168.100.33
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finreport"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
+  finreport-be:
+    image: ${DOCKER_REGISTRY}/finreport-be:latest
+    pull_policy: always
+    container_name: finreport-be
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@postgres:5432/finreport
+      APP_oauth_url: https://api.comdirect.de/api
+      APP_url: https://api.comdirect.de/api
+      APP_save_file_path: /app/data/.session.json
+      APP_client_id: ${APP_client_id}
+      APP_client_secret: ${APP_client_secret}
+      APP_zugangsnummer: ${APP_zugangsnummer}
+      APP_pin: ${APP_pin}
+    ports:
+      - "8080:8080"
+    networks:
+      finreport-be-net:
+      services-lan:
+        ipv4_address: 192.168.100.32
+    volumes:
+      - /mnt/user/appdata/finreport-be:/app/data
+    labels:
+      - "net.unraid.docker.webui=http://192.168.100.32:8080"
+      - "net.unraid.docker.managed=composeman"
+      - "net.unraid.docker.shell=bash"
+      - "net.unraid.docker.icon=https://raw.githubusercontent.com/docker-library/docs/refs/heads/master/mediawiki/logo.svg"
+
+networks:
+  services-lan:
+    external: true
+  finreport-be-net:
+    driver: bridge

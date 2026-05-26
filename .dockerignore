@@ -1,0 +1,12 @@
+.git/
+.idea/
+.build/
+finreport-fe/
+docs/
+target/
+finreport-rs/target/
+**/target/
+.env
+*.iml
+finreport-rs/.session.json
+finreport-rs/.env

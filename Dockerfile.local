@@ -1,0 +1,47 @@
+# ── Build stage (self-contained, no external base image needed) ────────
+FROM rust:1.93-slim-bookworm AS builder
+
+RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Cache dependency compilation by copying only manifests first and building
+# dummy entry points, then copying real sources.
+COPY finreport-rs/Cargo.toml finreport-rs/Cargo.lock ./
+COPY finreport-rs/webapp/Cargo.toml       webapp/Cargo.toml
+COPY finreport-rs/comdirect-rs/Cargo.toml comdirect-rs/Cargo.toml
+COPY finreport-rs/categorizer/Cargo.toml  categorizer/Cargo.toml
+COPY finreport-rs/entity/Cargo.toml       entity/Cargo.toml
+COPY finreport-rs/migration/Cargo.toml    migration/Cargo.toml
+COPY finreport-rs/utils/Cargo.toml        utils/Cargo.toml
+
+RUN set -eux; \
+    for crate in webapp comdirect-rs categorizer entity migration utils; do \
+        mkdir -p "$crate/src"; \
+        echo 'fn main() {}' > "$crate/src/main.rs"; \
+        touch "$crate/src/lib.rs"; \
+    done; \
+    mkdir -p webapp/src/bin; \
+    for bin in import_transactions init_session graphql_schema_exporter categorize db_importer; do \
+        echo 'fn main() {}' > "webapp/src/bin/${bin}.rs"; \
+    done; \
+    cargo build --release --package webapp --bin webapp; \
+    find . -path ./target -prune -o -name '*.rs' -print -exec rm {} +
+
+COPY finreport-rs/ ./
+RUN touch webapp/src/main.rs && cargo build --release --package webapp --bin webapp
+
+# ── Runtime stage ─────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y ca-certificates libssl3 && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /build/target/release/webapp /usr/local/bin/finreport-be
+
+WORKDIR /app/webapp
+COPY assets/  /app/assets/
+COPY prompts/ /app/prompts/
+
+EXPOSE 8080
+
+ENTRYPOINT ["finreport-be"]

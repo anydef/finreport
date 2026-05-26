@@ -1,0 +1,59 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --to /usr/local/bin
+
+      - name: Load secrets
+        uses: 1password/load-secrets-action@v3
+        with:
+          export-env: true
+        env:
+          OP_CONNECT_HOST: ${{ vars.OP_CONNECT_HOST }}
+          OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
+          OP_ENV_FILE: .env.tpl
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run tests
+        run: just test
+
+      - name: Bootstrap build-tools
+        run: just _bootstrap
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Setup OPNsense provider
+        uses: anydef/build-tools/.gitea/actions/setup-opnsense-provider@main
+        with:
+          build-tools-dir: .build/build-tools
+
+      - name: Build and push Docker images
+        env:
+          _OP_LOADED: "1"
+        run: just build
+
+      - name: Deploy to Portainer
+        env:
+          _OP_LOADED: "1"
+        run: echo yes | just deploy

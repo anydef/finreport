@@ -5,3 +5,23 @@
 /finreport-rs/target/
 /finreport-rs/.session.json
 **/target/
+/.idea/go.imports.xml
+/.idea/modules.xml
+/.idea/prettier.xml
+/.idea/inspectionProfiles/Project_Default.xml
+/.idea/vcs.xml
+/.idea/modules.xml
+/.idea/prettier.xml
+/.idea/inspectionProfiles/Project_Default.xml
+/.idea/vcs.xml
+
+# homelab build tooling and secrets
+.env
+/.build/
+/dist/
+
+# terraform
+/terraform/.terraform/
+/terraform/.terraform.lock.hcl
+/terraform/terraform.tfstate
+/terraform/terraform.tfstate.backup
