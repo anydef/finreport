@@ -19,7 +19,6 @@ services:
   finreport-be:
     build:
       context: .
-      dockerfile: Dockerfile.local
     restart: unless-stopped
     depends_on:
       postgres:

@@ -7,7 +7,6 @@ set allow-duplicate-recipes
 
 build_tools_dir   := ".build/build-tools"
 docker_image_name := "finreport-be"
-base_image_name   := "finreport-be-base"
 
 import? '.build/build-tools/common.just'
 
