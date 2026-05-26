@@ -2,7 +2,8 @@
 # Rebuild only when finreport-rs Cargo.toml / Cargo.lock or workspace member
 # manifests change.
 #
-#   docker build -f Dockerfile.base -t finreport-be-base .
+# Built automatically by build-and-push.sh because the filename matches
+# Dockerfile.${BASE_IMAGE_NAME} (see justfile: base_image_name).
 #
 FROM rust:1.93-slim-bookworm
 
