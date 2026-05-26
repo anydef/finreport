@@ -21,10 +21,10 @@ services:
       context: .
     restart: unless-stopped
     depends_on:
-      postgres:
+      finreport-be-postgres:
         condition: service_healthy
     environment:
-      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@postgres:5432/finreport
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
       APP_oauth_url: https://api.comdirect.de/api
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
