@@ -1,18 +1,18 @@
-use dotenv::dotenv;
 use comdirect_rs::comdirect::session::load_comdirect_session;
-use utils::settings::Settings;
-use std::env;
+use dotenv::dotenv;
 use std::error::Error;
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
+use utils::settings::Settings;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
-    unsafe {
-        env::set_var("RUST_LOG", "reqwest=trace");
-    }
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .init();
 
     let settings = config::Config::builder()
         .add_source(
@@ -26,9 +26,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .expect("Could not load application settings");
     loop {
         let session_result = load_comdirect_session(client_settings.clone()).await;
-        println!("Session status: {:?}", session_result);
+        info!(?session_result, "session result");
         sleep(Duration::from_secs(300)).await;
     }
-
-
 }
