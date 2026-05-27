@@ -4,7 +4,8 @@ use crate::comdirect::session_client::Session;
 use crate::comdirect::transaction::TransactionsResponse;
 use crate::comdirect::utils::request_id;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
+use reqwest_middleware::ClientWithMiddleware;
 use serde::Deserialize;
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
@@ -23,6 +24,15 @@ impl Display for AccountClientError {
 
 impl std::error::Error for AccountClientError {}
 
+impl From<reqwest_middleware::Error> for AccountClientError {
+    fn from(value: reqwest_middleware::Error) -> Self {
+        match value {
+            reqwest_middleware::Error::Reqwest(e) => e.into(),
+            reqwest_middleware::Error::Middleware(_) => AccountClientError::Unknown,
+        }
+    }
+}
+
 impl From<reqwest::Error> for AccountClientError {
     fn from(value: reqwest::Error) -> Self {
         match value.status() {
@@ -38,7 +48,7 @@ pub type AccountClientResult<T> = Result<T, AccountClientError>;
 
 pub struct AccountClient {
     session: Session,
-    client: Client,
+    client: ClientWithMiddleware,
     url: String,
     session_id: String,
 }
@@ -51,7 +61,7 @@ impl AccountClient {
 }
 
 impl AccountClient {
-    pub fn new(session: Session, client: Client, url: String) -> Self {
+    pub fn new(session: Session, client: ClientWithMiddleware, url: String) -> Self {
         AccountClient {
             session,
             client,
@@ -93,11 +103,8 @@ impl AccountClient {
         index: u32,
     ) -> AccountClientResult<TransactionsResponse> {
         let url = format!(
-            "{}/banking/v1/accounts/{}/transactions?transactionState={}&paging-first={}",
-            self.url,
-            account_id,
-            "BOOKED".to_string(),
-            index
+            "{}/banking/v1/accounts/{}/transactions?transactionState=BOOKED&paging-first={}",
+            self.url, account_id, index
         );
 
         let response = self
@@ -111,38 +118,27 @@ impl AccountClient {
             )
             .header("x-http-request-info", self.info_header())
             .send()
-            .await;
+            .await?;
 
-        match response {
-            Ok(res) => {
-                let status = res.status();
-                if status == StatusCode::OK {
-                    match res.json::<TransactionsResponse>().await {
-                        Ok(transactions) => Ok(transactions),
-                        Err(e) => {
-                            eprintln!(
-                                "get_account_transactions[{} idx={}]: parse failed: {e}",
-                                account_id, index
-                            );
-                            Err(AccountClientError::Unknown)
-                        }
-                    }
-                } else {
-                    let body = res.text().await.unwrap_or_default();
+        let status = response.status();
+        if status == StatusCode::OK {
+            response
+                .json::<TransactionsResponse>()
+                .await
+                .map_err(|e| {
                     eprintln!(
-                        "get_account_transactions[{} idx={}]: {} → {}",
-                        account_id, index, status, body
+                        "get_account_transactions[{} idx={}]: parse failed: {e}",
+                        account_id, index
                     );
-                    Err(AccountClientError::Unknown)
-                }
-            }
-            Err(e) => {
-                eprintln!(
-                    "get_account_transactions[{} idx={}]: request failed: {e}",
-                    account_id, index
-                );
-                Err(AccountClientError::Unknown)
-            }
+                    AccountClientError::Unknown
+                })
+        } else {
+            let body = response.text().await.unwrap_or_default();
+            eprintln!(
+                "get_account_transactions[{} idx={}]: {} → {}",
+                account_id, index, status, body
+            );
+            Err(AccountClientError::Unknown)
         }
     }
 }

@@ -1,5 +1,6 @@
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
-use reqwest::{Client, StatusCode};
+use reqwest::StatusCode;
+use reqwest_middleware::ClientWithMiddleware;
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
@@ -32,7 +33,7 @@ pub struct XOnceAuthenticationInfo {
 }
 
 pub struct SessionClient {
-    client: Client,
+    client: ClientWithMiddleware,
 
     url: String,
     oauth_url: String,
@@ -51,7 +52,7 @@ impl SessionClient {
         client_secret: String,
         username: String,
         password: String,
-        client: Client,
+        client: ClientWithMiddleware,
     ) -> Self {
         Self {
             client,

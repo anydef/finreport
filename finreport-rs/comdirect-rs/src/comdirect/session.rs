@@ -2,6 +2,7 @@ use crate::comdirect::loader;
 use crate::comdirect::session_client::{
     Session, SessionClient, SessionClientError, SessionStatus, XOnceAuthenticationInfo,
 };
+use crate::comdirect::http::build_client;
 use reqwest::Error;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
@@ -54,9 +55,7 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
         ..
     } = client_settings;
 
-    let client = reqwest::Client::builder()
-        .connection_verbose(false)
-        .build()?;
+    let client = build_client();
 
     let mut comdirect_client = SessionClient::new(
         client_settings.url,
@@ -69,6 +68,9 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
     );
 
     let session_loader = loader::SessionLoader::new(client_settings.save_file_path.to_string());
+    // The stored session can be 401-expired across runs. Track whether we've
+    // already wiped and restarted once so a chronic failure doesn't loop forever.
+    let mut already_recovered = false;
     let mut state = State::Start;
     let session_result = loop {
         match state {
@@ -122,6 +124,14 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                             state = State::NoSession;
                         }
                     },
+                    Err(SessionClientError::Unauthorized) if !already_recovered => {
+                        println!(
+                            "Stored session rejected (401). Clearing it and restarting from scratch."
+                        );
+                        session_loader.clear_session().await;
+                        already_recovered = true;
+                        state = State::NoSession;
+                    }
                     Err(e) => {
                         println!("Error getting session status: {:?}", e);
                         state = State::Error(SessionClientError::Unknown);
@@ -201,6 +211,15 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                     Ok(oauth) => {
                         println!("Session refreshed successfully.");
                         state = State::SessionReady(session.refreshed_session(oauth));
+                    }
+                    Err(e) if !already_recovered => {
+                        println!(
+                            "Refresh token rejected ({:?}). Clearing session and restarting.",
+                            e
+                        );
+                        session_loader.clear_session().await;
+                        already_recovered = true;
+                        state = State::NoSession;
                     }
                     Err(e) => {
                         println!("Error refreshing session: {:?}", e);

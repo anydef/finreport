@@ -1,5 +1,6 @@
 use crate::comdirect::account_client::{AccountClient, AccountClientResult};
 use crate::comdirect::balance_model::{Account, AccountsBalancesResponse};
+use crate::comdirect::http::build_client;
 use crate::comdirect::session_client::Session;
 use crate::comdirect::transaction::Transaction;
 use utils::settings::Settings;
@@ -10,7 +11,7 @@ pub async fn get_accounts(
 ) -> AccountClientResult<AccountsBalancesResponse> {
     let Settings { url, .. } = client_settings;
 
-    let account_client = AccountClient::new(session, reqwest::Client::new(), url);
+    let account_client = AccountClient::new(session, build_client(), url);
 
     let balances_response = account_client.accounts().await?;
     Ok(balances_response)
@@ -23,7 +24,7 @@ pub async fn get_account_transactions(
 ) -> AccountClientResult<Vec<Transaction>> {
     let Settings { url, .. } = client_settings;
 
-    let account_client = AccountClient::new(session, reqwest::Client::new(), url);
+    let account_client = AccountClient::new(session, build_client(), url);
     let mut all_transactions: Vec<Transaction> = vec![];
 
     let account_id = &account.account_id;
