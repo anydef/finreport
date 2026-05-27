@@ -8,6 +8,7 @@ use reqwest::StatusCode;
 use reqwest_middleware::ClientWithMiddleware;
 use serde::Deserialize;
 use std::fmt::{Display, Formatter};
+use tracing::error;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -91,7 +92,7 @@ impl AccountClient {
             }
             reqwest::StatusCode::UNAUTHORIZED => Err(AccountClientError::Unauthorized),
             _ => {
-                println!("Error: {:?}", response.status());
+                error!(status = ?response.status(), "accounts: unexpected status");
                 Err(AccountClientError::Unknown)
             }
         }
@@ -126,17 +127,17 @@ impl AccountClient {
                 .json::<TransactionsResponse>()
                 .await
                 .map_err(|e| {
-                    eprintln!(
-                        "get_account_transactions[{} idx={}]: parse failed: {e}",
-                        account_id, index
+                    error!(
+                        %account_id, idx = index, ?e,
+                        "get_account_transactions: parse failed"
                     );
                     AccountClientError::Unknown
                 })
         } else {
             let body = response.text().await.unwrap_or_default();
-            eprintln!(
-                "get_account_transactions[{} idx={}]: {} → {}",
-                account_id, index, status, body
+            error!(
+                %account_id, idx = index, %status, %body,
+                "get_account_transactions: non-OK response"
             );
             Err(AccountClientError::Unknown)
         }

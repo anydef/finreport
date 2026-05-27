@@ -8,11 +8,18 @@ TF_VAR_opnsense_api_key="op://HomeLab/OPNSense Admin/key"
 TF_VAR_opnsense_api_secret="op://HomeLab/OPNSense Admin/secret"
 TF_VAR_opnsense_url="op://HomeLab/OPNSense Admin/hostname"
 
-# Comdirect API credentials (consumed by webapp via APP_* env prefix)
+# Comdirect API credentials.
+# `APP_*` is consumed by `just import-local` (cargo run from the host).
+# `TF_VAR_app_*` is consumed by terraform and injected into the Portainer stack
+# so the deployed containers see them as `APP_*` at runtime.
 APP_client_id="op://HomeLab/finreport/comdirect/client_id"
 APP_client_secret="op://HomeLab/finreport/comdirect/client_secret"
 APP_zugangsnummer="op://HomeLab/finreport/comdirect/zugangsnummer"
 APP_pin="op://HomeLab/finreport/comdirect/pin"
+TF_VAR_app_client_id="op://HomeLab/finreport/comdirect/client_id"
+TF_VAR_app_client_secret="op://HomeLab/finreport/comdirect/client_secret"
+TF_VAR_app_zugangsnummer="op://HomeLab/finreport/comdirect/zugangsnummer"
+TF_VAR_app_pin="op://HomeLab/finreport/comdirect/pin"
 
 # Postgres password — pulled from 1Password and passed to Terraform, which
 # then injects it into the Portainer stack via extra_env.

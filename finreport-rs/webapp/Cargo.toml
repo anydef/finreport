@@ -11,8 +11,10 @@ entity = { path = "../entity" }
 
 config = "0.15.11"
 dotenv = "0.15.0"
-env_logger = "0.11.8"
 rand = "0.9.1"
+secrecy = { version = "0.10", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 reqwest = {version =  "0.12.15" , features = ["native-tls","stream", "json"]}
 rig-core = "0.12.0"
 serde = { version = "1.0.219", features = ["derive"] }

@@ -8,6 +8,7 @@ use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use dotenv::dotenv;
 use sea_orm::{Database, DatabaseConnection};
+use secrecy::ExposeSecret;
 use std::sync::Arc;
 use utils::settings::Settings;
 use webapp::graphql::{create_schema, AppSchema};
@@ -33,7 +34,7 @@ async fn data() -> impl Responder {
 
 #[get("/test-chart")]
 async fn test_chart() -> impl Responder {
-    println!("test-chart.json");
+    tracing::debug!("serving test-chart.json");
     match tokio::fs::read_to_string("../assets/test-chart.json").await {
         Ok(contents) => HttpResponse::Ok()
             .insert_header(("Access-Control-Allow-Origin", "*"))
@@ -61,7 +62,12 @@ struct AppState {
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     dotenv().ok();
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .init();
 
     let config = config::Config::builder()
         .add_source(
@@ -78,7 +84,7 @@ async fn main() -> std::io::Result<()> {
             .expect("Could not load application settings"),
     );
 
-    let conn = seaql::init_db(&app_settings.database_url).await;
+    let conn = seaql::init_db(app_settings.database_url.expose_secret()).await;
     // let app_settings_clone = Arc::clone(&app_settings);
 
     // // refresh session every minute

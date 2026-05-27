@@ -71,3 +71,30 @@ variable "postgres_password" {
   sensitive   = true
   # Set via TF_VAR_postgres_password, sourced from op://HomeLab/finreport/psql/password in .env.tpl
 }
+
+# Comdirect API credentials — consumed by the webapp/importer at runtime.
+# Sourced from 1Password via TF_VAR_app_* env vars in .env.tpl.
+
+variable "app_client_id" {
+  description = "Comdirect API client_id"
+  type        = string
+  sensitive   = true
+}
+
+variable "app_client_secret" {
+  description = "Comdirect API client_secret"
+  type        = string
+  sensitive   = true
+}
+
+variable "app_zugangsnummer" {
+  description = "Comdirect online-banking access number"
+  type        = string
+  sensitive   = true
+}
+
+variable "app_pin" {
+  description = "Comdirect online-banking PIN"
+  type        = string
+  sensitive   = true
+}

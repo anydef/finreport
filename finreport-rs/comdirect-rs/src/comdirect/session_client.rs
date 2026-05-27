@@ -1,6 +1,7 @@
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::StatusCode;
 use reqwest_middleware::ClientWithMiddleware;
+use tracing::{debug, error, info, warn};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
@@ -87,18 +88,18 @@ impl SessionClient {
                     let sessions: Vec<SessionStatus> = r.json().await.unwrap_or_else(|_| vec![]);
                     match sessions.first() {
                         Some(session) => {
-                            println!("Session status: {:?}", session);
+                            debug!(?session, "session status");
                             Ok(session.clone())
                         }
                         None => {
-                            println!("Error: No Session status available");
+                            error!("no session status available");
                             Err(SessionClientError::Unknown)
                         }
                     }
                 }
                 StatusCode::UNAUTHORIZED => Err(SessionClientError::Unauthorized),
                 _ => {
-                    println!("Error: Could not get session status: {}", r.status());
+                    error!(status = %r.status(), "could not get session status");
                     Err(SessionClientError::Unknown)
                 }
             }
@@ -139,19 +140,19 @@ impl SessionClient {
                         let header_str = header.to_str().unwrap_or_default();
                         let authentication_info: AuthenticationInfo =
                             serde_json::from_str(header_str).unwrap();
-                        println!("Authentication Info: {:?}", authentication_info.clone());
+                        info!(challenge_id = %authentication_info.challenge_id, typ = ?authentication_info, "authentication info received");
                         Ok(XOnceAuthenticationInfo {
                             challenge_id: authentication_info.challenge_id,
                             poll_href: authentication_info.link.href,
                         })
                     }
                     None => {
-                        println!("Error: No authentication info available");
+                        error!("no authentication info available");
                         Err(SessionClientError::Unknown)
                     }
                 },
                 _ => {
-                    println!("Error: Unexpected status code {}", r.status());
+                    error!(status = %r.status(), "validate_session: unexpected status code");
                     Err(SessionClientError::Unknown)
                 }
             },
@@ -187,21 +188,23 @@ impl SessionClient {
                     match response.json::<OAuthResponse>().await {
                         Ok(oauth_response) => Ok(oauth_response),
                         Err(e) => {
-                            eprintln!("acquire_password_token: failed to parse OAuth response: {e}");
+                            error!(?e, "acquire_password_token: failed to parse OAuth response");
                             Err(SessionClientError::Unknown)
                         }
                     }
                 } else {
                     let body = response.text().await.unwrap_or_default();
-                    eprintln!(
-                        "acquire_password_token: {} POST {}/oauth/token failed: {}",
-                        status, self.oauth_url, body
+                    error!(
+                        %status,
+                        oauth_url = %self.oauth_url,
+                        %body,
+                        "acquire_password_token failed"
                     );
                     Err(SessionClientError::Unknown)
                 }
             }
             Err(e) => {
-                eprintln!("acquire_password_token: request failed: {e}");
+                error!(?e, "acquire_password_token: request failed");
                 Err(SessionClientError::Unknown)
             }
         }
@@ -242,16 +245,16 @@ impl SessionClient {
                 let http_status = r.status();
                 if !http_status.is_success() {
                     let body = r.text().await.unwrap_or_default();
-                    eprintln!("get_authentication_status: {} → {}", http_status, body);
+                    error!(status = %http_status, %body, "get_authentication_status failed");
                     return Err(SessionClientError::Unknown);
                 }
                 r.json::<AuthenticationStatusResponse>().await.map_err(|e| {
-                    eprintln!("get_authentication_status: failed to parse: {e}");
+                    error!(?e, "get_authentication_status: failed to parse");
                     SessionClientError::Unknown
                 })
             }
             Err(e) => {
-                eprintln!("get_authentication_status: request failed: {e}");
+                error!(?e, "get_authentication_status: request failed");
                 Err(SessionClientError::Unknown)
             }
         }
@@ -292,24 +295,24 @@ impl SessionClient {
         match patched_session {
             Ok(r) => match r.status() {
                 StatusCode::OK => {
-                    println!("Session activated successfully: {:?}", r.status());
+                    info!(status = %r.status(), "session activated successfully");
 
                     let session_status: reqwest::Result<SessionStatus> = r.json().await;
                     if let Ok(session_status) = session_status {
                         Ok(session_status)
                     } else {
-                        println!("Error: No session status available");
+                        error!("no session status available");
                         Err(SessionClientError::Unknown)
                     }
                 }
                 status => {
                     let body = r.text().await.unwrap_or_default();
-                    eprintln!("patch_session: {} → {}", status, body);
+                    error!(%status, %body, "patch_session failed");
                     Err(SessionClientError::Unknown)
                 }
             },
-            Err(_) => {
-                println!("Error: Could not send request to validate session");
+            Err(e) => {
+                error!(?e, "patch_session: request failed");
                 Err(SessionClientError::Unknown)
             }
         }
@@ -340,20 +343,20 @@ impl SessionClient {
                 StatusCode::OK => {
                     let oauth_response: reqwest::Result<OAuthResponse> = r.json().await;
                     if let Ok(oauth_response) = oauth_response {
-                        println!("Access Token: {}", oauth_response.access_token);
+                        info!("secondary cd_secondary flow succeeded");
                         Ok(Session::from_oauth(oauth_response))
                     } else {
-                        println!("Error: Could not parse JSON response");
+                        error!("activate_secondary_flow: could not parse JSON response");
                         Err(SessionClientError::Unknown)
                     }
                 }
                 _ => {
-                    println!("Error: Unexpected status code {}", r.status());
+                    error!(status = %r.status(), "activate_secondary_flow: unexpected status");
                     Err(SessionClientError::Unknown)
                 }
             },
-            Err(_) => {
-                println!("Error: Could not send request to validate session");
+            Err(e) => {
+                error!(?e, "activate_secondary_flow: request failed");
                 Err(SessionClientError::Unknown)
             }
         }
@@ -387,17 +390,17 @@ impl SessionClient {
                     if let Ok(oauth_response) = oauth_response {
                         Ok(oauth_response)
                     } else {
-                        println!("Error: Could not parse JSON response");
+                        error!("refresh_token_flow: could not parse JSON response");
                         Err(SessionClientError::Unknown)
                     }
                 }
                 _ => {
-                    println!("Error: Unexpected status code {}", r.status());
+                    warn!(status = %r.status(), "refresh_token_flow: unexpected status");
                     Err(SessionClientError::Unknown)
                 }
             },
-            Err(_) => {
-                println!("Error: Could not send request to validate session");
+            Err(e) => {
+                error!(?e, "refresh_token_flow: request failed");
                 Err(SessionClientError::Unknown)
             }
         }

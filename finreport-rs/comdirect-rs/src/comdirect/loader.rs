@@ -64,10 +64,10 @@ async fn load_session_from_file(path: &str) -> Result<Session, Box<FileError>> {
 async fn delete_session_file(path: &str) {
     match tokio::fs::remove_file(path).await {
         Ok(_) => {
-            println!("Session file deleted successfully.");
+            tracing::info!("session file deleted");
         }
         Err(e) => {
-            eprintln!("Failed to delete session file: {}", e);
+            tracing::error!(%e, "failed to delete session file");
         }
     }
 }

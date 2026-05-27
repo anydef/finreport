@@ -43,7 +43,7 @@ pub async fn get_account_transactions(
             .await?;
         all_transactions.extend(response.values);
 
-        println!("[{}] Fetching transactions {}/{}", account_id, index, total_transactions);
+        tracing::info!(%account_id, index, total = total_transactions, "fetching transactions");
     }
     Ok(all_transactions)
 }

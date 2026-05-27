@@ -65,5 +65,9 @@ module "portainer_stack" {
 
   extra_env = {
     POSTGRES_PASSWORD = var.postgres_password
+    APP_client_id     = var.app_client_id
+    APP_client_secret = var.app_client_secret
+    APP_zugangsnummer = var.app_zugangsnummer
+    APP_pin           = var.app_pin
   }
 }

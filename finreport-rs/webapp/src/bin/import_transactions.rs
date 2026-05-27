@@ -6,10 +6,12 @@ use entities::{account, account_balance};
 use entity::entities;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{DbConn, EntityTrait, Set, Unchanged};
-use std::env;
+use secrecy::ExposeSecret;
 use std::error::Error;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::EnvFilter;
 use utils::settings::Settings;
 use webapp::db::seaql;
 
@@ -52,12 +54,9 @@ enum LoopState {
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
-    if env::var_os("RUST_LOG").is_none() {
-        unsafe {
-            env::set_var("RUST_LOG", "info");
-        }
-    }
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .init();
 
     let settings = config::Config::builder()
         .add_source(
@@ -70,25 +69,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .try_deserialize::<Settings>()
         .expect("Could not load application settings");
 
-    println!(
-        "[startup] Connecting to database at {}",
-        client_settings.database_url
-    );
-    let conn: DbConn = seaql::init_db(&client_settings.database_url).await?;
-    println!("[startup] Database connected, migrations applied.");
+    info!("[startup] Connecting to database");
+    let conn: DbConn =
+        seaql::init_db(client_settings.database_url.expose_secret()).await?;
+    info!("[startup] Database connected, migrations applied.");
 
     let mut state = LoopState::Bootstrap { attempt: 0 };
     loop {
         state = match state {
             LoopState::Bootstrap { attempt } => {
-                println!(
-                    "[bootstrap] attempt {}/{}",
-                    attempt + 1,
-                    MAX_BOOTSTRAP_ATTEMPTS
+                info!(
+                    attempt = attempt + 1,
+                    max = MAX_BOOTSTRAP_ATTEMPTS,
+                    "[bootstrap] starting"
                 );
                 match load_comdirect_session(client_settings.clone()).await {
                     Ok(session) => {
-                        println!("[bootstrap] session acquired");
+                        info!("[bootstrap] session acquired");
                         // Import immediately on first successful bootstrap so
                         // the user sees data within seconds of approving TAN.
                         LoopState::Run {
@@ -100,17 +97,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     Err(e) => {
                         let next_attempt = attempt + 1;
                         if next_attempt >= MAX_BOOTSTRAP_ATTEMPTS {
-                            eprintln!(
-                                "[bootstrap] failed ({:?}); exhausted {} attempts — exiting",
-                                e, MAX_BOOTSTRAP_ATTEMPTS
+                            error!(
+                                ?e,
+                                max = MAX_BOOTSTRAP_ATTEMPTS,
+                                "[bootstrap] exhausted attempts; exiting"
                             );
                             LoopState::Terminated
                         } else {
                             let delay = bootstrap_backoff(attempt);
-                            eprintln!(
-                                "[bootstrap] failed ({:?}); retrying in {}min",
-                                e,
-                                delay.as_secs() / 60
+                            warn!(
+                                ?e,
+                                retry_in_min = delay.as_secs() / 60,
+                                "[bootstrap] failed; will retry"
                             );
                             LoopState::BackoffBeforeBootstrap {
                                 delay,
@@ -133,13 +131,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
             } => {
                 let now = Instant::now();
                 if next_import <= now {
-                    println!("[import] starting");
+                    info!("[import] starting");
                     match run_import(&session, &client_settings, &conn).await {
                         Ok(()) => {
                             let next = Instant::now() + IMPORT_INTERVAL;
-                            println!(
-                                "[import] done; next run in {}min",
-                                IMPORT_INTERVAL.as_secs() / 60
+                            info!(
+                                next_run_min = IMPORT_INTERVAL.as_secs() / 60,
+                                "[import] done"
                             );
                             LoopState::Run {
                                 session,
@@ -148,18 +146,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                         Err(e) => {
-                            eprintln!(
-                                "[import] failed: {}; re-bootstrapping session",
-                                e
-                            );
+                            error!(%e, "[import] failed; re-bootstrapping session");
                             LoopState::Bootstrap { attempt: 0 }
                         }
                     }
                 } else if next_refresh <= now {
-                    println!("[refresh] refreshing session token");
+                    info!("[refresh] refreshing session token");
                     match refresh_comdirect_session(client_settings.clone(), &session).await {
                         Ok(new_session) => {
-                            println!("[refresh] done");
+                            info!("[refresh] done");
                             LoopState::Run {
                                 session: new_session,
                                 next_refresh: Instant::now() + REFRESH_INTERVAL,
@@ -167,10 +162,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                         }
                         Err(e) => {
-                            eprintln!(
-                                "[refresh] failed: {:?}; re-bootstrapping session",
-                                e
-                            );
+                            error!(?e, "[refresh] failed; re-bootstrapping session");
                             LoopState::Bootstrap { attempt: 0 }
                         }
                     }
@@ -201,9 +193,9 @@ async fn run_import(
     conn: &DbConn,
 ) -> Result<(), Box<dyn Error>> {
     let accounts = get_accounts(session.clone(), client_settings.clone()).await?;
-    println!(
-        "[import] loaded {} account(s) from Comdirect",
-        accounts.accounts.len()
+    info!(
+        count = accounts.accounts.len(),
+        "[import] loaded accounts from Comdirect"
     );
 
     for account in accounts.accounts {
@@ -226,13 +218,15 @@ async fn run_import(
             .exec(conn)
             .await
         {
-            Ok(r) => println!(
-                "Inserted account: {} with ID: {}",
-                account.account.display_id, r.last_insert_id
+            Ok(r) => info!(
+                display_id = %account.account.display_id,
+                last_insert_id = ?r.last_insert_id,
+                "inserted account"
             ),
-            Err(err) => println!(
-                "Failed to insert account {}: {}",
-                account.account.display_id, err
+            Err(err) => error!(
+                display_id = %account.account.display_id,
+                %err,
+                "failed to insert account"
             ),
         }
 
@@ -255,17 +249,19 @@ async fn run_import(
             .exec(conn)
             .await
         {
-            Ok(_) => println!(
-                "Inserted balance for account {}: {}",
-                account.account.display_id, account.balance.value
+            Ok(_) => info!(
+                display_id = %account.account.display_id,
+                balance = %account.balance.value,
+                "inserted balance"
             ),
-            Err(e) => println!(
-                "Failed to insert balance for account {}: {}",
-                account.account.display_id, e
+            Err(e) => error!(
+                display_id = %account.account.display_id,
+                %e,
+                "failed to insert balance"
             ),
         }
 
-        println!("Account: {:?}", account.account_id);
+        debug!(account_id = %account.account_id, "fetching transactions");
         let transactions =
             get_account_transactions(session.clone(), client_settings.clone(), &account.account)
                 .await?;
@@ -311,13 +307,11 @@ async fn run_import(
                 .exec(conn)
                 .await
             {
-                Ok(_) => println!(
-                    "Inserted transaction with reference: {}",
-                    transaction.reference
-                ),
-                Err(e) => println!(
-                    "Failed to insert transaction with reference {}: {}",
-                    transaction.reference, e
+                Ok(_) => debug!(reference = %transaction.reference, "inserted transaction"),
+                Err(e) => error!(
+                    reference = %transaction.reference,
+                    %e,
+                    "failed to insert transaction"
                 ),
             }
         }

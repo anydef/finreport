@@ -1,12 +1,14 @@
+use crate::comdirect::http::build_client;
 use crate::comdirect::loader;
 use crate::comdirect::session_client::{
     Session, SessionClient, SessionClientError, SessionStatus, XOnceAuthenticationInfo,
 };
-use crate::comdirect::http::build_client;
 use reqwest::Error;
+use secrecy::ExposeSecret;
 use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::{error, info, warn};
 use utils::settings::Settings;
 
 #[derive(Debug)]
@@ -52,60 +54,42 @@ pub async fn refresh_comdirect_session(
     client_settings: Settings,
     session: &Session,
 ) -> Result<Session, SessionError> {
-    let Settings {
-        oauth_url,
-        client_id,
-        client_secret,
-        zugangsnummer,
-        pin,
-        ..
-    } = client_settings.clone();
-
     let client = build_client();
     let mut comdirect_client = SessionClient::new(
         client_settings.url.clone(),
-        oauth_url,
-        client_id,
-        client_secret,
-        zugangsnummer,
-        pin,
+        client_settings.oauth_url.clone(),
+        client_settings.client_id.clone(),
+        client_settings.client_secret.expose_secret().to_string(),
+        client_settings.zugangsnummer.expose_secret().to_string(),
+        client_settings.pin.expose_secret().to_string(),
         client,
     );
 
     let oauth = comdirect_client.refresh_token_flow(session).await?;
     let new_session = session.refreshed_session(oauth);
 
-    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.to_string());
+    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.clone());
     if let Err(e) = session_loader.save_session(&new_session).await {
-        println!("Warning: failed to persist refreshed session: {:?}", e);
+        warn!(?e, "failed to persist refreshed session");
     }
 
     Ok(new_session)
 }
 
 pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session, SessionError> {
-    let Settings {
-        oauth_url,
-        client_id,
-        client_secret,
-        zugangsnummer,
-        pin,
-        ..
-    } = client_settings;
-
     let client = build_client();
 
     let mut comdirect_client = SessionClient::new(
-        client_settings.url,
-        oauth_url,
-        client_id,
-        client_secret,
-        zugangsnummer,
-        pin,
+        client_settings.url.clone(),
+        client_settings.oauth_url.clone(),
+        client_settings.client_id.clone(),
+        client_settings.client_secret.expose_secret().to_string(),
+        client_settings.zugangsnummer.expose_secret().to_string(),
+        client_settings.pin.expose_secret().to_string(),
         client,
     );
 
-    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.to_string());
+    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.clone());
     // The stored session can be 401-expired across runs. Track whether we've
     // already wiped and restarted once so a chronic failure doesn't loop forever.
     let mut already_recovered = false;
@@ -113,7 +97,7 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
     let session_result = loop {
         match state {
             State::Start => {
-                println!("Starting session...");
+                info!("Starting session...");
                 let session_result = session_loader.load_session().await;
                 match session_result {
                     Some(session) => {
@@ -125,13 +109,13 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                 }
             }
             State::NoSession => {
-                println!("No session found, creating a new one.");
+                info!("No session found, creating a new one.");
                 let oauth = comdirect_client.acquire_password_token().await?;
                 state = State::SessionUnchecked(Session::from_oauth(oauth))
             }
 
             State::SessionUnchecked(session) => {
-                println!("Session unchecked. Checking status...");
+                info!("Session unchecked. Checking status...");
                 let status = comdirect_client.get_session_status(&session).await;
                 match status {
                     Ok(status) => match status {
@@ -158,12 +142,12 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                             });
                         }
                         _ => {
-                            println!("Unknown session state.");
+                            warn!("Unknown session state.");
                             state = State::NoSession;
                         }
                     },
                     Err(SessionClientError::Unauthorized) if !already_recovered => {
-                        println!(
+                        warn!(
                             "Stored session rejected (401). Clearing it and restarting from scratch."
                         );
                         session_loader.clear_session().await;
@@ -171,14 +155,14 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                         state = State::NoSession;
                     }
                     Err(e) => {
-                        println!("Error getting session status: {:?}", e);
+                        error!(?e, "error getting session status");
                         state = State::Error(SessionClientError::Unknown);
                     }
                 }
             }
             State::SessionValidationReady(session) => {
                 //validate session POST
-                println!("Validating session...");
+                info!("Validating session...");
                 let auth_info = comdirect_client.validate_session(&session).await?;
                 state = State::SessionPatchWaitingForTan(session, auth_info);
             }
@@ -192,10 +176,10 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                 // must NOT patch until polling confirms approval.
                 let interval = Duration::from_secs(3);
                 let max_attempts: u32 = 200; // 3s × 200 = 10 min
-                println!(
-                    "Approve the push-TAN notification on your phone (polling every {}s, max {} min)...",
-                    interval.as_secs(),
-                    (interval.as_secs() * max_attempts as u64) / 60
+                info!(
+                    poll_interval_s = interval.as_secs(),
+                    max_wait_min = (interval.as_secs() * max_attempts as u64) / 60,
+                    "Approve the push-TAN notification on your phone..."
                 );
 
                 let mut approved = false;
@@ -207,7 +191,7 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                         .await
                     {
                         if last_status.as_deref() != Some(resp.status.as_str()) {
-                            println!("Authentication status: {}", resp.status);
+                            info!(status = %resp.status, "authentication status");
                             last_status = Some(resp.status.clone());
                         }
                         if resp.status == "AUTHENTICATED" {
@@ -218,7 +202,7 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                 }
 
                 if !approved {
-                    println!("TAN not approved within timeout.");
+                    warn!("TAN not approved within timeout.");
                     state = State::Error(SessionClientError::Unknown);
                     continue;
                 }
@@ -229,11 +213,11 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                         activated_2fa: true,
                         ..
                     }) => {
-                        println!("TAN activated.");
+                        info!("TAN activated.");
                         State::SessionPatchReady(session)
                     }
                     _ => {
-                        println!("patch_session failed after TAN approval.");
+                        error!("patch_session failed after TAN approval.");
                         State::Error(SessionClientError::Unknown)
                     }
                 };
@@ -247,20 +231,17 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
                 let oauth_result = comdirect_client.refresh_token_flow(&session).await;
                 match oauth_result {
                     Ok(oauth) => {
-                        println!("Session refreshed successfully.");
+                        info!("Session refreshed successfully.");
                         state = State::SessionReady(session.refreshed_session(oauth));
                     }
                     Err(e) if !already_recovered => {
-                        println!(
-                            "Refresh token rejected ({:?}). Clearing session and restarting.",
-                            e
-                        );
+                        warn!(?e, "refresh token rejected; clearing session and restarting");
                         session_loader.clear_session().await;
                         already_recovered = true;
                         state = State::NoSession;
                     }
                     Err(e) => {
-                        println!("Error refreshing session: {:?}", e);
+                        error!(?e, "error refreshing session");
                         state = State::Error(SessionClientError::Unknown);
                     }
                 }
@@ -269,7 +250,7 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
             State::SessionReady(session) => {
                 let result = session_loader.save_session(&session).await;
                 if let Err(e) = result {
-                    println!("Error saving session: {:?}", e);
+                    error!(?e, "error saving session");
                     state = State::Error(SessionClientError::Unknown);
                 } else {
                     break Ok(session);
@@ -277,7 +258,7 @@ pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session
             }
             State::Error(e) => {
                 session_loader.clear_session().await;
-                println!("Error occurred: {:?}", e);
+                error!(?e, "session bootstrap failed");
                 break Err(e);
             }
         };
