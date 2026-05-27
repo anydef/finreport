@@ -6,6 +6,12 @@ on:
       - main
   workflow_dispatch:
 
+# Serialize runs of this workflow on the same branch. A push that arrives while
+# a previous run is still going will queue behind it; nothing is cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-deploy:
     name: Build and Deploy
