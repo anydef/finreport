@@ -60,9 +60,11 @@ services:
     image: ${DOCKER_REGISTRY}/finreport-be:latest
     pull_policy: always
     container_name: finreport-be-importer
-    profiles: ["importer"]
     entrypoint: ["finreport-be-importer"]
-    restart: "no"
+    restart: always
+    depends_on:
+      finreport-be-postgres:
+        condition: service_healthy
     environment:
       RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport

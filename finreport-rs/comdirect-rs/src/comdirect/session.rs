@@ -45,6 +45,44 @@ enum State {
     Error(SessionClientError),
 }
 
+/// Refresh an already-active session using its refresh token. Persists the new
+/// access/refresh tokens to the session file so the next bootstrap (or restart)
+/// picks them up. Does **not** perform OAuth or the TAN flow.
+pub async fn refresh_comdirect_session(
+    client_settings: Settings,
+    session: &Session,
+) -> Result<Session, SessionError> {
+    let Settings {
+        oauth_url,
+        client_id,
+        client_secret,
+        zugangsnummer,
+        pin,
+        ..
+    } = client_settings.clone();
+
+    let client = build_client();
+    let mut comdirect_client = SessionClient::new(
+        client_settings.url.clone(),
+        oauth_url,
+        client_id,
+        client_secret,
+        zugangsnummer,
+        pin,
+        client,
+    );
+
+    let oauth = comdirect_client.refresh_token_flow(session).await?;
+    let new_session = session.refreshed_session(oauth);
+
+    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.to_string());
+    if let Err(e) = session_loader.save_session(&new_session).await {
+        println!("Warning: failed to persist refreshed session: {:?}", e);
+    }
+
+    Ok(new_session)
+}
+
 pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session, SessionError> {
     let Settings {
         oauth_url,

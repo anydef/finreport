@@ -25,3 +25,5 @@
 /terraform/.terraform.lock.hcl
 /terraform/terraform.tfstate
 /terraform/terraform.tfstate.backup
+/.idea/dataSources.xml
+/.idea/db-forest-config.xml

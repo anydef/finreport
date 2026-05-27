@@ -43,7 +43,7 @@ services:
       context: .
     profiles: ["importer"]
     entrypoint: ["finreport-be-importer"]
-    restart: "no"
+    restart: always
     depends_on:
       finreport-be-postgres:
         condition: service_healthy

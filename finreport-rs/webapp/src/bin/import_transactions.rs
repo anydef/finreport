@@ -1,20 +1,61 @@
 use comdirect_rs::comdirect::accounts::{get_account_transactions, get_accounts};
-use comdirect_rs::comdirect::session::load_comdirect_session;
+use comdirect_rs::comdirect::session::{load_comdirect_session, refresh_comdirect_session};
+use comdirect_rs::comdirect::session_client::Session;
 use dotenv::dotenv;
 use entities::{account, account_balance};
 use entity::entities;
 use sea_orm::sea_query::OnConflict;
-use sea_orm::{ActiveModelTrait, DbConn, EntityTrait, Set, Unchanged};
+use sea_orm::{DbConn, EntityTrait, Set, Unchanged};
 use std::env;
 use std::error::Error;
+use std::time::{Duration, Instant};
+use tokio::time::sleep;
 use utils::settings::Settings;
 use webapp::db::seaql;
+
+// --- Loop tuning -------------------------------------------------------------
+
+const REFRESH_INTERVAL: Duration = Duration::from_secs(8 * 60); // 8 min
+const IMPORT_INTERVAL: Duration = Duration::from_secs(4 * 3600); // 4 h
+const MAX_BOOTSTRAP_ATTEMPTS: u32 = 6;
+
+/// Exponential-ish backoff between failed bootstrap attempts, capped at 1h.
+/// 10m → 20m → 40m → 60m → 60m → 60m  (6 total attempts).
+fn bootstrap_backoff(attempt: u32) -> Duration {
+    let minutes = match attempt {
+        0 => 10,
+        1 => 20,
+        2 => 40,
+        _ => 60,
+    };
+    Duration::from_secs(minutes * 60)
+}
+
+// --- Top-level state machine -------------------------------------------------
+
+enum LoopState {
+    /// Acquire a Comdirect session (load existing + refresh, or full OAuth + TAN).
+    Bootstrap { attempt: u32 },
+    /// Sleep before retrying bootstrap.
+    BackoffBeforeBootstrap { delay: Duration, attempt: u32 },
+    /// Steady state: a valid session, scheduled refresh and import.
+    Run {
+        session: Session,
+        next_refresh: Instant,
+        next_import: Instant,
+    },
+    /// Permanent failure (e.g. TAN approval repeatedly missed). Exit non-zero;
+    /// the container's restart policy will start a fresh run.
+    Terminated,
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
-    unsafe {
-        env::set_var("RUST_LOG", "reqwest=trace");
+    if env::var_os("RUST_LOG").is_none() {
+        unsafe {
+            env::set_var("RUST_LOG", "info");
+        }
     }
     env_logger::init();
 
@@ -29,15 +70,141 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .try_deserialize::<Settings>()
         .expect("Could not load application settings");
 
-    let session = load_comdirect_session(client_settings.clone()).await?;
-    println!("[step] Comdirect session ready.");
-
-    let accounts = get_accounts(session.clone(), client_settings.clone()).await?;
-    println!("[step] Loaded {} account(s) from Comdirect.", accounts.accounts.len());
-
-    println!("[step] Connecting to database at {}", client_settings.database_url);
+    println!(
+        "[startup] Connecting to database at {}",
+        client_settings.database_url
+    );
     let conn: DbConn = seaql::init_db(&client_settings.database_url).await?;
-    println!("[step] Database connected, migrations applied.");
+    println!("[startup] Database connected, migrations applied.");
+
+    let mut state = LoopState::Bootstrap { attempt: 0 };
+    loop {
+        state = match state {
+            LoopState::Bootstrap { attempt } => {
+                println!(
+                    "[bootstrap] attempt {}/{}",
+                    attempt + 1,
+                    MAX_BOOTSTRAP_ATTEMPTS
+                );
+                match load_comdirect_session(client_settings.clone()).await {
+                    Ok(session) => {
+                        println!("[bootstrap] session acquired");
+                        // Import immediately on first successful bootstrap so
+                        // the user sees data within seconds of approving TAN.
+                        LoopState::Run {
+                            session,
+                            next_refresh: Instant::now() + REFRESH_INTERVAL,
+                            next_import: Instant::now(),
+                        }
+                    }
+                    Err(e) => {
+                        let next_attempt = attempt + 1;
+                        if next_attempt >= MAX_BOOTSTRAP_ATTEMPTS {
+                            eprintln!(
+                                "[bootstrap] failed ({:?}); exhausted {} attempts — exiting",
+                                e, MAX_BOOTSTRAP_ATTEMPTS
+                            );
+                            LoopState::Terminated
+                        } else {
+                            let delay = bootstrap_backoff(attempt);
+                            eprintln!(
+                                "[bootstrap] failed ({:?}); retrying in {}min",
+                                e,
+                                delay.as_secs() / 60
+                            );
+                            LoopState::BackoffBeforeBootstrap {
+                                delay,
+                                attempt: next_attempt,
+                            }
+                        }
+                    }
+                }
+            }
+
+            LoopState::BackoffBeforeBootstrap { delay, attempt } => {
+                sleep(delay).await;
+                LoopState::Bootstrap { attempt }
+            }
+
+            LoopState::Run {
+                session,
+                next_refresh,
+                next_import,
+            } => {
+                let now = Instant::now();
+                if next_import <= now {
+                    println!("[import] starting");
+                    match run_import(&session, &client_settings, &conn).await {
+                        Ok(()) => {
+                            let next = Instant::now() + IMPORT_INTERVAL;
+                            println!(
+                                "[import] done; next run in {}min",
+                                IMPORT_INTERVAL.as_secs() / 60
+                            );
+                            LoopState::Run {
+                                session,
+                                next_refresh,
+                                next_import: next,
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[import] failed: {}; re-bootstrapping session",
+                                e
+                            );
+                            LoopState::Bootstrap { attempt: 0 }
+                        }
+                    }
+                } else if next_refresh <= now {
+                    println!("[refresh] refreshing session token");
+                    match refresh_comdirect_session(client_settings.clone(), &session).await {
+                        Ok(new_session) => {
+                            println!("[refresh] done");
+                            LoopState::Run {
+                                session: new_session,
+                                next_refresh: Instant::now() + REFRESH_INTERVAL,
+                                next_import,
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!(
+                                "[refresh] failed: {:?}; re-bootstrapping session",
+                                e
+                            );
+                            LoopState::Bootstrap { attempt: 0 }
+                        }
+                    }
+                } else {
+                    let wait = next_refresh.min(next_import).saturating_duration_since(now);
+                    sleep(wait).await;
+                    LoopState::Run {
+                        session,
+                        next_refresh,
+                        next_import,
+                    }
+                }
+            }
+
+            LoopState::Terminated => {
+                // Non-zero exit so docker's `restart: always` brings us back.
+                std::process::exit(1);
+            }
+        };
+    }
+}
+
+// --- Import work -------------------------------------------------------------
+
+async fn run_import(
+    session: &Session,
+    client_settings: &Settings,
+    conn: &DbConn,
+) -> Result<(), Box<dyn Error>> {
+    let accounts = get_accounts(session.clone(), client_settings.clone()).await?;
+    println!(
+        "[import] loaded {} account(s) from Comdirect",
+        accounts.accounts.len()
+    );
 
     for account in accounts.accounts {
         let account_orm = account::ActiveModel {
@@ -50,38 +217,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
             ..Default::default()
         };
 
-        let account_res = account::Entity::insert(account_orm.to_owned())
+        match account::Entity::insert(account_orm)
             .on_conflict(
                 OnConflict::column(account::Column::AccountId)
                     .do_nothing()
                     .to_owned(),
             )
-            .exec(&conn)
-            .await;
-
-        match account_res {
-            Ok(r) => {
-                println!(
-                    "Inserted account: {} with ID: {}",
-                    account.account.display_id, r.last_insert_id
-                );
-            }
-            Err(err) => {
-                println!(
-                    "Failed to insert account {}: {}",
-                    account.account.display_id, err
-                );
-            }
+            .exec(conn)
+            .await
+        {
+            Ok(r) => println!(
+                "Inserted account: {} with ID: {}",
+                account.account.display_id, r.last_insert_id
+            ),
+            Err(err) => println!(
+                "Failed to insert account {}: {}",
+                account.account.display_id, err
+            ),
         }
 
         let balance_orm = account_balance::ActiveModel {
             account_id: Set(account.account.account_id.to_owned()),
-            amount: Set(account.balance.value.parse().unwrap_or_else(|_| 0.0)),
+            amount: Set(account.balance.value.parse().unwrap_or(0.0)),
             date: Set(chrono::Local::now().date_naive()),
             ..Default::default()
         };
 
-        let balance_res = account_balance::Entity::insert(balance_orm.to_owned())
+        match account_balance::Entity::insert(balance_orm)
             .on_conflict(
                 OnConflict::columns([
                     account_balance::Column::AccountId,
@@ -90,23 +252,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 .do_nothing()
                 .to_owned(),
             )
-            .exec(&conn)
-            .await;
-
-        match balance_res {
-            Ok(_) => {
-                println!(
-                    "Inserted balance for account {}: {}",
-                    account.account.display_id, account.balance.value
-                );
-            }
-            Err(e) => {
-                println!(
-                    "Failed to insert balance for account {}: {}",
-                    account.account.display_id, e
-                );
-            }
+            .exec(conn)
+            .await
+        {
+            Ok(_) => println!(
+                "Inserted balance for account {}: {}",
+                account.account.display_id, account.balance.value
+            ),
+            Err(e) => println!(
+                "Failed to insert balance for account {}: {}",
+                account.account.display_id, e
+            ),
         }
+
         println!("Account: {:?}", account.account_id);
         let transactions =
             get_account_transactions(session.clone(), client_settings.clone(), &account.account)
@@ -118,7 +276,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 account_id: Set(account.account.account_id.to_owned()),
                 booking_status: Set(transaction.booking_status),
                 booking_date: Set(transaction.booking_date.parse().unwrap()),
-                amount: Set(transaction.amount.value.parse().unwrap_or_else(|_| 0.0)),
+                amount: Set(transaction.amount.value.parse().unwrap_or(0.0)),
                 remitter: Set(transaction.remitter.unwrap_or_default().holder_name),
                 deptor: Set(transaction.deptor.unwrap_or_default()),
                 creditor: Set(transaction
@@ -133,41 +291,34 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 ..Default::default()
             };
 
-            let transaction_res =
-                entities::account_transactions::Entity::insert(transaction_orm.to_owned())
-                    .on_conflict(
-                        OnConflict::column(entities::account_transactions::Column::Reference)
-                            .update_columns([
-                                entities::account_transactions::Column::BookingStatus,
-                                entities::account_transactions::Column::BookingDate,
-                                entities::account_transactions::Column::Amount,
-                                entities::account_transactions::Column::Remitter,
-                                entities::account_transactions::Column::Deptor,
-                                entities::account_transactions::Column::Creditor,
-                                entities::account_transactions::Column::CreditorId,
-                                entities::account_transactions::Column::CreditorMandateId,
-                                entities::account_transactions::Column::RemittanceInfo,
-                                entities::account_transactions::Column::TransactionType,
-                            ])
-                            .to_owned(),
-                    )
-                    .exec(&conn)
-                    .await;
-
-            match transaction_res {
-                Ok(_) => {
-                    println!(
-                        "Inserted transaction with reference: {}",
-                        transaction.reference.to_owned()
-                    );
-                }
-                Err(e) => {
-                    println!(
-                        "Failed to insert transaction with reference {}: {}",
-                        transaction.reference.to_owned(),
-                        e
-                    );
-                }
+            match entities::account_transactions::Entity::insert(transaction_orm)
+                .on_conflict(
+                    OnConflict::column(entities::account_transactions::Column::Reference)
+                        .update_columns([
+                            entities::account_transactions::Column::BookingStatus,
+                            entities::account_transactions::Column::BookingDate,
+                            entities::account_transactions::Column::Amount,
+                            entities::account_transactions::Column::Remitter,
+                            entities::account_transactions::Column::Deptor,
+                            entities::account_transactions::Column::Creditor,
+                            entities::account_transactions::Column::CreditorId,
+                            entities::account_transactions::Column::CreditorMandateId,
+                            entities::account_transactions::Column::RemittanceInfo,
+                            entities::account_transactions::Column::TransactionType,
+                        ])
+                        .to_owned(),
+                )
+                .exec(conn)
+                .await
+            {
+                Ok(_) => println!(
+                    "Inserted transaction with reference: {}",
+                    transaction.reference
+                ),
+                Err(e) => println!(
+                    "Failed to insert transaction with reference {}: {}",
+                    transaction.reference, e
+                ),
             }
         }
     }
