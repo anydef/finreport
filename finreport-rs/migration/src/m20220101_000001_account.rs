@@ -39,5 +39,7 @@ pub enum Account {
     AccountType,
     IBAN,
     BIC,
-    Institute
+    Institute,
+    /// Added in m20260820_000001_account_name.
+    AccountName,
 }

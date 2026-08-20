@@ -69,19 +69,8 @@ async fn main() -> std::io::Result<()> {
         )
         .init();
 
-    let config = config::Config::builder()
-        .add_source(
-            config::Environment::with_prefix("APP")
-                .prefix_separator("_")
-                .separator("__"),
-        )
-        .build()
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
-
     let app_settings = Arc::new(
-        config
-            .try_deserialize::<Settings>()
-            .expect("Could not load application settings"),
+        Settings::from_env().expect("Could not load application settings"),
     );
 
     let conn = seaql::init_db(app_settings.database_url.expose_secret())

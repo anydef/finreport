@@ -19,6 +19,10 @@ pub struct Account {
     pub iban: String,
     pub bic: String,
     pub institute: String,
+    /// Human-readable label of the Comdirect login this account was imported
+    /// through. Null when that login has no label configured; use `accountId`
+    /// to reference an account.
+    pub account_name: Option<String>,
 }
 
 impl From<account::Model> for Account {
@@ -31,6 +35,7 @@ impl From<account::Model> for Account {
             iban: m.iban,
             bic: m.bic,
             institute: m.institute,
+            account_name: m.account_name,
         }
     }
 }

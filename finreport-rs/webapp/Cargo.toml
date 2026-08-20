@@ -9,7 +9,6 @@ categorizer = {path = "../categorizer"}
 migration = { path = "../migration" }
 entity = { path = "../entity" }
 
-config = "0.15.11"
 dotenv = "0.15.0"
 rand = "0.9.1"
 secrecy = { version = "0.10", features = ["serde"] }

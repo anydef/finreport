@@ -72,29 +72,23 @@ variable "postgres_password" {
   # Set via TF_VAR_postgres_password, sourced from op://HomeLab/finreport/psql/password in .env.tpl
 }
 
-# Comdirect API credentials — consumed by the webapp/importer at runtime.
-# Sourced from 1Password via TF_VAR_app_* env vars in .env.tpl.
+# Comdirect API credentials — consumed by the importer at runtime, one entry
+# per online-banking login. Sourced from 1Password via TF_VAR_app_comdirect_accounts
+# in .env.tpl (a JSON array; `op run` resolves the op:// refs inside it).
+#
+# Order matters: element 0 is injected as APP_accounts__0__* and is imported by
+# the finreport-be-importer-0 service, element 1 by -1, and so on. Adding an
+# element also needs a matching importer service in docker-compose.yml.
 
-variable "app_client_id" {
-  description = "Comdirect API client_id"
-  type        = string
-  sensitive   = true
-}
-
-variable "app_client_secret" {
-  description = "Comdirect API client_secret"
-  type        = string
-  sensitive   = true
-}
-
-variable "app_zugangsnummer" {
-  description = "Comdirect online-banking access number"
-  type        = string
-  sensitive   = true
-}
-
-variable "app_pin" {
-  description = "Comdirect online-banking PIN"
-  type        = string
-  sensitive   = true
+variable "app_comdirect_accounts" {
+  description = "Comdirect logins to import, in importer order"
+  type = list(object({
+    name          = string
+    client_id     = string
+    client_secret = string
+    zugangsnummer = string
+    pin           = string
+  }))
+  sensitive = true
+  default   = []
 }

@@ -8,18 +8,35 @@ TF_VAR_opnsense_api_key="op://HomeLab/OPNSense Admin/key"
 TF_VAR_opnsense_api_secret="op://HomeLab/OPNSense Admin/secret"
 TF_VAR_opnsense_url="op://HomeLab/OPNSense Admin/hostname"
 
-# Comdirect API credentials.
-# `APP_*` is consumed by `just import-local` (cargo run from the host).
-# `TF_VAR_app_*` is consumed by terraform and injected into the Portainer stack
-# so the deployed containers see them as `APP_*` at runtime.
-APP_client_id="op://HomeLab/finreport/comdirect/client_id"
-APP_client_secret="op://HomeLab/finreport/comdirect/client_secret"
-APP_zugangsnummer="op://HomeLab/finreport/comdirect/zugangsnummer"
-APP_pin="op://HomeLab/finreport/comdirect/pin"
-TF_VAR_app_client_id="op://HomeLab/finreport/comdirect/client_id"
-TF_VAR_app_client_secret="op://HomeLab/finreport/comdirect/client_secret"
-TF_VAR_app_zugangsnummer="op://HomeLab/finreport/comdirect/zugangsnummer"
-TF_VAR_app_pin="op://HomeLab/finreport/comdirect/pin"
+# Comdirect logins, one block per online-banking login. Each login approves its
+# own push-TAN and is imported by its own process, so they are numbered:
+# account 0 is driven by `--account 0` (the finreport-be-importer-0 service).
+#
+# `__name` is a plain human-readable label (no secret), stored on every account
+# row the login imports so they can be told apart in the UI. It is display only:
+# the importer is pointed at a login by its key (`--account 0`), not by name, so
+# renaming one here is safe.
+#
+# `APP_accounts__*` is consumed by `just import-local` (cargo run from the host).
+APP_accounts__0__name="Comdirect Family"
+APP_accounts__0__client_id="op://HomeLab/finreport/comdirect/client_id"
+APP_accounts__0__client_secret="op://HomeLab/finreport/comdirect/client_secret"
+APP_accounts__0__zugangsnummer="op://HomeLab/finreport/comdirect/zugangsnummer"
+APP_accounts__0__pin="op://HomeLab/finreport/comdirect/pin"
+
+# Second login — repoint these at its own 1Password item and uncomment, then
+# add it to TF_VAR_app_comdirect_accounts below.
+#APP_accounts__1__name="Comdirect Pavlo"
+#APP_accounts__1__client_id="op://HomeLab/finreport/comdirect 42992464/client_id"
+#APP_accounts__1__client_secret="op://HomeLab/finreport/comdirect 42992464/client_secret"
+#APP_accounts__1__zugangsnummer="op://HomeLab/finreport/comdirect 42992464/zugangsnummer"
+#APP_accounts__1__pin="op://HomeLab/finreport/comdirect 42992464/pin"
+
+# Terraform takes the same logins as one list(object) variable, which has to be
+# a JSON string. The deploy script evals this file, so it is assembled from the
+# already-resolved vars above rather than repeating the op:// references — keep
+# the array in importer order, element 0 first.
+TF_VAR_app_comdirect_accounts="[{\"name\":\"${APP_accounts__0__name}\",\"client_id\":\"${APP_accounts__0__client_id}\",\"client_secret\":\"${APP_accounts__0__client_secret}\",\"zugangsnummer\":\"${APP_accounts__0__zugangsnummer}\",\"pin\":\"${APP_accounts__0__pin}\"}]"
 
 # Postgres password — pulled from 1Password and passed to Terraform, which
 # then injects it into the Portainer stack via extra_env.

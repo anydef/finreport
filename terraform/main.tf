@@ -63,11 +63,19 @@ module "portainer_stack" {
   docker_registry    = var.docker_registry
   force_update       = var.force_update
 
-  extra_env = {
-    POSTGRES_PASSWORD = var.postgres_password
-    APP_client_id     = var.app_client_id
-    APP_client_secret = var.app_client_secret
-    APP_zugangsnummer = var.app_zugangsnummer
-    APP_pin           = var.app_pin
-  }
+  # Each login is flattened into the numbered APP_accounts__<index>__* form
+  # that utils::settings reads; the importer service for that index picks its
+  # own out with `--account <index>`.
+  extra_env = merge(
+    { POSTGRES_PASSWORD = var.postgres_password },
+    merge([
+      for index, account in var.app_comdirect_accounts : {
+        "APP_accounts__${index}__name"          = account.name
+        "APP_accounts__${index}__client_id"     = account.client_id
+        "APP_accounts__${index}__client_secret" = account.client_secret
+        "APP_accounts__${index}__zugangsnummer" = account.zugangsnummer
+        "APP_accounts__${index}__pin"           = account.pin
+      }
+    ]...)
+  )
 }

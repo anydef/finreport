@@ -73,11 +73,15 @@ dev-fe-tower:
 
 # Run the importer locally against the Postgres started by `db-up`.
 # Comdirect creds are pulled from 1Password via .env.tpl.
-import-local:
+#
+# One process imports one Comdirect login, since each login has to approve its
+# own push-TAN: pick it with `just import-local --account 1`. The flag can be
+# omitted when only one account is configured in .env.tpl.
+import-local *ARGS:
     APP_database_url='postgresql://finreport:finreport@127.0.0.1:5432/finreport' \
         APP_oauth_url='https://api.comdirect.de' \
         APP_url='https://api.comdirect.de/api' \
         APP_save_file_path='.session.json' \
         RUST_LOG=info \
         op run --env-file .env.tpl -- \
-        cargo run --manifest-path finreport-rs/Cargo.toml --bin import-transactions
+        cargo run --manifest-path finreport-rs/Cargo.toml --bin import-transactions -- {{ARGS}}

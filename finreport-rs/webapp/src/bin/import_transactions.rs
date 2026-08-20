@@ -1,3 +1,10 @@
+//! Imports balances and transactions for a single Comdirect login on a loop.
+//!
+//! One process drives one login: each has to approve its own push-TAN, and a
+//! session that goes stale must be re-bootstrapped without stalling the others.
+//! Pick the login with `--account <key>` (see `utils::settings`); the flag may
+//! be omitted when only one account is configured.
+
 use comdirect_rs::comdirect::accounts::{get_account_transactions, get_accounts};
 use comdirect_rs::comdirect::session::{load_comdirect_session, refresh_comdirect_session};
 use comdirect_rs::comdirect::session_client::Session;
@@ -12,7 +19,8 @@ use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
-use utils::settings::Settings;
+use utils::settings::{ComdirectProfile, Settings};
+use webapp::cli::account_arg;
 use webapp::db::seaql;
 
 // --- Loop tuning -------------------------------------------------------------
@@ -58,16 +66,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
-    let settings = config::Config::builder()
-        .add_source(
-            config::Environment::with_prefix("APP")
-                .prefix_separator("_")
-                .separator("__"),
-        )
-        .build()?;
-    let client_settings = settings
-        .try_deserialize::<Settings>()
-        .expect("Could not load application settings");
+    let requested_account = account_arg().map_err(|e| {
+        error!(%e, "[startup] invalid arguments");
+        e
+    })?;
+
+    let client_settings = Settings::from_env()?;
+    let profile = client_settings
+        .select_profile(requested_account.as_deref())
+        .map_err(|e| {
+            error!(%e, "[startup] could not select Comdirect account");
+            e
+        })?;
+    info!(
+        account = %profile.key,
+        account_name = profile.name.as_deref().unwrap_or("<unnamed>"),
+        session_file = %profile.save_file_path,
+        "[startup] importing for Comdirect account"
+    );
 
     info!("[startup] Connecting to database");
     let conn: DbConn =
@@ -83,7 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     max = MAX_BOOTSTRAP_ATTEMPTS,
                     "[bootstrap] starting"
                 );
-                match load_comdirect_session(client_settings.clone()).await {
+                match load_comdirect_session(&profile).await {
                     Ok(session) => {
                         info!("[bootstrap] session acquired");
                         // Import immediately on first successful bootstrap so
@@ -132,7 +148,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let now = Instant::now();
                 if next_import <= now {
                     info!("[import] starting");
-                    match run_import(&session, &client_settings, &conn).await {
+                    match run_import(&session, &profile, &conn).await {
                         Ok(()) => {
                             let next = Instant::now() + IMPORT_INTERVAL;
                             info!(
@@ -152,7 +168,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 } else if next_refresh <= now {
                     info!("[refresh] refreshing session token");
-                    match refresh_comdirect_session(client_settings.clone(), &session).await {
+                    match refresh_comdirect_session(&profile, &session).await {
                         Ok(new_session) => {
                             info!("[refresh] done");
                             LoopState::Run {
@@ -189,11 +205,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 async fn run_import(
     session: &Session,
-    client_settings: &Settings,
+    profile: &ComdirectProfile,
     conn: &DbConn,
 ) -> Result<(), Box<dyn Error>> {
-    let accounts = get_accounts(session.clone(), client_settings.clone()).await?;
+    let accounts = get_accounts(session.clone(), profile).await?;
     info!(
+        account = %profile.key,
         count = accounts.accounts.len(),
         "[import] loaded accounts from Comdirect"
     );
@@ -206,13 +223,16 @@ async fn run_import(
             iban: Unchanged(account.account.iban.to_owned()),
             bic: Unchanged(account.account.bic.to_owned()),
             institute: Unchanged("COMDIRECT".to_string()),
+            account_name: Set(profile.name.clone()),
             ..Default::default()
         };
 
         match account::Entity::insert(account_orm)
             .on_conflict(
+                // Only the name is refreshed on re-import, so renaming a login
+                // in the config lands on its accounts the next time it runs.
                 OnConflict::column(account::Column::AccountId)
-                    .do_nothing()
+                    .update_column(account::Column::AccountName)
                     .to_owned(),
             )
             .exec(conn)
@@ -220,6 +240,7 @@ async fn run_import(
         {
             Ok(r) => info!(
                 display_id = %account.account.display_id,
+                account_name = profile.name.as_deref().unwrap_or("<unnamed>"),
                 last_insert_id = ?r.last_insert_id,
                 "inserted account"
             ),
@@ -263,8 +284,7 @@ async fn run_import(
 
         debug!(account_id = %account.account_id, "fetching transactions");
         let transactions =
-            get_account_transactions(session.clone(), client_settings.clone(), &account.account)
-                .await?;
+            get_account_transactions(session.clone(), profile, &account.account).await?;
 
         for transaction in transactions {
             let transaction_orm = entities::account_transactions::ActiveModel {

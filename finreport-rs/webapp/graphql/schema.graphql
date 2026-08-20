@@ -6,6 +6,12 @@ type Account {
 	iban: String!
 	bic: String!
 	institute: String!
+	"""
+	Human-readable label of the Comdirect login this account was imported
+	through. Null when that login has no label configured; use `accountId`
+	to reference an account.
+	"""
+	accountName: String
 }
 
 type MutationRoot {

@@ -1,90 +1,92 @@
-version: '3.8'
+# Shared by every importer process — one per Comdirect login.
+x-importer: &importer
+  build:
+    context: .
+  profiles: ["importer"]
+  entrypoint: ["finreport-be-importer"]
+  restart: always
+  depends_on:
+    finreport-be-postgres:
+      condition: service_healthy
+  volumes:
+    - finreport-data:/app/data
 
-name: finreport-be
+x-importer-env: &importer-env
+  RUST_LOG: info
+  APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
+  APP_oauth_url: https://api.comdirect.de
+  APP_url: https://api.comdirect.de/api
+  APP_save_file_path: /app/data/.session.json
 
 services:
   finreport-be-postgres:
     image: postgres:17-alpine
-    container_name: finreport-be-postgres
-    restart: always
+    restart: unless-stopped
     environment:
       POSTGRES_DB: finreport
       POSTGRES_USER: finreport
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finreport}
+    ports:
+      - "5432:5432"
     volumes:
-      - /mnt/user/appdata/finreport-be/pgdata:/var/lib/postgresql/data
-    networks:
-      services-lan:
-        ipv4_address: 192.168.100.33
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U finreport"]
       interval: 5s
       timeout: 5s
       retries: 5
-    labels:
-      - "net.unraid.docker.managed=composeman"
 
   finreport-be:
-    image: ${DOCKER_REGISTRY}/finreport-be:latest
-    pull_policy: always
-    container_name: finreport-be
-    restart: always
+    build:
+      context: .
+    restart: unless-stopped
     depends_on:
       finreport-be-postgres:
         condition: service_healthy
     environment:
       RUST_LOG: info
-      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
-      APP_client_id: ${APP_client_id}
-      APP_client_secret: ${APP_client_secret}
-      APP_zugangsnummer: ${APP_zugangsnummer}
-      APP_pin: ${APP_pin}
     ports:
-      - "9040:8080"
-    networks:
-      finreport-be-net:
-      services-lan:
-        ipv4_address: 192.168.100.32
+      - "8080:8080"
     volumes:
-      - /mnt/user/appdata/finreport-be:/app/data
-    labels:
-      - "net.unraid.docker.webui=http://192.168.100.32:8080"
-      - "net.unraid.docker.managed=composeman"
-      - "net.unraid.docker.shell=bash"
-      - "net.unraid.docker.icon=https://raw.githubusercontent.com/docker-library/docs/refs/heads/master/mediawiki/logo.svg"
+      - finreport-data:/app/data
 
-  finreport-be-importer:
-    image: ${DOCKER_REGISTRY}/finreport-be:latest
-    pull_policy: always
-    container_name: finreport-be-importer
-    entrypoint: ["finreport-be-importer"]
-    restart: always
-    depends_on:
-      finreport-be-postgres:
-        condition: service_healthy
+  # One importer process per Comdirect login. They can't share a process: each
+  # login approves its own push-TAN, and a session that goes stale has to be
+  # re-bootstrapped without stalling the others. Each container also sees only
+  # its own credentials.
+  #
+  # To add a login: copy a block below, bump the index in the service name, the
+  # --account value and the APP_accounts__<n>__* keys, then add the matching
+  # variables to terraform's extra_env (terraform/main.tf).
+  finreport-be-importer-0:
+    <<: *importer
+    command: ["--account", "0"]
     environment:
-      RUST_LOG: info
-      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport
-      APP_oauth_url: https://api.comdirect.de
-      APP_url: https://api.comdirect.de/api
-      APP_save_file_path: /app/data/.session.json
-      APP_client_id: ${APP_client_id}
-      APP_client_secret: ${APP_client_secret}
-      APP_zugangsnummer: ${APP_zugangsnummer}
-      APP_pin: ${APP_pin}
-    networks:
-      services-lan:
-        ipv4_address: 192.168.100.35
-    volumes:
-      - /mnt/user/appdata/finreport-be:/app/data
-    labels:
-      - "net.unraid.docker.managed=composeman"
+      <<: *importer-env
+      APP_accounts__0__name: ${APP_accounts__0__name:-}
+      APP_accounts__0__client_id: ${APP_accounts__0__client_id:-}
+      APP_accounts__0__client_secret: ${APP_accounts__0__client_secret:-}
+      APP_accounts__0__zugangsnummer: ${APP_accounts__0__zugangsnummer:-}
+      APP_accounts__0__pin: ${APP_accounts__0__pin:-}
+      # Pinned to the unsuffixed path this importer already used when it was
+      # the only one, so upgrading doesn't throw away its session tokens.
+      APP_accounts__0__save_file_path: /app/data/.session.json
 
-networks:
-  services-lan:
-    external: true
-  finreport-be-net:
-    driver: bridge
+  finreport-be-importer-1:
+    <<: *importer
+    command: ["--account", "1"]
+    environment:
+      <<: *importer-env
+      APP_accounts__1__name: ${APP_accounts__1__name:-}
+      APP_accounts__1__client_id: ${APP_accounts__1__client_id:-}
+      APP_accounts__1__client_secret: ${APP_accounts__1__client_secret:-}
+      APP_accounts__1__zugangsnummer: ${APP_accounts__1__zugangsnummer:-}
+      APP_accounts__1__pin: ${APP_accounts__1__pin:-}
+
+volumes:
+  pgdata:
+  finreport-data:

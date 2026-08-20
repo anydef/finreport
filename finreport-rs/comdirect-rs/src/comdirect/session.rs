@@ -9,7 +9,7 @@ use std::fmt::{Display, Formatter};
 use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{error, info, warn};
-use utils::settings::Settings;
+use utils::settings::ComdirectProfile;
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -51,24 +51,24 @@ enum State {
 /// access/refresh tokens to the session file so the next bootstrap (or restart)
 /// picks them up. Does **not** perform OAuth or the TAN flow.
 pub async fn refresh_comdirect_session(
-    client_settings: Settings,
+    profile: &ComdirectProfile,
     session: &Session,
 ) -> Result<Session, SessionError> {
     let client = build_client();
     let mut comdirect_client = SessionClient::new(
-        client_settings.url.clone(),
-        client_settings.oauth_url.clone(),
-        client_settings.client_id.clone(),
-        client_settings.client_secret.expose_secret().to_string(),
-        client_settings.zugangsnummer.expose_secret().to_string(),
-        client_settings.pin.expose_secret().to_string(),
+        profile.url.clone(),
+        profile.oauth_url.clone(),
+        profile.client_id.clone(),
+        profile.client_secret.expose_secret().to_string(),
+        profile.zugangsnummer.expose_secret().to_string(),
+        profile.pin.expose_secret().to_string(),
         client,
     );
 
     let oauth = comdirect_client.refresh_token_flow(session).await?;
     let new_session = session.refreshed_session(oauth);
 
-    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.clone());
+    let session_loader = loader::SessionLoader::new(profile.save_file_path.clone());
     if let Err(e) = session_loader.save_session(&new_session).await {
         warn!(?e, "failed to persist refreshed session");
     }
@@ -76,20 +76,20 @@ pub async fn refresh_comdirect_session(
     Ok(new_session)
 }
 
-pub async fn load_comdirect_session(client_settings: Settings) -> Result<Session, SessionError> {
+pub async fn load_comdirect_session(profile: &ComdirectProfile) -> Result<Session, SessionError> {
     let client = build_client();
 
     let mut comdirect_client = SessionClient::new(
-        client_settings.url.clone(),
-        client_settings.oauth_url.clone(),
-        client_settings.client_id.clone(),
-        client_settings.client_secret.expose_secret().to_string(),
-        client_settings.zugangsnummer.expose_secret().to_string(),
-        client_settings.pin.expose_secret().to_string(),
+        profile.url.clone(),
+        profile.oauth_url.clone(),
+        profile.client_id.clone(),
+        profile.client_secret.expose_secret().to_string(),
+        profile.zugangsnummer.expose_secret().to_string(),
+        profile.pin.expose_secret().to_string(),
         client,
     );
 
-    let session_loader = loader::SessionLoader::new(client_settings.save_file_path.clone());
+    let session_loader = loader::SessionLoader::new(profile.save_file_path.clone());
     // The stored session can be 401-expired across runs. Track whether we've
     // already wiped and restarted once so a chronic failure doesn't loop forever.
     let mut already_recovered = false;

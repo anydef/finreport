@@ -15,6 +15,7 @@ pub struct Model {
     pub iban: String,
     pub bic: String,
     pub institute: String,
+    pub account_name: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

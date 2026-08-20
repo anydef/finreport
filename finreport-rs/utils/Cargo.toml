@@ -7,3 +7,4 @@ edition = "2024"
 secrecy = { version = "0.10", features = ["serde"] }
 serde = { version = "1.0.219", features = ["derive"] }
 tokio = "1.45.1"
+config = "0.15.11"
