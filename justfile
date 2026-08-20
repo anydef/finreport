@@ -34,13 +34,42 @@ test:
     cargo test --manifest-path finreport-rs/Cargo.toml
 
 # Start local Postgres (via compose) in the background.
+# No secrets needed here — POSTGRES_PASSWORD defaults in docker-compose.local.yml.
 db-up:
-    op run --env-file .env.tpl -- \
-        docker compose -f docker-compose.local.yml up finreport-be-postgres -d --wait
+    docker compose -f docker-compose.local.yml up finreport-be-postgres -d --wait
 
 # Stop the local Postgres started by `db-up`.
 db-down:
     docker compose -f docker-compose.local.yml down
+
+# Run the GraphQL backend locally against the Postgres started by `db-up`.
+# Config comes from finreport-rs/.env (copy finreport-rs/.env.example to create it) —
+# cargo needs to run with CWD inside finreport-rs/ for dotenv() to find it.
+dev-be:
+    cd finreport-rs && RUST_LOG=info cargo run -p webapp --bin webapp
+
+# Run the GraphQL backend locally against the tower (deployed) Postgres instead
+# of the local one from `just db-up`. All other config still comes from
+# finreport-rs/.env (see `dev-be`) — only APP_database_url is overridden here,
+# with the real password pulled live from 1Password (never written to disk).
+#
+# WARNING: seaql::init_db() runs pending migrations on every startup. Running
+# this applies any migration you've written locally — even ones not yet
+# deployed — to the live tower database. Don't run this with unreviewed
+# migrations sitting in finreport-rs/migration/.
+dev-be-tower:
+    cd finreport-rs && \
+        APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+        RUST_LOG=info \
+        cargo run -p webapp --bin webapp
+
+# Run the frontend locally, local profile (talks to `just dev-be` on localhost:8080).
+dev-fe:
+    cd finreport-fe && npm run dev
+
+# Run the frontend locally, tower profile (talks to the deployed Unraid backend).
+dev-fe-tower:
+    cd finreport-fe && npm run dev:tower
 
 # Run the importer locally against the Postgres started by `db-up`.
 # Comdirect creds are pulled from 1Password via .env.tpl.

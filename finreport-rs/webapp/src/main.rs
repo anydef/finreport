@@ -84,7 +84,9 @@ async fn main() -> std::io::Result<()> {
             .expect("Could not load application settings"),
     );
 
-    let conn = seaql::init_db(app_settings.database_url.expose_secret()).await;
+    let conn = seaql::init_db(app_settings.database_url.expose_secret())
+        .await
+        .expect("Failed to connect to the database");
     // let app_settings_clone = Arc::clone(&app_settings);
 
     // // refresh session every minute
@@ -100,7 +102,7 @@ async fn main() -> std::io::Result<()> {
     //     }
     // });
 
-    let schema = create_schema();
+    let schema = create_schema(conn);
     HttpServer::new(move || {
         App::new()
             .wrap(

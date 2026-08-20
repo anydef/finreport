@@ -1,15 +1,36 @@
-type QueryRoot {
-	hello: String!
-	reports(month: String!, year: String!): [Report!]!
+type Account {
+	id: Int!
+	accountId: String!
+	displayId: String!
+	accountType: String!
+	iban: String!
+	bic: String!
+	institute: String!
 }
 
+type MutationRoot {
+	loadAccounts: Boolean!
+}
 
-type Report {
-	month: String!
-	year: String!
-	category: String!
-	totalIncome: Float!
-	totalExpenses: Float!
+type QueryRoot {
+	accounts: [Account!]!
+	transactions(startDate: String, endDate: String, accountId: String): [Transaction!]!
+	lastTransactionDate(accountId: String): String
+}
+
+type Transaction {
+	reference: String!
+	accountId: String!
+	bookingStatus: String!
+	bookingDate: String!
+	amount: Float!
+	remitter: String!
+	deptor: String!
+	creditor: String!
+	creditorId: String!
+	creditorMandateId: String!
+	remittanceInfo: String!
+	transactionType: String!
 }
 
 """
@@ -22,4 +43,5 @@ Directs the executor to skip this field or fragment when the `if` argument is tr
 directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
 schema {
 	query: QueryRoot
+	mutation: MutationRoot
 }
