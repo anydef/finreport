@@ -290,6 +290,10 @@ async fn run_import(
             ..Default::default()
         };
 
+        // One balance per account per day. Re-running the import within the
+        // same day hits DO NOTHING, which returns zero rows — expected, not an
+        // error, so this uses exec_without_returning rather than exec(), whose
+        // RETURNING clause turns a skipped row into `RecordNotInserted`.
         match account_balance::Entity::insert(balance_orm)
             .on_conflict(
                 OnConflict::columns([
@@ -299,9 +303,13 @@ async fn run_import(
                 .do_nothing()
                 .to_owned(),
             )
-            .exec(conn)
+            .exec_without_returning(conn)
             .await
         {
+            Ok(0) => debug!(
+                display_id = %account.account.display_id,
+                "balance for today already recorded"
+            ),
             Ok(_) => info!(
                 display_id = %account.account.display_id,
                 balance = %account.balance.value,
