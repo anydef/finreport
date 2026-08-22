@@ -2,9 +2,9 @@
 
 /// Reads `--account <key>` (or `--account=<key>`) from the process arguments.
 ///
-/// Every Comdirect login has to approve its own push-TAN, so one process
-/// drives exactly one account; this flag says which. It may be omitted when
-/// only one account is configured.
+/// The importer imports every configured account by default; this flag narrows
+/// a run to a single one, which is mostly useful locally. `init-session`, which
+/// drives one login interactively, requires it when several are configured.
 pub fn account_arg() -> Result<Option<String>, String> {
     parse_account(std::env::args().skip(1))
 }

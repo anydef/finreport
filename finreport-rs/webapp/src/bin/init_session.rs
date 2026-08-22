@@ -1,8 +1,9 @@
 //! Keeps a single Comdirect login's session alive: bootstraps it (including
 //! the push-TAN approval) and re-loads it periodically.
 //!
-//! Like the importer, one process handles one login — pick it with
+//! This one drives a single login interactively — pick it with
 //! `--account <key>`; the flag may be omitted when only one is configured.
+//! (The importer, by contrast, runs every configured account at once.)
 
 use comdirect_rs::comdirect::session::load_comdirect_session;
 use dotenv::dotenv;

@@ -8,14 +8,14 @@ TF_VAR_opnsense_api_key="op://HomeLab/OPNSense Admin/key"
 TF_VAR_opnsense_api_secret="op://HomeLab/OPNSense Admin/secret"
 TF_VAR_opnsense_url="op://HomeLab/OPNSense Admin/hostname"
 
-# Comdirect logins, one block per online-banking login. Each login approves its
-# own push-TAN and is imported by its own process, so they are numbered:
-# account 0 is driven by `--account 0` (the finreport-be-importer-0 service).
+# Comdirect logins, one block per online-banking login, numbered. The importer
+# imports them all in a single process (one task per login), so each approves
+# its own push-TAN without blocking the others.
 #
 # `__name` is a plain human-readable label (no secret), stored on every account
 # row the login imports so they can be told apart in the UI. It is display only:
-# the importer is pointed at a login by its key (`--account 0`), not by name, so
-# renaming one here is safe.
+# a login is addressed by its key (`--account 0`), never by name, so renaming
+# one here is safe.
 #
 # `APP_accounts__*` is consumed by `just import-local` (cargo run from the host).
 APP_accounts__0__name="Comdirect Family"

@@ -28,8 +28,9 @@ pub struct ComdirectAccount {
 /// Everything one Comdirect login needs: its credentials, the shared API URLs
 /// and the session file that belongs to it alone.
 ///
-/// Each login has to approve its own push-TAN, so exactly one importer process
-/// drives one profile — see `webapp/src/bin/import_transactions.rs`.
+/// The importer runs one task per profile, so each login approves its own
+/// push-TAN and refreshes its own session independently — see
+/// `webapp/src/bin/import_transactions.rs`.
 #[derive(Debug, Clone)]
 pub struct ComdirectProfile {
     /// Key this profile was configured under; `"default"` for the flat
@@ -122,8 +123,7 @@ impl Display for SettingsError {
             SettingsError::AmbiguousAccount { available } => write!(
                 f,
                 "{} accounts are configured ({}) — pick one by key with \
-                 --account <key>, each login needs its own process and its own \
-                 TAN approval",
+                 --account <key>",
                 available.len(),
                 available.join(", ")
             ),

@@ -1,9 +1,9 @@
-//! Imports balances and transactions for a single Comdirect login on a loop.
+//! Imports balances and transactions for every configured Comdirect login.
 //!
-//! One process drives one login: each has to approve its own push-TAN, and a
-//! session that goes stale must be re-bootstrapped without stalling the others.
-//! Pick the login with `--account <key>` (see `utils::settings`); the flag may
-//! be omitted when only one account is configured.
+//! One process, one task per login: each login runs its own state machine, so
+//! it approves its own push-TAN and re-bootstraps its own stale session without
+//! holding up the others. `--account <key>` narrows the run to a single login
+//! (handy locally); without it every configured account is imported.
 
 use comdirect_rs::comdirect::accounts::{get_account_transactions, get_accounts};
 use comdirect_rs::comdirect::session::{load_comdirect_session, refresh_comdirect_session};
@@ -15,9 +15,11 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{DbConn, EntityTrait, Set, Unchanged};
 use secrecy::ExposeSecret;
 use std::error::Error;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::task::JoinSet;
 use tokio::time::sleep;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, info_span, warn, Instrument};
 use tracing_subscriber::EnvFilter;
 use utils::settings::{ComdirectProfile, Settings};
 use webapp::cli::account_arg;
@@ -72,24 +74,56 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })?;
 
     let client_settings = Settings::from_env()?;
-    let profile = client_settings
-        .select_profile(requested_account.as_deref())
-        .map_err(|e| {
-            error!(%e, "[startup] could not select Comdirect account");
-            e
-        })?;
-    info!(
-        account = %profile.key,
-        account_name = profile.name.as_deref().unwrap_or("<unnamed>"),
-        session_file = %profile.save_file_path,
-        "[startup] importing for Comdirect account"
-    );
+    let profiles = match requested_account.as_deref() {
+        Some(key) => vec![client_settings.select_profile(Some(key))?],
+        None => client_settings.profiles()?,
+    };
 
     info!("[startup] Connecting to database");
-    let conn: DbConn =
-        seaql::init_db(client_settings.database_url.expose_secret()).await?;
+    let conn: Arc<DbConn> =
+        Arc::new(seaql::init_db(client_settings.database_url.expose_secret()).await?);
     info!("[startup] Database connected, migrations applied.");
 
+    // One task per login. They run concurrently — each approves its own TAN and
+    // keeps its own session file — and the connection pool is shared.
+    let mut accounts = JoinSet::new();
+    for profile in profiles {
+        info!(
+            account = %profile.key,
+            account_name = profile.name.as_deref().unwrap_or("<unnamed>"),
+            session_file = %profile.save_file_path,
+            "[startup] starting importer for Comdirect account"
+        );
+        let span = info_span!("account", key = %profile.key);
+        let conn = Arc::clone(&conn);
+        accounts.spawn(async move { run_account(profile, conn).instrument(span).await });
+    }
+
+    // Each task only returns once that login has failed for good; the others
+    // keep going. Exit non-zero once they have all given up so the container's
+    // restart policy takes over.
+    let mut terminated = Vec::new();
+    while let Some(joined) = accounts.join_next().await {
+        match joined {
+            Ok(key) => {
+                error!(account = %key, "[shutdown] account gave up permanently");
+                terminated.push(key);
+            }
+            Err(e) => error!(?e, "[shutdown] account task panicked"),
+        }
+    }
+
+    error!(
+        accounts = ?terminated,
+        "[shutdown] every configured account has stopped importing; exiting"
+    );
+    std::process::exit(1);
+}
+
+/// Drives one Comdirect login forever: session bootstrap (including the TAN
+/// approval), periodic token refresh and periodic import. Returns the account
+/// key only when that login has failed for good.
+async fn run_account(profile: ComdirectProfile, conn: Arc<DbConn>) -> String {
     let mut state = LoopState::Bootstrap { attempt: 0 };
     loop {
         state = match state {
@@ -193,10 +227,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 }
             }
 
-            LoopState::Terminated => {
-                // Non-zero exit so docker's `restart: always` brings us back.
-                std::process::exit(1);
-            }
+            // Only this login stops; the other accounts carry on importing.
+            LoopState::Terminated => return profile.key,
         };
     }
 }
