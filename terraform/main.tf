@@ -1,5 +1,24 @@
 locals {
   tag = "[tf]"
+
+  # Comdirect logins in importer order. An account whose client_id is blank is
+  # not configured and is filtered out; index 0 must always be present.
+  comdirect_accounts = [
+    for account in [
+      {
+        client_id     = var.app_account_0_client_id
+        client_secret = var.app_account_0_client_secret
+        zugangsnummer = var.app_account_0_zugangsnummer
+        pin           = var.app_account_0_pin
+      },
+      {
+        client_id     = var.app_account_1_client_id
+        client_secret = var.app_account_1_client_secret
+        zugangsnummer = var.app_account_1_zugangsnummer
+        pin           = var.app_account_1_pin
+      },
+    ] : account if account.client_id != ""
+  ]
 }
 
 data "opnsense_haproxy_frontend" "https" {
@@ -63,14 +82,13 @@ module "portainer_stack" {
   docker_registry    = var.docker_registry
   force_update       = var.force_update
 
-  # Each login is flattened into the numbered APP_accounts__<index>__* form
-  # that utils::settings reads; the importer service for that index picks its
-  # own out with `--account <index>`.
+  # Each configured login is flattened into the numbered APP_accounts__<n>__*
+  # form utils::settings reads. Accounts left empty are dropped, so the stack
+  # never receives half-populated credentials.
   extra_env = merge(
     { POSTGRES_PASSWORD = var.postgres_password },
     merge([
-      for index, account in var.app_comdirect_accounts : {
-        "APP_accounts__${index}__name"          = account.name
+      for index, account in local.comdirect_accounts : {
         "APP_accounts__${index}__client_id"     = account.client_id
         "APP_accounts__${index}__client_secret" = account.client_secret
         "APP_accounts__${index}__zugangsnummer" = account.zugangsnummer

@@ -69,9 +69,12 @@ services:
       APP_save_file_path: /app/data/.session.json
       # Comdirect logins, numbered. The importer runs one task per account in
       # this single container, so adding a login is just another block here
-      # (plus its entry in TF_VAR_app_comdirect_accounts) — no new container,
-      # address or port.
-      APP_accounts__0__name: ${APP_accounts__0__name}
+      # (plus its TF_VAR_app_account_<n>_* entries in .env.tpl) — no new
+      # container, address or port.
+      #
+      # The label is not a secret and does not vary by environment, so it is
+      # written here rather than plumbed through 1Password and terraform.
+      APP_accounts__0__name: Main
       APP_accounts__0__client_id: ${APP_accounts__0__client_id}
       APP_accounts__0__client_secret: ${APP_accounts__0__client_secret}
       APP_accounts__0__zugangsnummer: ${APP_accounts__0__zugangsnummer}
@@ -79,14 +82,14 @@ services:
       # Pinned to the path this importer already uses, so the upgrade keeps its
       # session tokens instead of asking for a fresh TAN.
       APP_accounts__0__save_file_path: /app/data/.session.json
-      # Second login — uncomment together with the APP_accounts__1__* entries in
-      # .env.tpl. Its session lands beside the first as .session.1.json.
-      # Leave commented until configured: blank credentials abort startup.
-      #APP_accounts__1__name: ${APP_accounts__1__name}
-      #APP_accounts__1__client_id: ${APP_accounts__1__client_id}
-      #APP_accounts__1__client_secret: ${APP_accounts__1__client_secret}
-      #APP_accounts__1__zugangsnummer: ${APP_accounts__1__zugangsnummer}
-      #APP_accounts__1__pin: ${APP_accounts__1__pin}
+      # Second login. Its session lands beside the first as .session.1.json
+      # (APP_save_file_path + the account key). Credentials come from the
+      # TF_VAR_app_account_1_* entries in .env.tpl.
+      APP_accounts__1__name: Second
+      APP_accounts__1__client_id: ${APP_accounts__1__client_id}
+      APP_accounts__1__client_secret: ${APP_accounts__1__client_secret}
+      APP_accounts__1__zugangsnummer: ${APP_accounts__1__zugangsnummer}
+      APP_accounts__1__pin: ${APP_accounts__1__pin}
     networks:
       services-lan:
         ipv4_address: 192.168.100.35

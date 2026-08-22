@@ -72,23 +72,69 @@ variable "postgres_password" {
   # Set via TF_VAR_postgres_password, sourced from op://HomeLab/finreport/psql/password in .env.tpl
 }
 
-# Comdirect API credentials — consumed by the importer at runtime, one entry
-# per online-banking login. Sourced from 1Password via TF_VAR_app_comdirect_accounts
-# in .env.tpl (a JSON array; `op run` resolves the op:// refs inside it).
+# Comdirect API credentials — consumed by the importer at runtime, one numbered
+# block per online-banking login. Sourced from 1Password via the
+# TF_VAR_app_account_<n>_* entries in .env.tpl.
 #
-# Order matters: element 0 is injected as APP_accounts__0__* and is imported by
-# the finreport-be-importer-0 service, element 1 by -1, and so on. Adding an
-# element also needs a matching importer service in docker-compose.yml.
+# Deliberately plain strings rather than a list(object): a complex variable has
+# to arrive as one JSON-encoded TF_VAR, and .env.tpl cannot compose one — CI
+# loads that file with 1password/load-secrets-action, which resolves one op://
+# reference per line and performs no shell expansion.
+#
+# Account 0 has no default on purpose: a missing secret must fail the deploy
+# rather than quietly ship a container with blank credentials.
 
-variable "app_comdirect_accounts" {
-  description = "Comdirect logins to import, in importer order"
-  type = list(object({
-    name          = string
-    client_id     = string
-    client_secret = string
-    zugangsnummer = string
-    pin           = string
-  }))
-  sensitive = true
-  default   = []
+variable "app_account_0_client_id" {
+  description = "Comdirect API client_id for account 0"
+  type        = string
+  sensitive   = true
+}
+
+variable "app_account_0_client_secret" {
+  description = "Comdirect API client_secret for account 0"
+  type        = string
+  sensitive   = true
+}
+
+variable "app_account_0_zugangsnummer" {
+  description = "Comdirect online-banking access number for account 0"
+  type        = string
+  sensitive   = true
+}
+
+variable "app_account_0_pin" {
+  description = "Comdirect online-banking PIN for account 0"
+  type        = string
+  sensitive   = true
+}
+
+# Account 1 — optional. Left empty it is skipped entirely, so no blank
+# APP_accounts__1__* variables reach the stack. Copy this block for a third.
+
+variable "app_account_1_client_id" {
+  description = "Comdirect API client_id for account 1 (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "app_account_1_client_secret" {
+  description = "Comdirect API client_secret for account 1 (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "app_account_1_zugangsnummer" {
+  description = "Comdirect online-banking access number for account 1 (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "app_account_1_pin" {
+  description = "Comdirect online-banking PIN for account 1 (optional)"
+  type        = string
+  sensitive   = true
+  default     = ""
 }
