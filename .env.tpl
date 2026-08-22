@@ -33,16 +33,15 @@ TF_VAR_app_account_0_client_secret="op://HomeLab/finreport/comdirect/client_secr
 TF_VAR_app_account_0_zugangsnummer="op://HomeLab/finreport/comdirect/zugangsnummer"
 TF_VAR_app_account_0_pin="op://HomeLab/finreport/comdirect/pin"
 
-# Second login — repoint these at its own 1Password item and uncomment, then
-# uncomment the APP_accounts__1__* block in docker-compose.yml too.
-APP_accounts__1__client_id="op://HomeLab/finreport/comdirect-2/client_id"
-APP_accounts__1__client_secret="op://HomeLab/finreport/comdirect-2/client_secret"
-APP_accounts__1__zugangsnummer="op://HomeLab/finreport/comdirect-2/zugangsnummer"
-APP_accounts__1__pin="op://HomeLab/finreport/comdirect-2/pin"
-TF_VAR_app_account_1_client_id="op://HomeLab/finreport/comdirect-2/client_id"
-TF_VAR_app_account_1_client_secret="op://HomeLab/finreport/comdirect-2/client_secret"
-TF_VAR_app_account_1_zugangsnummer="op://HomeLab/finreport/comdirect-2/zugangsnummer"
-TF_VAR_app_account_1_pin="op://HomeLab/finreport/comdirect-2/pin"
+# Second login, from its own 1Password item.
+APP_accounts__1__client_id="op://HomeLab/finreport/comdirect 42992464/client_id"
+APP_accounts__1__client_secret="op://HomeLab/finreport/comdirect 42992464/client_secret"
+APP_accounts__1__zugangsnummer="op://HomeLab/finreport/comdirect 42992464/zugangsnummer"
+APP_accounts__1__pin="op://HomeLab/finreport/comdirect 42992464/pin"
+TF_VAR_app_account_1_client_id="op://HomeLab/finreport/comdirect 42992464/client_id"
+TF_VAR_app_account_1_client_secret="op://HomeLab/finreport/comdirect 42992464/client_secret"
+TF_VAR_app_account_1_zugangsnummer="op://HomeLab/finreport/comdirect 42992464/zugangsnummer"
+TF_VAR_app_account_1_pin="op://HomeLab/finreport/comdirect 42992464/pin"
 
 # Postgres password — pulled from 1Password and passed to Terraform, which
 # then injects it into the Portainer stack via extra_env.
