@@ -74,7 +74,7 @@ services:
       #
       # The label is not a secret and does not vary by environment, so it is
       # written here rather than plumbed through 1Password and terraform.
-      APP_accounts__0__name: Main
+      APP_accounts__0__name: Comdirect Family
       APP_accounts__0__client_id: ${APP_accounts__0__client_id}
       APP_accounts__0__client_secret: ${APP_accounts__0__client_secret}
       APP_accounts__0__zugangsnummer: ${APP_accounts__0__zugangsnummer}
@@ -85,7 +85,7 @@ services:
       # Second login. Its session lands beside the first as .session.1.json
       # (APP_save_file_path + the account key). Credentials come from the
       # TF_VAR_app_account_1_* entries in .env.tpl.
-      APP_accounts__1__name: Second
+      APP_accounts__1__name: Comdirect Pavlo
       APP_accounts__1__client_id: ${APP_accounts__1__client_id}
       APP_accounts__1__client_secret: ${APP_accounts__1__client_secret}
       APP_accounts__1__zugangsnummer: ${APP_accounts__1__zugangsnummer}
