@@ -3,11 +3,14 @@
 # ── Build stage ────────────────────────────────────────────────────────
 FROM rust:1.93-slim-bookworm AS builder
 
-# cmake/make/g++ are for librdkafka, which rdkafka-sys builds from source
-# (cmake-build feature). It is linked statically, so the runtime stage
-# needs no additional packages.
+# make/g++ are for librdkafka, which rdkafka-sys builds from source with
+# librdkafka's own configure script (mklove). Do NOT switch that to the crate's
+# `cmake-build` feature: the cmake path never passes WITH_CURL=OFF, so
+# librdkafka's default turns CURL on and the build then needs libcurl headers.
+# The configure path explicitly disables curl/ssl/gssapi/zlib/zstd, so no extra
+# dev packages are required and the runtime stage needs nothing new either.
 RUN apt-get update && apt-get install -y \
-        pkg-config libssl-dev cmake make g++ \
+        pkg-config libssl-dev make g++ \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build

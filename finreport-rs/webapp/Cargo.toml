@@ -29,7 +29,7 @@ async-graphql-actix-web = "7.0.17"
 actix-cors = "0.7.1"
 sea-orm = { version = "1.1.12", features = ["runtime-tokio", "sqlx-postgres", "macros", "mock", "debug-print", "with-json"] }
 chrono = "0.4.41"
-rdkafka = { version = "0.39.0", default-features = false, features = ["cmake-build", "tokio"] }
+rdkafka = { version = "0.39.0", default-features = false, features = ["tokio"] }
 
 
 [[bin]]
