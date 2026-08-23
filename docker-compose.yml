@@ -52,6 +52,13 @@ services:
       services-lan:
         ipv4_address: 192.168.100.37
     volumes:
+      # This directory MUST be owned by the image's `redpanda` user. The image
+      # runs as that user (not root) and never chowns, unlike the postgres
+      # image, so a fresh root-owned bind mount makes redpanda die on its first
+      # write with `Permission denied` and restart forever:
+      #     uid=$(docker run --rm --entrypoint id \
+      #             docker.redpanda.com/redpandadata/redpanda:v24.3.6 -u)
+      #     chown -R "$uid:$uid" /mnt/user/appdata/finreport-redpanda
       - /mnt/user/appdata/finreport-redpanda:/var/lib/redpanda/data
     healthcheck:
       test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
