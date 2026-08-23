@@ -24,6 +24,43 @@ services:
     labels:
       - "net.unraid.docker.managed=composeman"
 
+  # Redpanda (Kafka API) broker for the event-log migration. Phase 1 is a
+  # dual-write: the importer publishes here while Postgres stays the source of
+  # truth, so this broker being down must never stop an import.
+  #
+  # It gets its own services-lan address and publishes NO host ports, so
+  # nothing on the tower contends for 9092. Topics are managed by terraform
+  # (terraform/kafka), not auto-created here.
+  finreport-redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.6
+    container_name: finreport-redpanda
+    restart: always
+    command:
+      - redpanda
+      - start
+      - --node-id=0
+      - --smp=1
+      - --memory=1G
+      - --reserve-memory=0M
+      - --overprovisioned
+      - --check=false
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr=PLAINTEXT://192.168.100.37:9092
+      - --rpc-addr=0.0.0.0:33145
+      - --advertise-rpc-addr=192.168.100.37:33145
+    networks:
+      services-lan:
+        ipv4_address: 192.168.100.37
+    volumes:
+      - /mnt/user/appdata/finreport-redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
   finreport-be:
     image: ${DOCKER_REGISTRY}/finreport-be:latest
     pull_policy: always
@@ -61,12 +98,17 @@ services:
     depends_on:
       finreport-be-postgres:
         condition: service_healthy
+      finreport-redpanda:
+        condition: service_started
     environment:
       RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
+      # Event-log dual-write target. Unset it to disable publishing entirely
+      # (that is what local dev does) — imports carry on either way.
+      APP_kafka_brokers: 192.168.100.37:9092
       # Comdirect logins, numbered. The importer runs one task per account in
       # this single container, so adding a login is just another block here
       # (plus its TF_VAR_app_account_<n>_* entries in .env.tpl) — no new

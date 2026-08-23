@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+chrono = "0.4.41"
 reqwest = { version = "0.12.19", features = ["json"] }
 reqwest-middleware = { version = "0.4", features = ["json"] }
 reqwest-retry = "0.7"

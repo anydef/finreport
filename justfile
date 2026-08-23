@@ -84,3 +84,24 @@ import-local *ARGS:
         RUST_LOG=info \
         op run --env-file .env.tpl -- \
         cargo run --manifest-path finreport-rs/Cargo.toml --bin import-transactions -- {{ARGS}}
+
+# Runs the console container on this machine only — nothing is deployed and the
+# tower stack is untouched. Open http://localhost:8090; Ctrl-C to stop.
+#
+# The broker publishes no host port (see docker-compose.yml): it is reachable
+# on services-lan at 192.168.100.37:9092, so this needs LAN access and a
+# deployed stack. Override either argument to point elsewhere, e.g. at a local
+# broker:
+#     just redpanda-console 127.0.0.1:19092
+#     just redpanda-console 192.168.100.37:9092 9000
+#
+# Redpanda Console (web UI) locally, against the tower's broker.
+redpanda-console broker="192.168.100.37:9092" port="8090":
+    @echo "==> Redpanda Console http://localhost:{{port}} -> {{broker}} (Ctrl-C to stop)"
+    # Add -e REDPANDA_ADMINAPI_ENABLED=true -e REDPANDA_ADMINAPI_URLS=http://<broker-host>:9644
+    # to surface cluster/broker config in the UI as well as topics.
+    docker run --rm -it \
+        --name finreport-redpanda-console \
+        -p {{port}}:8080 \
+        -e KAFKA_BROKERS={{broker}} \
+        docker.redpanda.com/redpandadata/console:v2.8.5

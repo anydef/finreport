@@ -138,3 +138,9 @@ variable "app_account_1_pin" {
   sensitive   = true
   default     = ""
 }
+
+variable "kafka_bootstrap_servers" {
+  description = "Redpanda bootstrap servers, as advertised on services-lan"
+  type        = list(string)
+  default     = ["192.168.100.37:9092"]
+}

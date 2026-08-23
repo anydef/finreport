@@ -61,6 +61,12 @@ pub struct Settings {
     pub save_file_path: String,
     pub database_url: SecretString,
 
+    /// Kafka/Redpanda bootstrap servers for the event-log dual-write, e.g.
+    /// `192.168.100.37:9092`. Unset disables publishing entirely: during the
+    /// migration Postgres is still the source of truth, so an importer with no
+    /// broker configured is a supported setup (local dev runs this way).
+    pub kafka_brokers: Option<String>,
+
     /// Comdirect logins keyed by the segment in `APP_accounts__<key>__*`.
     /// A `BTreeMap` rather than a `Vec` because config-rs turns numbered env
     /// segments into a table keyed by `"0"`, `"1"`, ... — sorting by key keeps

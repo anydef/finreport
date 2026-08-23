@@ -3,7 +3,12 @@
 # ── Build stage ────────────────────────────────────────────────────────
 FROM rust:1.93-slim-bookworm AS builder
 
-RUN apt-get update && apt-get install -y pkg-config libssl-dev && rm -rf /var/lib/apt/lists/*
+# cmake/make/g++ are for librdkafka, which rdkafka-sys builds from source
+# (cmake-build feature). It is linked statically, so the runtime stage
+# needs no additional packages.
+RUN apt-get update && apt-get install -y \
+        pkg-config libssl-dev cmake make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 

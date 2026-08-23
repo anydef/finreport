@@ -14,6 +14,14 @@ terraform {
       source  = "registry.terraform.io/anydef/opnsense"
       version = "0.1.0"
     }
+    kafka = {
+      source  = "Mongey/kafka"
+      version = "~> 0.13"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = "~> 3.0"
+    }
   }
 
   backend "s3" {
@@ -59,4 +67,16 @@ provider "opnsense" {
   api_key    = var.opnsense_api_key
   api_secret = var.opnsense_api_secret
   insecure   = true
+}
+
+# Plaintext, no auth — the Redpanda broker sits on the trusted services LAN,
+# not exposed beyond it, so TLS/SASL would add no real protection here.
+#
+# Note this couples plans of this module to broker reachability: once topics
+# are in state, a refresh reads them. If the broker is down and you need to
+# deploy anyway, `terraform apply -target=module.portainer_stack` (or
+# `-refresh=false`) still works.
+provider "kafka" {
+  bootstrap_servers = var.kafka_bootstrap_servers
+  tls_enabled       = false
 }

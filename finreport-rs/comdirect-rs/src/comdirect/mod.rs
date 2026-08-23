@@ -4,6 +4,7 @@ pub mod balance;
 pub mod balance_model;
 pub mod http;
 pub mod loader;
+pub mod raw;
 pub mod session;
 pub mod session_client;
 pub mod transaction;

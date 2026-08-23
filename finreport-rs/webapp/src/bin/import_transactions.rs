@@ -5,9 +5,10 @@
 //! holding up the others. `--account <key>` narrows the run to a single login
 //! (handy locally); without it every configured account is imported.
 
-use comdirect_rs::comdirect::accounts::{get_account_transactions, get_accounts};
+use comdirect_rs::comdirect::accounts::{get_account_transactions_since_raw, get_accounts_raw};
 use comdirect_rs::comdirect::session::{load_comdirect_session, refresh_comdirect_session};
 use comdirect_rs::comdirect::session_client::Session;
+use comdirect_rs::comdirect::transaction::ImportStop;
 use dotenv::dotenv;
 use entities::{account, account_balance};
 use entity::entities;
@@ -15,6 +16,7 @@ use sea_orm::sea_query::OnConflict;
 use sea_orm::{DbConn, EntityTrait, Set, Unchanged};
 use secrecy::ExposeSecret;
 use std::error::Error;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
@@ -24,6 +26,10 @@ use tracing_subscriber::EnvFilter;
 use utils::settings::{ComdirectProfile, Settings};
 use webapp::cli::account_arg;
 use webapp::db::seaql;
+use webapp::kafka::events::split_account_element;
+use webapp::kafka::producer::{EventPublisher, RecordMeta};
+use webapp::kafka::watermark::{load_watermarks, publish_watermark, Watermark};
+use webapp::kafka::{TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION};
 
 // --- Loop tuning -------------------------------------------------------------
 
@@ -96,7 +102,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         );
         let span = info_span!("account", key = %profile.key);
         let conn = Arc::clone(&conn);
-        accounts.spawn(async move { run_account(profile, conn).instrument(span).await });
+        let brokers = client_settings.kafka_brokers.clone();
+        accounts.spawn(async move { run_account(profile, conn, brokers).instrument(span).await });
     }
 
     // Each task only returns once that login has failed for good; the others
@@ -123,7 +130,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// Drives one Comdirect login forever: session bootstrap (including the TAN
 /// approval), periodic token refresh and periodic import. Returns the account
 /// key only when that login has failed for good.
-async fn run_account(profile: ComdirectProfile, conn: Arc<DbConn>) -> String {
+async fn run_account(
+    profile: ComdirectProfile,
+    conn: Arc<DbConn>,
+    brokers: Option<String>,
+) -> String {
+    // Publishing is an optional side-channel during dual-write: if the broker
+    // is unreachable or unconfigured, this account still imports into Postgres.
+    let publisher = match brokers.as_deref() {
+        None => None,
+        Some(brokers) => match EventPublisher::connect(brokers) {
+            Ok(publisher) => Some(publisher),
+            Err(e) => {
+                error!(%e, "[startup] could not reach the broker; publishing disabled");
+                None
+            }
+        },
+    };
+
+    // Resume points, so an import only publishes what the log lacks. An empty
+    // map means "import everything", which is the first-run and no-Kafka path.
+    let mut watermarks = match (publisher.is_some(), brokers.clone()) {
+        (true, Some(brokers)) => {
+            match tokio::task::spawn_blocking(move || load_watermarks(&brokers)).await {
+                Ok(Ok(watermarks)) => {
+                    info!(accounts = watermarks.len(), "[startup] loaded resume points");
+                    watermarks
+                }
+                Ok(Err(e)) => {
+                    warn!(%e, "[startup] could not read resume points; importing full history");
+                    HashMap::new()
+                }
+                Err(e) => {
+                    warn!(%e, "[startup] resume-point read panicked; importing full history");
+                    HashMap::new()
+                }
+            }
+        }
+        _ => HashMap::new(),
+    };
+
     let mut state = LoopState::Bootstrap { attempt: 0 };
     loop {
         state = match state {
@@ -182,7 +228,7 @@ async fn run_account(profile: ComdirectProfile, conn: Arc<DbConn>) -> String {
                 let now = Instant::now();
                 if next_import <= now {
                     info!("[import] starting");
-                    match run_import(&session, &profile, &conn).await {
+                    match run_import(&session, &profile, &conn, publisher.as_ref(), &mut watermarks).await {
                         Ok(()) => {
                             let next = Instant::now() + IMPORT_INTERVAL;
                             info!(
@@ -239,15 +285,56 @@ async fn run_import(
     session: &Session,
     profile: &ComdirectProfile,
     conn: &DbConn,
+    publisher: Option<&EventPublisher>,
+    watermarks: &mut HashMap<String, Watermark>,
 ) -> Result<(), Box<dyn Error>> {
-    let accounts = get_accounts(session.clone(), profile).await?;
+    let accounts = get_accounts_raw(session.clone(), profile).await?;
+    let imported_at = chrono::Utc::now().to_rfc3339();
+    let meta = RecordMeta {
+        account_key: &profile.key,
+        account_name: profile.name.as_deref(),
+        imported_at: &imported_at,
+    };
     info!(
         account = %profile.key,
         count = accounts.accounts.len(),
         "[import] loaded accounts from Comdirect"
     );
 
-    for account in accounts.accounts {
+    for element in accounts.accounts {
+        let account = &element.parsed;
+
+        // Publish the bank's own bytes for this account and its balance. The
+        // response bundles both, but they belong on different topics, so they
+        // are sliced out of the original payload rather than re-encoded.
+        if let Some(publisher) = publisher {
+            match split_account_element(&element.raw) {
+                Ok((account_json, balance_json)) => {
+                    let key = &account.account.account_id;
+                    publisher
+                        .publish_best_effort(
+                            TOPIC_ACCOUNT,
+                            key,
+                            account_json.get().as_bytes(),
+                            &meta,
+                        )
+                        .await;
+                    publisher
+                        .publish_best_effort(
+                            TOPIC_ACCOUNT_BALANCE,
+                            key,
+                            balance_json.get().as_bytes(),
+                            &meta,
+                        )
+                        .await;
+                }
+                Err(e) => warn!(
+                    display_id = %account.account.display_id,
+                    %e, "could not split account payload; not published"
+                ),
+            }
+        }
+
         let account_orm = account::ActiveModel {
             account_id: Unchanged(account.account.account_id.clone()),
             display_id: Unchanged(account.account.display_id.to_owned()),
@@ -322,28 +409,77 @@ async fn run_import(
             ),
         }
 
-        debug!(account_id = %account.account_id, "fetching transactions");
+        // Resume where the log left off. With no watermark (first run, or no
+        // broker configured) this is an unrestricted fetch — today's behaviour.
+        let account_id = account.account.account_id.clone();
+        let stop = watermarks
+            .get(&account_id)
+            .map(|w| ImportStop {
+                last_reference: w.last_reference.clone(),
+                last_booking_date: w.last_booking_date,
+            })
+            .unwrap_or_default();
+        debug!(
+            account_id = %account.account_id,
+            resume_from = ?stop.last_booking_date,
+            "fetching transactions"
+        );
         let transactions =
-            get_account_transactions(session.clone(), profile, &account.account).await?;
+            get_account_transactions_since_raw(session.clone(), profile, &account.account, &stop)
+                .await?;
 
-        for transaction in transactions {
+        // Newest by booking date, not by position: the API's ordering is an
+        // assumption the client guards but does not rely on.
+        let newest = transactions
+            .iter()
+            .filter_map(|t| {
+                t.parsed
+                    .booking_date
+                    .parse::<chrono::NaiveDate>()
+                    .ok()
+                    .map(|date| (date, t.parsed.reference.clone()))
+            })
+            .max_by(|a, b| a.0.cmp(&b.0));
+
+        for raw_transaction in &transactions {
+            let transaction = &raw_transaction.parsed;
+            if let Some(publisher) = publisher {
+                publisher
+                    .publish_best_effort(
+                        TOPIC_TRANSACTION,
+                        &account_id,
+                        raw_transaction.raw.get().as_bytes(),
+                        &meta,
+                    )
+                    .await;
+            }
             let transaction_orm = entities::account_transactions::ActiveModel {
                 reference: Set(transaction.reference.to_owned()),
                 account_id: Set(account.account.account_id.to_owned()),
-                booking_status: Set(transaction.booking_status),
+                booking_status: Set(transaction.booking_status.clone()),
                 booking_date: Set(transaction.booking_date.parse().unwrap()),
                 amount: Set(transaction.amount.value.parse().unwrap_or(0.0)),
-                remitter: Set(transaction.remitter.unwrap_or_default().holder_name),
-                deptor: Set(transaction.deptor.unwrap_or_default()),
+                remitter: Set(transaction
+                    .remitter
+                    .as_ref()
+                    .map(|remitter| remitter.holder_name.clone())
+                    .unwrap_or_default()),
+                deptor: Set(transaction.deptor.clone().unwrap_or_default()),
                 creditor: Set(transaction
                     .creditor
-                    .unwrap_or_default()
-                    .holder_name
-                    .to_owned()),
-                creditor_id: Set(transaction.direct_debit_creditor_id.unwrap_or_default()),
-                creditor_mandate_id: Set(transaction.direct_debit_mandate_id.unwrap_or_default()),
-                remittance_info: Set(transaction.remittance_info),
-                transaction_type: Set(transaction.transaction_type.text),
+                    .as_ref()
+                    .map(|creditor| creditor.holder_name.clone())
+                    .unwrap_or_default()),
+                creditor_id: Set(transaction
+                    .direct_debit_creditor_id
+                    .clone()
+                    .unwrap_or_default()),
+                creditor_mandate_id: Set(transaction
+                    .direct_debit_mandate_id
+                    .clone()
+                    .unwrap_or_default()),
+                remittance_info: Set(transaction.remittance_info.clone()),
+                transaction_type: Set(transaction.transaction_type.text.clone()),
                 ..Default::default()
             };
 
@@ -373,6 +509,32 @@ async fn run_import(
                     %e,
                     "failed to insert transaction"
                 ),
+            }
+        }
+
+        // Advance the resume point only when this pass actually saw something
+        // newer. An empty fetch means the log is already current, and moving
+        // the watermark backwards would re-publish history next run.
+        if let (Some(publisher), Some((booking_date, reference))) = (publisher, newest) {
+            let already_current = watermarks
+                .get(&account_id)
+                .and_then(|w| w.last_booking_date)
+                .is_some_and(|previous| previous > booking_date);
+
+            if !already_current {
+                let watermark = Watermark {
+                    account_id: account_id.clone(),
+                    last_booking_date: Some(booking_date),
+                    last_reference: Some(reference),
+                    updated_at: chrono::Utc::now(),
+                };
+                publish_watermark(publisher, &watermark, &meta).await;
+                debug!(
+                    account_id = %account_id,
+                    %booking_date,
+                    "advanced resume point"
+                );
+                watermarks.insert(account_id.clone(), watermark);
             }
         }
     }

@@ -1,7 +1,7 @@
-use crate::comdirect::balance_model::AccountsBalancesResponse;
+use crate::comdirect::balance_model::{AccountsBalancesResponse, AccountsBalancesResponseRaw};
 use crate::comdirect::session_client::HttpRequestInfoHeader;
 use crate::comdirect::session_client::Session;
-use crate::comdirect::transaction::TransactionsResponse;
+use crate::comdirect::transaction::{TransactionsResponse, TransactionsResponseRaw};
 use crate::comdirect::utils::request_id;
 use reqwest::header::{ACCEPT, AUTHORIZATION, CONTENT_TYPE};
 use reqwest::StatusCode;
@@ -98,6 +98,39 @@ impl AccountClient {
         }
     }
 
+    /// Same request as `accounts()`, but keeps each balances-response
+    /// element's exact raw JSON alongside its parsed form, for the Kafka
+    /// publishing path (which must forward Comdirect's bytes untouched).
+    pub async fn accounts_raw(&self) -> AccountClientResult<AccountsBalancesResponseRaw> {
+        let url = format!("{}/banking/clients/user/v2/accounts/balances", self.url);
+        let response = self
+            .client
+            .get(url)
+            .header(
+                AUTHORIZATION,
+                format!("Bearer {}", self.session.access_token.clone()),
+            )
+            .header("x-http-request-info", self.info_header())
+            .header(CONTENT_TYPE, "application/json")
+            .header(ACCEPT, "application/json")
+            .send()
+            .await?;
+        match response.status() {
+            reqwest::StatusCode::OK => {
+                let body = response.text().await?;
+                AccountsBalancesResponseRaw::from_json(&body).map_err(|e| {
+                    error!(?e, "accounts_raw: parse failed");
+                    AccountClientError::Unknown
+                })
+            }
+            reqwest::StatusCode::UNAUTHORIZED => Err(AccountClientError::Unauthorized),
+            _ => {
+                error!(status = ?response.status(), "accounts_raw: unexpected status");
+                Err(AccountClientError::Unknown)
+            }
+        }
+    }
+
     pub async fn get_account_transactions(
         &self,
         account_id: &str,
@@ -138,6 +171,52 @@ impl AccountClient {
             error!(
                 %account_id, idx = index, %status, %body,
                 "get_account_transactions: non-OK response"
+            );
+            Err(AccountClientError::Unknown)
+        }
+    }
+
+    /// Same request as `get_account_transactions()`, but keeps each
+    /// transaction's exact raw JSON alongside its parsed form, for the Kafka
+    /// publishing path.
+    pub async fn get_account_transactions_raw(
+        &self,
+        account_id: &str,
+        index: u32,
+    ) -> AccountClientResult<TransactionsResponseRaw> {
+        let url = format!(
+            "{}/banking/v1/accounts/{}/transactions?transactionState=BOOKED&paging-first={}",
+            self.url, account_id, index
+        );
+
+        let response = self
+            .client
+            .get(&url)
+            .header(ACCEPT, "application/json")
+            .header(CONTENT_TYPE, "application/json")
+            .header(
+                AUTHORIZATION,
+                format!("Bearer {}", self.session.access_token),
+            )
+            .header("x-http-request-info", self.info_header())
+            .send()
+            .await?;
+
+        let status = response.status();
+        if status == StatusCode::OK {
+            let body = response.text().await?;
+            TransactionsResponseRaw::from_json(&body).map_err(|e| {
+                error!(
+                    %account_id, idx = index, ?e,
+                    "get_account_transactions_raw: parse failed"
+                );
+                AccountClientError::Unknown
+            })
+        } else {
+            let body = response.text().await.unwrap_or_default();
+            error!(
+                %account_id, idx = index, %status, %body,
+                "get_account_transactions_raw: non-OK response"
             );
             Err(AccountClientError::Unknown)
         }
