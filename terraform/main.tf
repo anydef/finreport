@@ -98,39 +98,11 @@ module "portainer_stack" {
   )
 }
 
-# The broker is a service inside the Portainer stack above, so topics can only
-# be created once that stack is up. `depends_on` orders the module, and the
-# gate below waits for the broker to actually accept connections — Portainer
-# returns as soon as it has accepted the stack, well before redpanda is
-# listening.
-resource "null_resource" "redpanda_ready" {
-  depends_on = [module.portainer_stack]
-
-  triggers = {
-    broker       = join(",", var.kafka_bootstrap_servers)
-    stack_update = var.force_update
-  }
-
-  provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-c"]
-    command     = <<-EOT
-      broker="${split(",", join(",", var.kafka_bootstrap_servers))[0]}"
-      host="$${broker%%:*}"; port="$${broker##*:}"
-      echo "==> Waiting for Redpanda at $${host}:$${port}..."
-      for _ in $(seq 1 30); do
-        if timeout 2 bash -c "exec 3<>/dev/tcp/$${host}/$${port}" 2>/dev/null; then
-          echo "==> Redpanda is accepting connections"
-          exit 0
-        fi
-        sleep 2
-      done
-      echo "Redpanda at $${host}:$${port} unreachable after 60s" >&2
-      exit 1
-    EOT
-  }
-}
-
+# The broker is central homelab infrastructure (kafka.lab.anydef.de), managed
+# and deployed outside this repo — finreport only owns its own topics on it.
+# No readiness gate is needed here: an unreachable broker is a legitimate
+# external-dependency failure for `terraform plan`/`apply` to report on its
+# own, not something this module needs to poll for.
 module "kafka_topics" {
-  source     = "./kafka"
-  depends_on = [null_resource.redpanda_ready]
+  source = "./kafka"
 }

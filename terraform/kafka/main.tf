@@ -1,15 +1,8 @@
-# Redpanda (Kafka) topic definitions for finreport.
-#
-# A child module of terraform/, applied in the same run and sharing its state.
-# The broker is a service in the Portainer stack that terraform/ deploys, so
-# ordering matters: the module depends on null_resource.redpanda_ready, which
-# blocks until the broker is actually accepting connections. Portainer returns
-# as soon as it accepts the stack, well before redpanda is listening.
-#
-# The trade-off of sharing state: once topics are in it, any plan of the root
-# module refreshes them, so plans need the broker reachable. If it is down and
-# you need to deploy regardless, `terraform apply -target=module.portainer_stack`
-# or `-refresh=false` gets you through.
+# Kafka topic definitions for finreport, on the central homelab broker
+# (kafka.lab.anydef.de — see the "kafka" provider block in terraform/provider.tf).
+# The broker itself is infrastructure this repo does not own or deploy; this
+# module owns only the finreport.* topics on it, as a child module of
+# terraform/ sharing its state.
 #
 # All four topics are keyed by account_id.
 #

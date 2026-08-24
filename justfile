@@ -85,18 +85,18 @@ import-local *ARGS:
         op run --env-file .env.tpl -- \
         cargo run --manifest-path finreport-rs/Cargo.toml --bin import-transactions -- {{ARGS}}
 
-# Runs the console container on this machine only — nothing is deployed and the
-# tower stack is untouched. Open http://localhost:8090; Ctrl-C to stop.
+# Runs the console container on this machine only — nothing is deployed.
+# Open http://localhost:8090; Ctrl-C to stop.
 #
-# The broker publishes no host port (see docker-compose.yml): it is reachable
-# on services-lan at 192.168.100.37:9092, so this needs LAN access and a
-# deployed stack. Override either argument to point elsewhere, e.g. at a local
+# Kafka is central homelab infrastructure (kafka.lab.anydef.de), not part of
+# this repo's stack, so this just needs kafka.lab.anydef.de to resolve and be
+# reachable. Override either argument to point elsewhere, e.g. at a local
 # broker:
 #     just redpanda-console 127.0.0.1:19092
-#     just redpanda-console 192.168.100.37:9092 9000
+#     just redpanda-console kafka.lab.anydef.de:9092 9000
 #
-# Redpanda Console (web UI) locally, against the tower's broker.
-redpanda-console broker="192.168.100.37:9092" port="8090":
+# Redpanda Console (web UI) locally, against the central broker.
+redpanda-console broker="kafka.lab.anydef.de:9092" port="8090":
     @echo "==> Redpanda Console http://localhost:{{port}} -> {{broker}} (Ctrl-C to stop)"
     # Add -e REDPANDA_ADMINAPI_ENABLED=true -e REDPANDA_ADMINAPI_URLS=http://<broker-host>:9644
     # to surface cluster/broker config in the UI as well as topics.

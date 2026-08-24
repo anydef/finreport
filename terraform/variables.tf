@@ -140,7 +140,7 @@ variable "app_account_1_pin" {
 }
 
 variable "kafka_bootstrap_servers" {
-  description = "Redpanda bootstrap servers, as advertised on services-lan"
+  description = "Central homelab Kafka bootstrap servers (not deployed by this repo)"
   type        = list(string)
-  default     = ["192.168.100.37:9092"]
+  default     = ["kafka.lab.anydef.de:9092"]
 }

@@ -61,8 +61,9 @@ pub struct Settings {
     pub save_file_path: String,
     pub database_url: SecretString,
 
-    /// Kafka/Redpanda bootstrap servers for the event-log dual-write, e.g.
-    /// `192.168.100.37:9092`. Unset disables publishing entirely: during the
+    /// Kafka bootstrap servers for the event-log dual-write, e.g.
+    /// `kafka.lab.anydef.de:9092` — central homelab infrastructure, not
+    /// deployed by this repo. Unset disables publishing entirely: during the
     /// migration Postgres is still the source of truth, so an importer with no
     /// broker configured is a supported setup (local dev runs this way).
     pub kafka_brokers: Option<String>,

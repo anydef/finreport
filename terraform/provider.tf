@@ -18,10 +18,6 @@ terraform {
       source  = "Mongey/kafka"
       version = "~> 0.13"
     }
-    null = {
-      source  = "hashicorp/null"
-      version = "~> 3.0"
-    }
   }
 
   backend "s3" {
@@ -69,13 +65,15 @@ provider "opnsense" {
   insecure   = true
 }
 
-# Plaintext, no auth — the Redpanda broker sits on the trusted services LAN,
-# not exposed beyond it, so TLS/SASL would add no real protection here.
+# kafka.lab.anydef.de is central homelab infrastructure, not deployed by this
+# repo — finreport only manages its own topics on it (see terraform/kafka).
+# Plaintext, no auth: the broker sits on the trusted internal LAN, not exposed
+# beyond it, so TLS/SASL would add no real protection here.
 #
-# Note this couples plans of this module to broker reachability: once topics
-# are in state, a refresh reads them. If the broker is down and you need to
-# deploy anyway, `terraform apply -target=module.portainer_stack` (or
-# `-refresh=false`) still works.
+# Every plan of this module refreshes finreport's topics, so plans need the
+# broker reachable. If it's down and you need to deploy the app regardless,
+# `terraform apply -target=module.portainer_stack` skips the Kafka provider
+# entirely.
 provider "kafka" {
   bootstrap_servers = var.kafka_bootstrap_servers
   tls_enabled       = false

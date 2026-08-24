@@ -8,10 +8,12 @@ here changes what `import_transactions` writes to `account` /
 publishes an event per record it already writes. If this phase goes wrong,
 the fix is "stop publishing" — Postgres is unaffected either way.
 
-Status: design only. Nothing in this doc has been built yet; the broker,
-topics, and importer changes described below do not exist in the codebase as
-of this writing. Assumptions are called out explicitly rather than stated as
-fact.
+Status: implemented (phase 1). The importer, topics, and Terraform module
+described below exist in the codebase. The broker itself is **central
+homelab infrastructure at `kafka.lab.anydef.de:9092`, not deployed by this
+repo** — this repo owns only its own topics on it (`terraform/kafka`).
+Assumptions that were unverified at design time and remain so are still
+called out explicitly rather than stated as fact.
 
 ## 1. Why
 
@@ -62,12 +64,13 @@ a partitioner.
 | `finreport.import-watermark` | `account_id` | `compact` | n/a | Our own small JSON — see §3 |
 
 All four topics are created by Terraform using the `Mongey/kafka` provider,
-in a **separate root module** from whatever provisions the broker itself.
-Reason: the `kafka` provider connects to the broker at plan time to manage
-topics, so it can't live in the module that stands the broker up — on a
-clean apply the broker doesn't exist yet when Terraform would try to
-resolve the provider. Two-step apply: broker module first, topic module
-second.
+as the `terraform/kafka` child module of this repo's existing root module —
+same state, same `just deploy`. This repo does not provision the broker
+itself; `kafka.lab.anydef.de` is expected to already exist and be reachable
+whenever this module plans or applies. (An earlier iteration of this design
+ran the broker as part of finreport's own stack and had to sequence around
+bringing it up first; centralizing the broker removed that problem instead
+of solving it in-repo.)
 
 ### Raw-payload rule
 
@@ -195,26 +198,27 @@ wrong and the failure mode is silent data loss, not a crash.
 
 ## 5. Operating it
 
-Broker: `192.168.100.37:9092`, plaintext, LAN-reachable — no TLS or SASL
-assumed for this phase (matches the plaintext, LAN-only posture of the rest
-of the stack, e.g. Postgres at `192.168.100.33:5432`).
+Broker: `kafka.lab.anydef.de:9092`, plaintext, no TLS or SASL — a central
+homelab service, not something this repo deploys or configures. See whatever
+repo/runbook owns that host for broker-level operations (upgrades, node
+health, disk); this section only covers finreport's own topics on it.
 
 Using [`rpk`](https://docs.redpanda.com/current/reference/rpk/) against that
 broker:
 
 ```bash
 # list topics
-rpk topic list -X brokers=192.168.100.37:9092
+rpk topic list -X brokers=kafka.lab.anydef.de:9092
 
 # describe a topic's config (partitions, cleanup.policy, retention)
-rpk topic describe finreport.transaction -X brokers=192.168.100.37:9092
+rpk topic describe finreport.transaction -X brokers=kafka.lab.anydef.de:9092
 
 # tail new events for an account (client-side filter — the topic isn't partitioned by account)
-rpk topic consume finreport.transaction -X brokers=192.168.100.37:9092 | jq 'select(.key == "<account_id>")'
+rpk topic consume finreport.transaction -X brokers=kafka.lab.anydef.de:9092 | jq 'select(.key == "<account_id>")'
 
 # check a single account's current watermark: compacted topic, so consuming
 # from the start and keeping the last record per key gives the current value
-rpk topic consume finreport.import-watermark -X brokers=192.168.100.37:9092 \
+rpk topic consume finreport.import-watermark -X brokers=kafka.lab.anydef.de:9092 \
   --offset start -f '%v\n' | jq -c 'select(.account_id == "<account_id>")' | tail -n 1
 ```
 
@@ -226,17 +230,18 @@ watermark reader treats "no record" as "import everything"):
 ```bash
 # reset by writing an old/empty watermark
 echo '{"account_id":"<account_id>","last_reference":null,"last_booking_date":null,"updated_at":"<now>"}' \
-  | rpk topic produce finreport.import-watermark -X brokers=192.168.100.37:9092 --key '<account_id>'
+  | rpk topic produce finreport.import-watermark -X brokers=kafka.lab.anydef.de:9092 --key '<account_id>'
 
 # or delete the key outright via a tombstone (null value), if supported by however produce is invoked
 ```
 
-The importer will pick up the reset watermark on its next scheduled cycle
-(or on next restart, if the watermark is only read at startup — not yet
-decided which, see §6) and early-stop pagination will simply not find
-anything to stop at, so it walks further back — bounded by whatever the
-transaction topic's own history covers plus what Comdirect's API still
-returns for that account.
+The importer reads each account's watermark **once, at process startup**
+(`load_watermarks` in `webapp::kafka::watermark`), not on every import cycle
+— so a reset written while an account's task is already running won't take
+effect until that process restarts. Once it does, early-stop pagination
+simply won't find anything to stop at, so it walks further back — bounded by
+whatever the transaction topic's own history covers plus what Comdirect's
+API still returns for that account.
 
 ## 6. Open questions / not yet decided
 
