@@ -4,7 +4,8 @@
 # module owns only the finreport.* topics on it, as a child module of
 # terraform/ sharing its state.
 #
-# All four topics are keyed by account_id.
+# account, account-balance and import-watermark are keyed by account_id;
+# transaction is keyed by the transaction's own `reference` (see below).
 #
 # Deleting a topic deletes its events, and CI applies this module
 # unattended on every push (see .gitea/workflows/build-deploy.yaml). So every
@@ -51,18 +52,23 @@ resource "kafka_topic" "account_balance" {
   }
 }
 
-# Event stream: individual transactions per account_id. Raw Comdirect API
-# JSON, byte-for-byte. Same reasoning as account-balance: every transaction
-# event matters individually, so delete-cleanup with infinite retention
-# rather than compaction.
+# Event stream: individual transactions, keyed by the transaction's own
+# `reference` — not account_id. account_id is low-cardinality (one key per
+# configured login), so it neither spreads load across partitions nor gives
+# Kafka anything to dedupe on: a reimport (backfill, bug fix, new login)
+# republishes every transaction in range as a brand new record, forever,
+# since nothing here has ever depended on Kafka's per-partition ordering
+# (the resume watermark is computed from the fetch batch in-process, not by
+# replaying this topic — see webapp::kafka::watermark). Compacted on
+# `reference` instead: a reimport just gives the log cleaner a newer record
+# to keep for that key, so duplicates get GC'd instead of accumulating.
 resource "kafka_topic" "transaction" {
   name               = "finreport.transaction"
   partitions         = 1
   replication_factor = 1
 
   config = {
-    "cleanup.policy" = "delete"
-    "retention.ms"   = "-1"
+    "cleanup.policy" = "compact"
   }
 
   lifecycle {

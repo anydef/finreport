@@ -447,7 +447,7 @@ async fn run_import(
                 publisher
                     .publish_best_effort(
                         TOPIC_TRANSACTION,
-                        &account_id,
+                        &transaction.reference,
                         raw_transaction.raw.get().as_bytes(),
                         &meta,
                     )
