@@ -8,6 +8,12 @@ set allow-duplicate-recipes
 build_tools_dir   := ".build/build-tools"
 docker_image_name := "finreport-be"
 
+# Local-dev config for every recipe that talks to the `dev-up` stack, so no
+# finreport-rs/.env (or 1Password) is needed to run the demo. Each value can
+# still be overridden from the calling shell. These are throwaway localhost
+# defaults, never real secrets; real credentials only come in via .env.tpl.
+local_env := 'APP_database_url="${APP_database_url:-postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@127.0.0.1:${FINREPORT_PG_PORT:-5432}/finreport}" APP_kafka_brokers="${APP_kafka_brokers:-127.0.0.1:${FINREPORT_KAFKA_PORT:-19092}}" APP_cookie_secure="${APP_cookie_secure:-false}" APP_allowed_origins="${APP_allowed_origins:-http://localhost:5173}"'
+
 import? '.build/build-tools/common.just'
 
 [private]
@@ -82,13 +88,10 @@ dev-down:
 # `--until-caught-up` to exit at the log end instead of tailing it (what
 # `dev-demo` uses); omit it to keep tailing like the deployed service.
 #
-# Config comes from finreport-rs/.env as usual (dev-be's APP_database_url);
-# APP_kafka_brokers is supplied here rather than left to .env's commented-out
-# default, so this works against FINREPORT_KAFKA_PORT out of the box.
+# Config comes from `local_env` (top of this file); no .env needed.
 dev-projector *ARGS:
     cd finreport-rs && \
-        APP_kafka_brokers="127.0.0.1:${FINREPORT_KAFKA_PORT:-19092}" \
-        RUST_LOG=info \
+        {{local_env}} RUST_LOG=info \
         cargo run -p webapp --bin projector -- {{ARGS}}
 
 # Create (or no-op onto) the `dev` user with a known password, so the seeded
@@ -97,7 +100,7 @@ dev-projector *ARGS:
 # this recipe.
 seed-user:
     cd finreport-rs && \
-        FINREPORT_PASSWORD="${FINREPORT_PASSWORD:-dev}" \
+        {{local_env}} FINREPORT_PASSWORD="${FINREPORT_PASSWORD:-dev}" \
         cargo run -p webapp --bin user-admin -- create-user --username dev --display-name "Local Dev"
 
 # Publish the WP0 fixture corpus (finreport-rs/webapp/fixtures) onto the
@@ -105,21 +108,24 @@ seed-user:
 # from without any Comdirect credentials.
 seed-events:
     cd finreport-rs && \
-        APP_kafka_brokers="127.0.0.1:${FINREPORT_KAFKA_PORT:-19092}" \
-        RUST_LOG=info \
+        {{local_env}} RUST_LOG=info \
         cargo run -p webapp --bin fixture-replay -- webapp/fixtures
 
 # One command, clean checkout to a logged-in dashboard with seeded data:
 # dev-up -> migrate -> seed-user -> seed-events -> projector (catch up) ->
 # link every seeded account to `dev`. No bank credentials, no central broker.
 dev-demo: dev-up
-    cd finreport-rs && make migrate
+    just dev-migrate
     just seed-user
     just seed-events
     just dev-projector --until-caught-up
     cd finreport-rs && \
-        cargo run -p webapp --bin user-admin -- link --username dev --all
+        {{local_env}} cargo run -p webapp --bin user-admin -- link --username dev --all
     @echo "==> Ready: just dev-be (backend) + just dev-fe (frontend), log in as dev/\${FINREPORT_PASSWORD:-dev}"
+
+# Apply all migrations to the local `dev-up` Postgres (no .env needed).
+dev-migrate:
+    {{local_env}} sh -c 'sea-orm-cli migrate -d finreport-rs/migration -u "$APP_database_url" -s public'
 
 # Wipe the projected read model (transactions, balances, offsets) so the next
 # `dev-projector` run replays the log from the beginning. Deliberately leaves
@@ -133,10 +139,9 @@ dev-reset:
         -c 'TRUNCATE TABLE transaction, account_balance, projection_offset;'
 
 # Run the GraphQL backend locally against the Postgres started by `db-up`.
-# Config comes from finreport-rs/.env (copy finreport-rs/.env.example to create it) —
-# cargo needs to run with CWD inside finreport-rs/ for dotenv() to find it.
+# Config comes from `local_env` (top of this file); no .env needed.
 dev-be:
-    cd finreport-rs && RUST_LOG=info cargo run -p webapp --bin webapp
+    cd finreport-rs && {{local_env}} RUST_LOG=info cargo run -p webapp --bin webapp
 
 # Run the GraphQL backend locally against the tower (deployed) Postgres instead
 # of the local one from `just db-up`. All other config still comes from
