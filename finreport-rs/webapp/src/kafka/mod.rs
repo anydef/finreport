@@ -5,15 +5,15 @@
 //! of truth, so publishing is best-effort — a broker outage degrades the event
 //! log, it must never stop an import.
 
+pub mod envelope;
 pub mod events;
 pub mod producer;
 pub mod watermark;
 
-/// Account entity snapshots. Compacted: the latest record per account wins.
-pub const TOPIC_ACCOUNT: &str = "finreport.account";
-/// Balance observations, one per account per import. Retained forever.
-pub const TOPIC_ACCOUNT_BALANCE: &str = "finreport.account-balance";
-/// Transaction events. Retained forever.
-pub const TOPIC_TRANSACTION: &str = "finreport.transaction";
-/// Per-account import resume points. Compacted.
-pub const TOPIC_IMPORT_WATERMARK: &str = "finreport.import-watermark";
+// Topic constants are owned by `envelope` (the frozen §2.2 contract); re-exported
+// here so existing call sites (`producer.rs`, `watermark.rs`, `import_transactions.rs`)
+// keep compiling unchanged against `webapp::kafka::TOPIC_*`.
+pub use envelope::{
+    TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_IMPORT_WATERMARK, TOPIC_TRANSACTION,
+};
+
