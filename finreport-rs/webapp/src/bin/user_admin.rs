@@ -92,7 +92,10 @@ async fn main() -> ExitCode {
 
 async fn run(command: Command) -> Result<(), Box<dyn Error>> {
     let settings = Settings::from_env()?;
-    let db = init_db(secrecy::ExposeSecret::expose_secret(&settings.database_url)).await?;
+    let db = init_db(secrecy::ExposeSecret::expose_secret(
+        settings.require_database_url()?,
+    ))
+    .await?;
 
     match command {
         Command::CreateUser {

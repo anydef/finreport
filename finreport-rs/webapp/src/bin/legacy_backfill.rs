@@ -58,7 +58,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let settings = Settings::from_env()?;
     let brokers = settings.require_kafka_brokers()?.to_string();
-    let conn = Database::connect(settings.database_url.expose_secret()).await?;
+    let conn = Database::connect(settings.require_database_url()?.expose_secret()).await?;
     let publisher = EventPublisher::connect(&brokers)?;
 
     let accounts = legacy_account::Entity::find().all(&conn).await?;

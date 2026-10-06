@@ -1,5 +1,4 @@
 use sea_orm::{DatabaseBackend, MockDatabase};
-use secrecy::SecretString;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::sync::Arc;
@@ -14,10 +13,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Likewise, the exported SDL doesn't depend on any setting's value —
     // only `create_schema`'s signature needs one.
     let settings = Arc::new(Settings {
-        oauth_url: String::new(),
-        url: String::new(),
-        save_file_path: String::new(),
-        database_url: SecretString::from(String::new()),
+        oauth_url: None,
+        url: None,
+        save_file_path: None,
+        database_url: None,
         kafka_brokers: None,
         cookie_secure: true,
         allowed_origins: String::new(),

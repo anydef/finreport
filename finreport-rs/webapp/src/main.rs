@@ -59,19 +59,24 @@ async fn main() -> std::io::Result<()> {
     let app_settings =
         Arc::new(Settings::from_env().expect("Could not load application settings"));
 
+    let database_url = app_settings
+        .require_database_url()
+        .expect("APP_database_url is required to run webapp");
     let conn = Arc::new(
-        seaql::init_db(app_settings.database_url.expose_secret())
+        seaql::init_db(database_url.expose_secret())
             .await
             .expect("Failed to connect to the database"),
     );
 
     let schema = create_schema(Arc::clone(&conn), Arc::clone(&app_settings));
     let cors_settings = Arc::clone(&app_settings);
+    let handler_settings = Arc::clone(&app_settings);
     HttpServer::new(move || {
         App::new()
             .wrap(cors(&cors_settings))
             .app_data(web::Data::new(schema.clone()))
             .app_data(web::Data::new(Arc::clone(&conn)))
+            .app_data(web::Data::new(Arc::clone(&handler_settings)))
             .route("/graphql", web::post().to(graphql_handler))
             .route("/playground", web::get().to(playground))
             .service(root)

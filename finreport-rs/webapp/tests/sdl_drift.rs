@@ -14,7 +14,6 @@
 //! expected to keep improving as they go from stub to real (§9).
 
 use sea_orm::{DatabaseBackend, MockDatabase};
-use secrecy::SecretString;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use utils::settings::Settings;
@@ -63,10 +62,10 @@ fn normalize(sdl: &str) -> String {
 
 fn dummy_settings() -> Arc<Settings> {
     Arc::new(Settings {
-        oauth_url: String::new(),
-        url: String::new(),
-        save_file_path: String::new(),
-        database_url: SecretString::from(String::new()),
+        oauth_url: None,
+        url: None,
+        save_file_path: None,
+        database_url: None,
         kafka_brokers: None,
         cookie_secure: true,
         allowed_origins: String::new(),
