@@ -24,9 +24,11 @@ Authoritative inputs: `docs/requirements.md` (decisions), `docs/kafka-migration.
 5. Username/password auth with an HTTP-only cookie session; every GraphQL field
    that touches money is scoped to the caller's accounts.
 6. GraphQL: `me`, `login`, `logout`, `accounts`, `transactions` (filter +
-   pagination), `cashflowSummary` (income/spending/net buckets).
-7. SvelteKit: login page, dashboard (period selector, chart, totals,
-   transaction list).
+   pagination), `cashflowSummary` (income/spending/net buckets) and
+   `cashflowGraph` (Sankey-shaped nodes/links, built to grow into categories
+   and inter-account transfers without a breaking change).
+7. SvelteKit: login page, dashboard (period selector, totals, bar chart, and a
+   simple income → account → spending/net Sankey, transaction list).
 8. A fully local, bank-free dev stack: Postgres + single-node Redpanda +
    fixture replay, driven from `just`.
 
@@ -420,6 +422,7 @@ type Query {
   accounts: [Account!]!
   transactions(filter: TransactionFilter, page: PageInput): TransactionPage!
   cashflowSummary(filter: TransactionFilter!, granularity: Granularity!): CashflowSummary!
+  cashflowGraph(filter: TransactionFilter!, grouping: CashflowGraphInput): CashflowGraph!
 }
 
 type Mutation {
@@ -499,6 +502,63 @@ type CashflowBucket {
 }
 
 type CashflowTotals { income: Decimal!, spending: Decimal!, net: Decimal!, transactionCount: Int! }
+
+# --- Sankey-shaped cash flow -------------------------------------------------
+# Deliberately library-neutral (nodes + links, not "sankey"): the same shape
+# feeds a chord/alluvial/flow view if LayerChart's Sankey ever disappoints.
+
+input CashflowGraphInput {
+  # Ordered left-to-right dimensions. Iteration 1 accepts exactly
+  # [INCOME_SOURCE, ACCOUNT, OUTCOME] (also the default) and errors on anything
+  # else, so an old server never silently returns a graph it did not build.
+  dimensions: [CashflowDimension!]! = [INCOME_SOURCE, ACCOUNT, OUTCOME]
+  # Per-dimension truncation; the remainder is folded into one "Other" node.
+  maxNodesPerDimension: Int! = 8
+}
+
+enum CashflowDimension {
+  INCOME_SOURCE      # counterparty of incoming transactions
+  ACCOUNT
+  OUTCOME            # spending vs. net/saved
+  CATEGORY           # reserved, iteration 2 — rejected until then
+  TAG                # reserved, iteration 3 — rejected until then
+}
+
+type CashflowGraph {
+  nodes: [CashflowNode!]!
+  links: [CashflowLink!]!
+  currency: String!
+  # Echoes what the server actually applied, so the client never has to assume.
+  dimensions: [CashflowDimension!]!
+  truncated: Boolean!
+}
+
+type CashflowNode {
+  id: ID!                    # opaque, stable within one response
+  label: String!
+  kind: CashflowNodeKind!
+  depth: Int!                # column index; the server lays out, not the client
+  value: Decimal!            # max(inflow, outflow)
+  refType: String            # e.g. "account" | "category" — null for synthetic nodes
+  refId: String              # id within refType, for drill-down
+}
+
+enum CashflowNodeKind {
+  INCOME_SOURCE
+  ACCOUNT
+  SPENDING
+  NET
+  DEFICIT
+  OTHER
+  CATEGORY                   # reserved, iteration 2
+  TAG                        # reserved, iteration 3
+}
+
+type CashflowLink {
+  sourceId: ID!
+  targetId: ID!
+  value: Decimal!            # always positive
+}
 ```
 
 Semantics and edge cases:
@@ -526,6 +586,37 @@ Semantics and edge cases:
 - `login` with bad credentials returns `extensions.code = "INVALID_CREDENTIALS"`
   with the same message and the same latency for unknown-user and wrong-password
   (hash a dummy PHC string when the user does not exist) — no user enumeration.
+
+**`cashflowGraph` semantics and why it extends without breaking**
+
+- Iteration 1 builds exactly `INCOME_SOURCE → ACCOUNT → OUTCOME`: incoming
+  transactions grouped by `counterparty_name` (top N + `Other`) flow into their
+  account; each account flows out into spending counterparties (top N +
+  `Other`) and, when income exceeds spending, a single `NET` node.
+- **Flow conservation.** A Sankey requires inflow to equal outflow per node.
+  When spending exceeds income in the period, the difference is injected as a
+  `DEFICIT` node at depth 0 (labelled "from reserves") rather than leaving the
+  graph unbalanced. Link values are always positive; sign lives in node `kind`,
+  not in the number.
+- **Acyclicity is the server's job.** d3-sankey needs a DAG. Iteration 1 is
+  layered by construction, so this is free; iteration 3's account-to-account
+  transfers can create mutual flows, and the server must then net opposing
+  pairs into a single directed link. The client never deduplicates cycles.
+- Empty period → `nodes: [], links: []`, not an error. A single transaction
+  still yields a valid two-link graph.
+- Transactions with no counterparty name land in an `Unknown` node of the same
+  kind (never dropped, or the totals would silently stop matching
+  `cashflowSummary`).
+- **Non-breaking growth path:** iteration 2 adds `CATEGORY` to
+  `CashflowDimension`/`CashflowNodeKind` and allows
+  `[INCOME_SOURCE, ACCOUNT, CATEGORY]`; iteration 3 adds `TAG` and
+  account-to-account links. Both are *additive enum values and new node kinds* —
+  no field changes, no type changes, no new query. The contract that makes that
+  work: clients must treat unknown `kind` values as `OTHER` and must not infer
+  layout from `kind` (that is what `depth` is for), and the server echoes the
+  `dimensions` it applied. `cashflowSummary` stays as it is; the two queries
+  answer different questions (buckets over time vs. flow within a period) and
+  neither subsumes the other.
 
 ---
 
@@ -556,8 +647,11 @@ outside that group. Login is a form action → `login` mutation → relay
 - `/` — dashboard. Period selector (This month / Last month / Last 3 months /
   This year / Custom range) + granularity (day/week/month, defaulting to the
   range: ≤ 31 days → day, ≤ 26 weeks → week, else month). Totals row
-  (income, spending, net). Chart. Transaction list (paged, 50/page, newest
-  first) filtered by the same period and by clicking a bucket.
+  (income, spending, net). Bar chart of the buckets, and below it the
+  income → account → spending/net Sankey for the same period. Transaction list
+  (paged, 50/page, newest first), filtered by the period and narrowed by
+  clicking a bucket or a Sankey node/link (node → that counterparty or account,
+  link → both ends).
 - `/transactions` — the existing list page, re-pointed at the new SDL.
 
 **Styling: Tailwind CSS 4, and nothing else.** `finreport-fe` already has
@@ -576,8 +670,8 @@ shadcn-svelte, bits-ui, Flowbite, no CSS modules, no Sass. Rules:
   is the usual way a Tailwind codebase drifts back into bespoke CSS.
 - `src/app.css` stays as it is, except for `@theme` tokens when a value is
   genuinely shared (brand colour, the income/spending/net colour pair). Those
-  tokens are the single source for both the UI and the chart datasets, so a
-  chart colour cannot drift from the legend beside it.
+  tokens are the single source for both the UI and the chart marks, so a chart
+  colour cannot drift from the legend beside it.
 - Form controls lean on `@tailwindcss/forms`; the period inputs are plain
   `<input type="date">` / `<select>`, styled with utilities. No custom
   date-picker dependency.
@@ -592,17 +686,46 @@ shadcn-svelte, bits-ui, Flowbite, no CSS modules, no Sass. Rules:
 - Prettier with `prettier-plugin-tailwindcss` (already installed) orders classes;
   `npm run lint` enforces it, so class ordering is never a review topic.
 
-`chart.js` renders into a `<canvas>` and is therefore unaffected by this rule —
-it is a drawing library, not a style framework. Its colours come from the
-`@theme` tokens above.
+LayerChart renders SVG marks that accept `class` props, so charts are styled
+with the same utilities and `@theme` tokens as everything around them — which
+is the main reason it was chosen over a canvas library (see below).
 
-**Charting: `chart.js`.** It is already a dependency of `finreport-fe`, it is
-framework-agnostic (a `<canvas>` + a Svelte 5 `$effect` to update it is ~30
-lines), and a grouped bar chart of income/spending per bucket with a net line
-is exactly what it is good at. `layerchart` was considered and rejected for
-this iteration: adding a second charting dependency plus LayerCake concepts to
-get a bar chart, when a working one is already installed, is cost without
-payoff. Revisit if iteration 2's category views need composable layers.
+**Charting: `layerchart` (LayerChart 2.x), replacing `chart.js`.**
+
+The deciding requirement is Sankey: cash-flow Sankeys are wanted for categories
+(iteration 2) and for flows between accounts (iteration 3), and picking the bar
+library now without that in mind means replacing it twice. `chart.js` has no
+first-class Sankey (only a third-party plugin), so it loses on the one axis
+that matters most.
+
+| | LayerChart 2.x | ECharts (+ `svelte-echarts`) |
+|---|---|---|
+| Sankey | built in, d3-sankey under the hood, node/link props (alignment, node width/padding, link colour) | built in, mature, good labels/tooltips |
+| Svelte 5 | native: runes + snippets, components are the API | wrapper component around an imperative `setOption` lifecycle |
+| Output | **SVG DOM** → Tailwind utility classes apply to marks directly | `<canvas>` → styling is a JS options object, opaque to Tailwind |
+| Theming | reads the same `@theme` tokens as the rest of the UI via classes | colours duplicated into chart options |
+| Bundle | tree-shaken components + the `d3-*` modules actually used | smaller than full ECharts when tree-shaken, still the heavier of the two |
+| Scope | one library for bars **and** Sankey | one library, but a second styling model |
+
+LayerChart wins because it is the only option that keeps the §6 styling rule
+honest: SVG marks take Tailwind classes, so the chart is styled the same way as
+everything around it instead of through a parallel, canvas-only theme. It is
+also Svelte-native (no imperative wrapper to babysit across Svelte 5 lifecycle
+changes) and covers bars and Sankey with one dependency.
+
+Consequence: `chart.js` is **removed** from `finreport-fe/package.json` in this
+iteration — one charting library, not two. ECharts stays the documented
+fallback if LayerChart's Sankey turns out to be too limited for iteration 3's
+account-to-account flows (the `cashflowGraph` contract in §5 is library-neutral
+nodes/links, so swapping is a frontend-only change).
+
+**Iteration 1 Sankey (included — it is cheap).** Below the bar chart, a single
+Sankey of `income sources → account → spending / net`, from the same
+`cashflowGraph` query. It is cheap because it is the same `GROUP BY` the
+summary already does, plus a top-N truncation, and it is the view the user
+actually asked for. Scope guards: top 8 income counterparties and top 8
+spending counterparties, everything else folded into an `Other` node, no
+categories (iteration 2), no account-to-account links (iteration 3).
 
 Period math (bucket labels, default granularity, range presets) goes in
 `src/lib/period.ts` as pure functions — that is what vitest covers (see
@@ -659,12 +782,13 @@ data is ever committed.
 |---|---|---|
 | Mappers | unit | Each `map_*` against fixture payloads: field mapping, missing optional fields, unparseable date → `MapError`, unmodelled fields survive into `raw_payload`, sign convention |
 | Bucketing | unit | Dense bucket generation per granularity: empty range, single day, month clipped at both ends, ISO week boundaries, DST-free date-only math |
+| Cashflow graph | unit | Node/link building: top-N truncation + `Other` folding, `NET` vs `DEFICIT` branch, flow conservation (sum of links into a node equals sum out), no cycles, unknown counterparty bucketing, empty period |
 | Auth | unit | Argon2 hash/verify round-trip, wrong password rejected, token hashing, session expiry boundary |
 | Scoping | unit | `scoped_account_ids` (existing tests, ported to `Uuid`) + "no linked accounts" |
 | Projector | integration | testcontainers Postgres + Redpanda: replay fixtures → assert row counts/values; replay the **same** records twice → assert byte-identical table state (idempotency); kill mid-batch → restart → no duplicates, no gaps |
-| GraphQL | integration | Real schema over testcontainers Postgres seeded by the projector: unauthenticated access denied, cross-user account access denied, pagination stability, `cashflowSummary` totals match a hand-computed fixture sum |
-| FE logic | vitest | `src/lib/period.ts`, amount/row formatting, `cashflowSummary` → chart dataset shaping |
-| FE smoke | Playwright | login → dashboard renders a chart canvas and ≥1 transaction row → logout → redirected to `/login` |
+| GraphQL | integration | Real schema over testcontainers Postgres seeded by the projector: unauthenticated access denied, cross-user account access denied, pagination stability, `cashflowSummary` totals match a hand-computed fixture sum, `cashflowGraph` totals reconcile with `cashflowSummary` for the same filter, unsupported `dimensions` rejected |
+| FE logic | vitest | `src/lib/period.ts`, amount/row formatting, `cashflowSummary` → bar dataset shaping, `cashflowGraph` → LayerChart node/link shaping including unknown-`kind` fallback |
+| FE smoke | Playwright | login → dashboard renders the bar chart and the Sankey (SVG nodes present) and ≥1 transaction row → logout → redirected to `/login` |
 
 Integration tests use `testcontainers` as a dev-dependency and are gated behind
 a `integration` cargo feature so `just test` stays fast and offline; a new
@@ -731,7 +855,9 @@ developed in its own worktree
 Migrations from §3 (users, membership, sessions, reshaped read model,
 `projection_offset`) + regenerated entities; `envelope.rs`; the committed SDL
 (hand-written to §5 — the exporter check in WP4 must match it); the fixture
-corpus and its derived GraphQL mock responses; all settings keys; empty
+corpus and its derived GraphQL mock responses (including a `cashflowGraph`
+response with truncation, an `Other` node and a `DEFICIT` period, so the
+frontend builds the Sankey against the awkward cases from the start); all settings keys; empty
 `auth`/`projection` module files; Cargo deps and bin entries.
 
 *Depends on:* nothing. *Blocks:* everything (briefly — this is a small,
@@ -790,21 +916,24 @@ kill leaves no duplicates and no gaps.
 
 Cookie extraction + auth context injection (calling WP2's library),
 `login`/`logout`/`me`, rewritten `current_user`, `accounts`/`transactions`/
-`cashflowSummary`, dense bucketing, `Decimal`/`Date`/`UUID` scalars, CORS
-allow-list + credentials + `Origin` check.
+`cashflowSummary`/`cashflowGraph`, dense bucketing, Sankey node/link building
+(top-N + `Other`, `NET`/`DEFICIT`, conservation), `Decimal`/`Date`/`UUID`
+scalars, CORS allow-list + credentials + `Origin` check.
 *Depends on:* WP0 (entities, SDL), WP2 (auth functions — stub them locally if
 WP2 has not merged; the signatures are fixed in §4).
 *Done when:* the exporter's output equals the committed `schema.graphql`
 byte-for-byte (enforced by a test), unauthenticated and cross-user access are
-denied by test, `cashflowSummary` matches a hand-computed fixture sum, and a
-real HTTP test round-trips the login cookie.
+denied by test, `cashflowSummary` matches a hand-computed fixture sum,
+`cashflowGraph` conserves flow and reconciles with it, and a real HTTP test
+round-trips the login cookie.
 
 ### WP5 — Frontend (presentation)
 **Owns:** `finreport-fe/**` except the WP0-owned `src/lib/graphql/schema.graphql`
 and `src/lib/graphql/mocks/**` (read-only to this package).
 
 `/api/graphql` proxy route, `hooks.server.ts` + layout auth guard, `/login`,
-dashboard (period selector, totals, chart.js chart, paged transaction list),
+dashboard (period selector, totals, LayerChart bar chart + Sankey, paged
+transaction list), removal of the `chart.js` dependency,
 `src/lib/period.ts`, shared Tailwind-styled primitives in
 `src/lib/components/`, conversion of the two remaining Svelte `<style>` blocks
 to utilities, updated `/transactions`, updated `finreport-fe/CLAUDE.md`.
@@ -872,7 +1001,8 @@ WP4 ↔ WP2 (function signatures, fixed in §4) and WP4 ↔ WP5 (the SDL, fixed 
    `projection_offset`. Not enforced with a lock in this iteration.
 5. Offset-based pagination, not cursors. A household's transaction list does not
    reach the depth where offset paging hurts.
-6. `chart.js` over `layerchart` (§6).
+6. `layerchart` over `chart.js` and ECharts, driven by the Sankey requirement
+   and by SVG marks being Tailwind-styleable (§6). `chart.js` is removed.
 7. Tailwind 4 utilities only — no component library, no `@apply`, no dark
    mode in this iteration (§6).
 8. Session TTL 30 days, sliding; no "remember me" distinction.
@@ -901,3 +1031,10 @@ WP4 ↔ WP2 (function signatures, fixed in §4) and WP4 ↔ WP5 (the SDL, fixed 
   retention limit.
 - Whether `account_balance` should keep a full observation history rather than
   one row per account-day once a balance chart exists (iteration 4).
+- Whether LayerChart's Sankey handles iteration 3's account-to-account flows
+  (mutual transfers, many small links) acceptably. If not, the fallback is
+  ECharts behind the same `cashflowGraph` contract — a frontend-only swap,
+  which is exactly why the query returns neutral nodes/links rather than a
+  library-shaped payload.
+- Whether top-N truncation at 8 per dimension is the right default once real
+  data is on screen; it is a query argument, so changing it costs nothing.
