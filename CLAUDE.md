@@ -30,11 +30,23 @@ Run from repo root unless noted.
 
 ```bash
 # Rust workspace
-just test                    # cargo test across finreport-rs
+just test                    # cargo test across finreport-rs (unit only, offline)
+just test-integration        # testcontainers-backed suite (Postgres + Kafka); needs Docker
+just lint                    # cargo clippy across finreport-rs (used by CI)
 just db-up / just db-down    # local Postgres via docker compose
 just dev-be                  # run the GraphQL backend locally (see "Running locally" below)
 just dev-be-tower            # run the GraphQL backend locally against the tower (deployed) Postgres — see warning below
 just import-local [--account <key>]   # run the transaction importer against local Postgres
+
+# Local dev stack: Postgres + Redpanda + topic-init (phase 2, see Kafka section below)
+just dev-up                  # compose up Postgres + Redpanda + topic-init, healthy
+just dev-down                # compose down (drops the Postgres volume too)
+just dev-reset               # truncate the read model + projection_offset so the next projector run replays from scratch
+just dev-projector [ARGS]    # cargo run the projector against the local stack; pass --until-caught-up to exit at the log end
+just seed-user                # create the demo `dev` user (idempotent)
+just seed-events               # replay the fixture corpus onto the local Redpanda
+just dev-demo                 # the whole demo in order: dev-up → migrate → seed-user → seed-events → projector --until-caught-up → link accounts
+just redpanda-console [broker] # Redpanda Console UI (http://localhost:8090); defaults to the central broker, pass 127.0.0.1:19092 for the local stack
 
 # DB (run inside finreport-rs/, needs .env with APP_database_url)
 make migrate                 # sea-orm-cli migrate
@@ -48,11 +60,12 @@ just dev-fe-tower            # tower profile
 
 ## Running locally
 
-Each component starts independently — no need to bring up the full docker-compose stack for dev work.
+Each component starts independently — no need to bring up the full docker-compose stack for dev work. The whole demo (steps 1–3 below, via `just dev-demo`) needs **no Comdirect credentials and no network access** to the bank or to the central Kafka broker.
 
-1. **Postgres**: `just db-up` (stop with `just db-down`). No secrets needed — password defaults in `docker-compose.local.yml`.
+1. **Postgres + Redpanda**: `just dev-up` brings up Postgres, a single-node Redpanda, and a one-shot topic-init job (the same four topics/configs as `terraform/kafka/main.tf`) under `docker-compose.local.yml`, all with overridable ports (`FINREPORT_PG_PORT`/`FINREPORT_KAFKA_PORT`, defaulting to `5432`/`19092`). Stop with `just dev-down`; `just dev-reset` truncates the read model so a fresh projector run starts over without touching `app_user`/`user_account`/`user_session` (those links survive by design — see §2.3 of the spec). `just db-up`/`just db-down` still work if you only need Postgres (e.g. for `dev-be`, no Kafka).
 2. **Backend**: copy `finreport-rs/.env.example` to `finreport-rs/.env` (gitignored), then `just dev-be`. Runs migrations automatically and serves GraphQL on `:8080`. `dev-be` needs no Comdirect creds at all — it only serves GraphQL against the DB and never calls the Comdirect API. Real imports go through `just import-local` instead, which pulls real creds from 1Password.
-3. **Frontend**: `just dev-fe` (or `cd finreport-fe && npm run dev` directly) — see `finreport-fe/CLAUDE.md` for the local/tower profile switch.
+3. **Demo data, no bank needed**: `just dev-demo` seeds a `dev` user, replays the fixture corpus onto the local Redpanda, runs the projector to catch up, and links the seeded accounts to `dev` — the fixtures are synthetic but realistically shaped, spanning ~6 months across 2 accounts. Or drive the steps yourself: `just seed-user`, `just seed-events`, `just dev-projector --until-caught-up`.
+4. **Frontend**: `just dev-fe` (or `cd finreport-fe && npm run dev` directly) — see `finreport-fe/CLAUDE.md` for the local/tower profile switch.
 
 ## Comdirect logins (importer)
 
@@ -108,47 +121,69 @@ APP_accounts__1__...
   `account`'s unique IBAN index — logged as an error, and its balances and
   transactions then fail their foreign keys. Noisy, but not corrupting.
 
-## Event log (Kafka) — migration phase 1
+## Event log (Kafka) — migration phase 2
 
-Postgres is still the source of truth. The importer **dual-writes**: every
-import does the same DB inserts as before and additionally publishes to
-Kafka. See `docs/kafka-migration.md` for the full design, the resume-point
-alternatives that were weighed, and the open questions.
+Kafka is now the source of truth for the read model: the importer publishes
+only (it no longer writes to Postgres itself, and no longer takes
+`APP_database_url` at all — `APP_kafka_brokers` is a hard requirement, not
+best-effort), and a new `projector` binary consumes the four topics and
+builds the Postgres read model (`account`, `account_balance`, `transaction`,
+keyed by deterministic UUIDs so replays are idempotent). See
+`docs/specs/iteration-1.md` §2.2 (envelope contract), §2.3 (projector design)
+and §2.8 (the legacy-backfill cutover runbook that reshaped the old
+`account`/`account_balance`/`account_transactions` tables into
+`legacy_account`/`legacy_account_balance`/`legacy_account_transactions`) for
+the full design.
 
-- **Broker**: `kafka.lab.anydef.de:9092`, plaintext. This is **central homelab
-  infrastructure — not deployed by this repo**. finreport only owns its own
-  topics on it (`terraform/kafka`); the broker's own deployment, upgrades and
-  retention are managed elsewhere.
+- **Broker**: `kafka.lab.anydef.de:9092`, plaintext, for the deployed stack —
+  central homelab infrastructure this repo does not own or deploy; finreport
+  only owns its own topics on it (`terraform/kafka`). **Locally**,
+  `just dev-up` runs a single-node Redpanda under `docker-compose.local.yml`
+  with the same four topics/configs, so the whole demo needs no network
+  access to the central broker at all (see "Running locally" above).
 - **Topics** (`finreport.account`, `.account-balance`, `.transaction`,
   `.import-watermark`) are managed by Terraform as the `terraform/kafka` child
-  module of the existing root module — same state, same `just deploy`. Each
+  module of the existing root module — same state, same `just deploy` — for
+  the central broker, and mirrored by `docker-compose.local.yml`'s
+  `finreport-redpanda-init` one-shot job for local dev; the two must be kept
+  in step by hand (see the comment in `terraform/kafka/main.tf`). Each
   topic carries `prevent_destroy`: CI applies unattended, and an edit that
   would *replace* a topic (rename, fewer partitions) deletes its events, so
   those fail the apply instead. Retention/cleanup-policy edits apply in place.
   Every plan of this module refreshes finreport's topics, so plans need the
   broker reachable; if it's down, `terraform apply -target=module.portainer_stack`
   deploys the app without touching Kafka.
-- **Payloads are the raw Comdirect JSON, byte-for-byte.** Nothing is
-  re-serialized on the way to a topic — `webapp::kafka::events` slices the
-  account and balance sub-objects straight out of the original response, and
-  `comdirect-rs`'s `Raw<T>` carries each record's original bytes alongside the
-  parsed struct. Our own metadata (which login, when) rides in Kafka
-  **headers** so the value stays exactly what the bank returned. The one
-  exception is the watermark record, which is ours.
-- **Publishing is best-effort.** `APP_kafka_brokers` unset disables it
-  entirely (that is what local dev does), and a broker outage logs a warning
-  and carries on — an import must never fail because the event log is down.
+- **Payloads are the raw Comdirect JSON, byte-for-byte**, with one documented
+  exception: the legacy-backfill reconstruction (§2.8), which publishes
+  `origin=legacy-backfill` records only for keys with no existing raw record,
+  and never touches a key the importer has already written. Our own metadata
+  (which login, when, schema version, origin) rides in Kafka **headers** (the
+  full envelope contract, §2.2) so the value stays exactly what the bank
+  returned whenever `origin=source`.
+- **Publishing is best-effort against the broker, not against the import**:
+  `APP_kafka_brokers` unset is now a startup error for the importer (it has
+  no other output), and a publish failure is now data loss, not a degraded
+  side-channel — the import loop logs at `error` and does **not** advance
+  that account's watermark for the cycle (advancing it past an unpublished
+  transaction would lose it permanently), so the next cycle re-fetches and
+  retries instead of silently skipping ahead.
+- **The deployed stack** (`docker-compose.yml`) gained a `finreport-be-projector`
+  service alongside `finreport-be-importer` — same images, same Kafka broker,
+  consuming instead of producing.
 - **Inspecting it**: `just redpanda-console` runs Redpanda Console locally
-  (http://localhost:8090) against the central broker — local container only,
-  nothing deployed. Pass a different broker/port to aim it elsewhere:
-  `just redpanda-console 127.0.0.1:19092`.
-- **Resume points**: at startup each account reads its watermark from the
-  compacted `finreport.import-watermark` topic and only fetches transactions
-  newer than it. The Comdirect bank-account transactions endpoint has **no
-  date filter**, so this is client-side early-stop pagination, which assumes
-  newest-first ordering — an assumption `comdirect-rs` guards at runtime and
-  falls back to a full walk when violated. That guard is the riskiest part of
-  the design; do not remove it.
+  (http://localhost:8090) against the central broker by default — local
+  container only, nothing deployed. Pass a different broker/port to aim it
+  at the local stack instead: `just redpanda-console 127.0.0.1:19092`.
+- **Resume points**: at startup each importer account reads its watermark
+  from the compacted `finreport.import-watermark` topic and only fetches
+  transactions newer than it. The Comdirect bank-account transactions
+  endpoint has **no date filter**, so this is client-side early-stop
+  pagination, which assumes newest-first ordering — an assumption
+  `comdirect-rs` guards at runtime and falls back to a full walk when
+  violated. That guard is the riskiest part of the design; do not remove it.
+  The projector has its own, separate resume point: `projection_offset`
+  (one row per topic-partition) in Postgres, so a projector restart or
+  `just dev-reset` resumes/replays independently of the importer's watermark.
 
 ## Backend database profiles
 

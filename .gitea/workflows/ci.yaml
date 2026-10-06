@@ -1,0 +1,70 @@
+name: CI
+
+# Fast, offline PR feedback — unit tests + lint only (§9 WP6). The
+# `build-deploy.yaml` workflow stays the only one that builds/pushes images
+# and deploys; this one never touches Docker images, Terraform, or Portainer.
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Rust unit tests + lint
+    runs-on: rust-web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install just
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh \
+            | bash -s -- --to /usr/local/bin
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      # Unit tests only — the testcontainers-backed `integration` feature
+      # needs a Docker daemon and is intentionally left to `just
+      # test-integration`, run locally/manually (§8), not on every PR.
+      - name: Run unit tests
+        run: just test
+
+      - name: Run lint
+        run: just lint
+
+  frontend:
+    name: Frontend lint + unit tests
+    runs-on: rust-web
+    defaults:
+      run:
+        working-directory: finreport-fe
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: finreport-fe/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Informational only for now: the current frontend tree already has
+      # pre-existing prettier/eslint violations (tracked separately, not
+      # introduced here) — continue-on-error keeps this step visible in CI
+      # output without blocking merges on debt WP6 isn't fixing.
+      - name: Lint
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Unit tests
+        run: npm run test:unit
