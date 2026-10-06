@@ -191,7 +191,7 @@ Binding for every agent working in this repo:
   - Opus 5.5 evaluates/validates results and orchestrates.
 - These roles are the default. The orchestrator may pick a different model, subagent or effort level per task. Keep costs low without lowering quality.
 - Independent work may run in parallel across agents.
-- **Budget:** each session has an AI-credit (AIC) budget set by the user. A Haiku agent periodically checks spend, using `session_usage.cost` from the session store as the proxy. Work **hard-stops at 100%** of the budget.
+- **Budget:** each session has an AI-credit (AIC) budget set by the user. A Haiku agent periodically checks spend, using the local session store: `SELECT SUM(total_nano_aiu)/1e9 FROM assistant_usage_events WHERE session_id = '<id>'` (source `local`). Don't use the cloud `session_usage.cost` field: it isn't in AIC and may be empty. Work **hard-stops at 100%** of the budget.
 - **Code quality:** code must be readable, well modularized and well tested.
 - **Local runnability:** everything must be runnable locally. Docker is fine, e.g. Postgres via `just db-up` or a local Kafka broker for dev.
 - **Judgement calls:** agents may make their own assumptions and decisions, unless they are security-critical or harmful. Those go to the user.
