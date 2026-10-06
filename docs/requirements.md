@@ -92,3 +92,27 @@ Goal: don't ask the LLM again for repeating patterns, such as Lidl → groceries
   - Candidates **below the threshold** go to the admin review queue.
 - **Changing a rule** can be applied retroactively, on demand, to transactions without a user override. The operation is idempotent and never touches user overrides.
 - **Ambiguous merchants** (Lidl also sells non-food items): a rule sets the default, and the user corrects individual transactions with an override or a split.
+
+## Savings and spending goals (iteration 4, after categories and tags)
+A goal is a threshold that the user sets against a **scope** of transactions and checks over time. Each goal has its own browsable page.
+
+- **Types**
+  - `spending_limit`: stay at or below the amount. Example: hobbies ≤ €200/month.
+  - `saving_target`: reach at least the amount. Only `saving`-kind categories count toward it.
+- **Scope:** one or more categories and/or tags.
+  - A category includes its subcategories.
+  - Several items are combined as OR, and each transaction is counted once.
+  - Split transactions count by their parts.
+  - Internal transfers never count.
+- **Period**
+  - **Recurring** (monthly by default; quarterly and yearly are also possible). Each period is evaluated on its own, with no rollover of unused budget. Example: "how much do I spend on hobbies each month".
+  - **Fixed range** (start date to end date, or open-ended): the total adds up over the whole range. Examples: a renovation project, a vacation.
+- **Goal page**
+  - Recurring goals: bars per period with the threshold as a line, colored by over or under.
+  - Fixed-range goals: a cumulative line against the budget line.
+  - Totals: spent or saved, remaining, average per period.
+  - The matching transactions, with drill-down.
+- **Edge cases**
+  - The current period is shown as "in progress", not as a failure.
+  - Refunds within the scope reduce spending.
+  - Transactions held for review are shown separately as "pending" until they're resolved.
