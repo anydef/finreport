@@ -348,6 +348,11 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
 
     let consumer: StreamConsumer = ClientConfig::new()
         .set("bootstrap.servers", &config.brokers)
+        // No consumer-group coordination is used (offsets live in Postgres,
+        // not Kafka, and partitions are always `assign()`ed explicitly) --
+        // but librdkafka still requires `group.id` to be a non-empty string
+        // on every consumer, group membership or not.
+        .set("group.id", "finreport-projector")
         .set("enable.auto.commit", "false")
         .set("enable.partition.eof", "false")
         .create()
@@ -365,13 +370,29 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
     }
     consumer.assign(&tpl).map_err(ProjectorError::Kafka)?;
 
+    // `--until-caught-up` needs each topic's high watermark *and* where this
+    // run is actually starting from, tracked ourselves as `next_offsets`
+    // rather than read back via `consumer.position()`: librdkafka only
+    // reports a partition's position once a fetch response for it has
+    // actually landed, so right after `assign()` -- the common case for a
+    // topic that is already fully caught up and will never receive one --
+    // `position()` reports `Offset::Invalid` forever, and a loop driven by
+    // it never terminates. `next_offsets` starts at the real resume point
+    // (the stored offset, or the topic's low watermark for a from-scratch
+    // `Offset::Beginning`) and advances by hand as records are consumed.
+    let mut next_offsets: HashMap<String, i64> = HashMap::new();
     let high_watermarks = if config.until_caught_up {
         let mut marks = HashMap::new();
         for topic in INGEST_TOPICS {
-            let (_, high) = consumer
+            let (low, high) = consumer
                 .fetch_watermarks(topic, INGEST_PARTITION, Duration::from_secs(10))
                 .map_err(ProjectorError::Kafka)?;
             marks.insert(topic.to_string(), high);
+            let starting = stored_offsets
+                .get(&(topic.to_string(), INGEST_PARTITION))
+                .copied()
+                .unwrap_or(low);
+            next_offsets.insert(topic.to_string(), starting);
         }
         Some(marks)
     } else {
@@ -383,9 +404,15 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
     loop {
         let batch = collect_batch(&consumer, config.batch_max_records, config.batch_max_wait).await;
 
+        if let Some(last_by_topic) = last_offset_per_topic(&batch) {
+            for (topic, last_offset) in last_by_topic {
+                next_offsets.insert(topic, last_offset + 1);
+            }
+        }
+
         if batch.is_empty() {
             if let Some(marks) = &high_watermarks {
-                if is_caught_up(&consumer, marks).map_err(ProjectorError::Kafka)? {
+                if is_caught_up(&next_offsets, marks) {
                     info!("projector: caught up with all ingest topics, exiting (--until-caught-up)");
                     return Ok(());
                 }
@@ -442,35 +469,37 @@ async fn collect_batch(
     batch
 }
 
-/// Whether the consumer's current position has reached every ingest topic's
-/// high watermark at `assign()` time (`--until-caught-up`, §2.3). An empty
-/// topic (`high == 0`) is trivially caught up regardless of position.
-fn is_caught_up(
-    consumer: &StreamConsumer,
-    high_watermarks: &HashMap<String, i64>,
-) -> Result<bool, rdkafka::error::KafkaError> {
-    let position = consumer.position()?;
+/// The offset after the last record this batch carried, per topic — what
+/// `next_offsets` advances to once a batch (even a to-be-discarded empty
+/// one) has been collected.
+fn last_offset_per_topic(batch: &[ConsumedRecord]) -> Option<HashMap<String, i64>> {
+    if batch.is_empty() {
+        return None;
+    }
+    let mut last: HashMap<String, i64> = HashMap::new();
+    for record in batch {
+        last.entry(record.topic.clone())
+            .and_modify(|o| *o = (*o).max(record.offset))
+            .or_insert(record.offset);
+    }
+    Some(last)
+}
 
+/// Whether `next_offsets` (this run's own resume-point bookkeeping, §2.3 --
+/// *not* `consumer.position()`, see `run`'s comment on why) has reached
+/// every ingest topic's high watermark as of `assign()` time
+/// (`--until-caught-up`). An empty topic (`high == 0`) is trivially caught up
+/// regardless of position.
+fn is_caught_up(next_offsets: &HashMap<String, i64>, high_watermarks: &HashMap<String, i64>) -> bool {
     for topic in INGEST_TOPICS {
         let high = *high_watermarks.get(topic).unwrap_or(&0);
         if high == 0 {
             continue;
         }
-
-        let current = position
-            .elements_for_topic(topic)
-            .into_iter()
-            .find(|e| e.partition() == INGEST_PARTITION)
-            .and_then(|e| match e.offset() {
-                Offset::Offset(o) => Some(o),
-                _ => None,
-            });
-
-        match current {
-            Some(o) if o >= high => continue,
-            _ => return Ok(false),
+        let current = next_offsets.get(topic).copied().unwrap_or(0);
+        if current < high {
+            return false;
         }
     }
-
-    Ok(true)
+    true
 }
