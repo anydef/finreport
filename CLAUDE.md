@@ -1,0 +1,197 @@
+# finreport
+
+Personal-finance reporting: a Rust Comdirect API client + GraphQL backend, feeding a SvelteKit frontend.
+
+## Layout
+
+- `finreport-rs/` — Cargo workspace (resolver 3). Members:
+  - `webapp` — actix-web + async-graphql server; binaries in `webapp/src/bin/` for one-off jobs (`import_transactions`, `categorize`, `db_importer`, `init_session`, `graphql_schema_exporter`)
+  - `comdirect-rs` — Comdirect REST API client
+  - `categorizer` — transaction categorization logic (taxonomy lives in `prompts/categories.json`)
+  - `entity` — sea-orm generated entities (do not hand-edit; regenerate, see below)
+  - `migration` — sea-orm migrations
+  - `utils` — shared settings/config (`utils::settings::Settings`)
+- `finreport-fe/` — SvelteKit frontend, talks to the GraphQL backend. See `finreport-fe/CLAUDE.md` for frontend-specific commands.
+- `prompts/` — LLM categorization prompt (`categorize.txt`) + category taxonomy (`categories.json`)
+- `docs/` — Comdirect Postman collection, plus `docs/multi-agent-setup.md` tracking this repo's multi-agent prep
+- `terraform/` — deploy infra (Portainer stack)
+- `.gitea/` — CI
+
+## Conventions
+
+- Logging via `tracing`, not `log`/`println!`.
+- Secrets wrapped in `secrecy` (`ExposeSecret`), never held as plain `String`.
+- Env vars are `APP_*`, loaded through `utils::settings::Settings`; local secrets come from 1Password via `.env.tpl` (`op run --env-file .env.tpl -- ...`).
+- The root `README.md`'s `sqlx-cli` install/migrate instructions are stale — this project uses **sea-orm-cli**, not sqlx-cli (see Commands below).
+
+## Commands
+
+Run from repo root unless noted.
+
+```bash
+# Rust workspace
+just test                    # cargo test across finreport-rs
+just db-up / just db-down    # local Postgres via docker compose
+just dev-be                  # run the GraphQL backend locally (see "Running locally" below)
+just dev-be-tower            # run the GraphQL backend locally against the tower (deployed) Postgres — see warning below
+just import-local [--account <key>]   # run the transaction importer against local Postgres
+
+# DB (run inside finreport-rs/, needs .env with APP_database_url)
+make migrate                 # sea-orm-cli migrate
+make generate-entities       # regenerate entity/src/entities from DB schema
+make generate-migrations TARGET=<name>
+
+# Frontend — thin `just` wrappers around the npm scripts in finreport-fe/CLAUDE.md
+just dev-fe                  # local profile
+just dev-fe-tower            # tower profile
+```
+
+## Running locally
+
+Each component starts independently — no need to bring up the full docker-compose stack for dev work.
+
+1. **Postgres**: `just db-up` (stop with `just db-down`). No secrets needed — password defaults in `docker-compose.local.yml`.
+2. **Backend**: copy `finreport-rs/.env.example` to `finreport-rs/.env` (gitignored), then `just dev-be`. Runs migrations automatically and serves GraphQL on `:8080`. `dev-be` needs no Comdirect creds at all — it only serves GraphQL against the DB and never calls the Comdirect API. Real imports go through `just import-local` instead, which pulls real creds from 1Password.
+3. **Frontend**: `just dev-fe` (or `cd finreport-fe && npm run dev` directly) — see `finreport-fe/CLAUDE.md` for the local/tower profile switch.
+
+## Comdirect logins (importer)
+
+The importer handles multiple Comdirect logins in **one process, one task per
+login**. Each task runs its own state machine, so a login approves its own
+push-TAN and re-bootstraps its own stale session without holding up the others;
+a login that fails for good ends only its own task, and the process exits
+non-zero once every account has given up.
+
+Logins are configured as numbered accounts and read by `utils::settings`:
+
+```
+APP_accounts__0__name / __client_id / __client_secret / __zugangsnummer / __pin
+APP_accounts__1__...
+```
+
+- `import-transactions` imports every configured account; `--account <key>`
+  narrows a run to one (the account **key**, never the `__name` label), which is
+  mostly useful locally. `init-session` drives a single login interactively, so
+  it requires the flag when several accounts are configured.
+- `__name` is a free-text, human-readable label for the login, persisted to
+  the nullable `account.account_name` on every account it imports (migration
+  `m20260820_000001_account_name`, exposed as the nullable `Account.accountName`
+  in GraphQL). It is **display only**: nothing resolves an account through it,
+  it has no default (unset stays NULL rather than borrowing the key), and it is
+  refreshed on re-import so renaming a login propagates on its next run.
+  Accounts are referenced by the account key in config and by `account_id` in
+  the DB — both stable, unlike a label someone may reword.
+- Each account persists its tokens separately: `APP_save_file_path` with the
+  key spliced in (`.session.0.json`), overridable per account via
+  `APP_accounts__<key>__save_file_path`.
+- The older flat form (`APP_client_id`/`APP_client_secret`/`APP_zugangsnummer`/
+  `APP_pin`, labelled with `APP_account_name`) still works as a single account
+  named `default`, and is ignored as soon as any `APP_accounts__*` var is set.
+- Deployment: the single `finreport-be-importer` service in
+  `docker-compose.yml` — the deployed stack file, which runs prebuilt
+  `${DOCKER_REGISTRY}/finreport-be` images with static LAN IPs, **not** the
+  `build:`-based `docker-compose.local.yml`. Adding a login means a
+  `TF_VAR_app_account_<n>_*` block in `.env.tpl` (terraform flattens those into
+  `APP_accounts__<n>__*`), a matching variable block in `terraform/variables.tf`,
+  and the env block in the compose file. No new container, address or port.
+- **`.env.tpl` values must each be exactly one `op://` reference.** The file is
+  read three ways — `op run` (`just import-local`), `op inject` (local
+  `just deploy`), and `1password/load-secrets-action` in CI — and only that form
+  works in all of them. Nothing there is shell-expanded in CI, so no value may
+  refer to another; that is why terraform takes flat per-account strings rather
+  than one JSON-encoded list. Non-secret values (like `__name`) belong in
+  `docker-compose.yml`, not in `.env.tpl`.
+- An account visible from two logins is imported idempotently *as long as
+  Comdirect reports the same `accountId` for both*: accounts and balances
+  conflict-`do_nothing`, transactions upsert on `reference`. If the same IBAN
+  ever arrives under two different `accountId`s, the second insert trips
+  `account`'s unique IBAN index — logged as an error, and its balances and
+  transactions then fail their foreign keys. Noisy, but not corrupting.
+
+## Event log (Kafka) — migration phase 1
+
+Postgres is still the source of truth. The importer **dual-writes**: every
+import does the same DB inserts as before and additionally publishes to
+Kafka. See `docs/kafka-migration.md` for the full design, the resume-point
+alternatives that were weighed, and the open questions.
+
+- **Broker**: `kafka.lab.anydef.de:9092`, plaintext. This is **central homelab
+  infrastructure — not deployed by this repo**. finreport only owns its own
+  topics on it (`terraform/kafka`); the broker's own deployment, upgrades and
+  retention are managed elsewhere.
+- **Topics** (`finreport.account`, `.account-balance`, `.transaction`,
+  `.import-watermark`) are managed by Terraform as the `terraform/kafka` child
+  module of the existing root module — same state, same `just deploy`. Each
+  topic carries `prevent_destroy`: CI applies unattended, and an edit that
+  would *replace* a topic (rename, fewer partitions) deletes its events, so
+  those fail the apply instead. Retention/cleanup-policy edits apply in place.
+  Every plan of this module refreshes finreport's topics, so plans need the
+  broker reachable; if it's down, `terraform apply -target=module.portainer_stack`
+  deploys the app without touching Kafka.
+- **Payloads are the raw Comdirect JSON, byte-for-byte.** Nothing is
+  re-serialized on the way to a topic — `webapp::kafka::events` slices the
+  account and balance sub-objects straight out of the original response, and
+  `comdirect-rs`'s `Raw<T>` carries each record's original bytes alongside the
+  parsed struct. Our own metadata (which login, when) rides in Kafka
+  **headers** so the value stays exactly what the bank returned. The one
+  exception is the watermark record, which is ours.
+- **Publishing is best-effort.** `APP_kafka_brokers` unset disables it
+  entirely (that is what local dev does), and a broker outage logs a warning
+  and carries on — an import must never fail because the event log is down.
+- **Inspecting it**: `just redpanda-console` runs Redpanda Console locally
+  (http://localhost:8090) against the central broker — local container only,
+  nothing deployed. Pass a different broker/port to aim it elsewhere:
+  `just redpanda-console 127.0.0.1:19092`.
+- **Resume points**: at startup each account reads its watermark from the
+  compacted `finreport.import-watermark` topic and only fetches transactions
+  newer than it. The Comdirect bank-account transactions endpoint has **no
+  date filter**, so this is client-side early-stop pagination, which assumes
+  newest-first ordering — an assumption `comdirect-rs` guards at runtime and
+  falls back to a full walk when violated. That guard is the riskiest part of
+  the design; do not remove it.
+
+## Backend database profiles
+
+The backend can run locally against either Postgres:
+
+- `just dev-be` → the local Postgres from `just db-up` (`127.0.0.1:5432`), config from `finreport-rs/.env`.
+- `just dev-be-tower` → the **real, deployed** tower Postgres (`192.168.100.33:5432`, same LAN-reachable host the deployed `finreport-be` container uses). Everything except `APP_database_url` still comes from `finreport-rs/.env`; the real DB password is pulled live from 1Password via `op read` and never written to disk.
+
+  **Be deliberate with this one.** `webapp`'s startup (`db/seaql.rs::init_db`) runs `Migrator::up()` unconditionally — pointing the local binary at tower means any migration that exists locally but isn't deployed yet gets applied to the live database the moment you run it. Don't run `dev-be-tower` with unreviewed/WIP migrations sitting in `finreport-rs/migration/`.
+
+## Frontend backend-target profiles
+
+The frontend can point at either backend, selected by Vite `--mode`:
+
+- `just dev-fe` / `npm run dev` (default `development` mode) → `http://localhost:8080/graphql`, i.e. whichever backend you've started locally (step 2 above, `dev-be` or `dev-be-tower` — both bind `:8080`, so only run one at a time).
+- `just dev-fe-tower` / `npm run dev:tower` (`--mode tower`, loads `finreport-fe/.env.tower`) → the *deployed* backend on the Unraid box directly, no local backend needed at all. Distinct from `dev-be-tower`: this one skips your local backend entirely and hits the deployed `finreport-be` container's GraphQL endpoint over the network.
+
+Add more profiles by dropping a new `finreport-fe/.env.<mode>` file (setting `PUBLIC_GRAPHQL_URL`), a matching `dev:<mode>` script in `finreport-fe/package.json`, and a `dev-fe-<mode>` justfile wrapper.
+
+## Multi-agent development
+
+This repo is being prepped to support multiple Claude Code agents working in parallel. See `docs/multi-agent-setup.md` for the running log of what's been set up and why.
+
+Natural parallelization seams:
+- `finreport-rs` (backend/Rust) vs. `finreport-fe` (frontend/SvelteKit) — separate toolchains, separate CLAUDE.md context.
+- Within `finreport-rs`, individual crates (`comdirect-rs`, `categorizer`, `entity`/`migration`) are reasonably independent, but `webapp` depends on all of them and the GraphQL schema is a shared contract — two agents changing it concurrently will conflict.
+
+Use `git worktree add ../finreport-worktrees/<branch-name> -b <branch-name>` to give a parallel agent its own working copy (worktrees are kept as sibling dirs, not nested — see `docs/multi-agent-setup.md`).
+
+### Agent working rules
+
+Binding for every agent working in this repo:
+
+- **Never push.** Commit locally only, on feature branches in worktrees (`../finreport-worktrees/<branch>`), never on `main`.
+- **Never scan the home (`~`) or root (`/`) folder.** Stay inside the repo and its worktrees.
+- **Model roles:**
+  - Opus 5 writes specs.
+  - Sonnet 5 writes code.
+  - Haiku runs simple scripts, tests, lints and budget checks.
+  - Opus 5.5 evaluates/validates results and orchestrates.
+- These roles are the default. The orchestrator may pick a different model, subagent or effort level per task. Keep costs low without lowering quality.
+- Independent work may run in parallel across agents.
+- **Budget:** each session has an AI-credit (AIC) budget set by the user. A Haiku agent periodically checks spend, using `session_usage.cost` from the session store as the proxy. Work **hard-stops at 100%** of the budget.
+- **Code quality:** code must be readable, well modularized and well tested.
+- **Local runnability:** everything must be runnable locally. Docker is fine, e.g. Postgres via `just db-up` or a local Kafka broker for dev.
+- **Judgement calls:** agents may make their own assumptions and decisions, unless they are security-critical or harmful. Those go to the user.
