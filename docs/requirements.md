@@ -36,3 +36,11 @@ A web UI for exploring personal and family finances: income and spending by peri
 4. **Goals:** postponed, tracked in `docs/TODO.md`.
 5. **Authentication:** simple username/password for now. Authelia/OAuth comes later.
 6. **Delivery:** MVP-first iterations. Each one should show the user something useful as early as possible.
+
+## LLM providers (iteration 2)
+- The categorizer can use several LLM providers, chosen by config:
+  - Anthropic (key `APP_anthropic_api_key`, sourced from `TF_VAR_anthropic_api_key`)
+  - local Ollama
+  - any OpenAI-compatible endpoint set by its URL, which covers Unsloth models served through llama.cpp, vLLM or LM Studio
+- The LLM cache key includes the provider, the model and the prompt version.
+- For local dev, Ollama is available as an optional profile in Docker Compose.
