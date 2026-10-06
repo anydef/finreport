@@ -1,19 +1,14 @@
-use actix_cors::Cors;
-use actix_files as fs;
 use actix_files::NamedFile;
 use actix_web::web;
 use actix_web::{get, Error, HttpResponse, Responder};
 use actix_web::{App, HttpServer};
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
-use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use dotenv::dotenv;
-use sea_orm::{Database, DatabaseConnection};
 use secrecy::ExposeSecret;
 use std::sync::Arc;
 use utils::settings::Settings;
-use webapp::graphql::{create_schema, AppSchema};
-use migration::{Migrator, MigratorTrait};
 use webapp::db::seaql;
+use webapp::graphql::{create_schema, http::cors, http::graphql_handler};
 
 #[get("/")]
 async fn root() -> Result<NamedFile, Error> {
@@ -45,18 +40,10 @@ async fn test_chart() -> impl Responder {
     }
 }
 
-async fn graphql_handler(schema: web::Data<AppSchema>, req: GraphQLRequest) -> GraphQLResponse {
-    schema.execute(req.into_inner()).await.into()
-}
-
 async fn playground() -> HttpResponse {
     HttpResponse::Ok()
         .content_type("text/html; charset=utf-8")
         .body(playground_source(GraphQLPlaygroundConfig::new("/graphql")))
-}
-
-struct AppState {
-    conn: DatabaseConnection,
 }
 
 #[actix_web::main]
@@ -69,44 +56,27 @@ async fn main() -> std::io::Result<()> {
         )
         .init();
 
-    let app_settings = Arc::new(
-        Settings::from_env().expect("Could not load application settings"),
+    let app_settings =
+        Arc::new(Settings::from_env().expect("Could not load application settings"));
+
+    let conn = Arc::new(
+        seaql::init_db(app_settings.database_url.expose_secret())
+            .await
+            .expect("Failed to connect to the database"),
     );
 
-    let conn = seaql::init_db(app_settings.database_url.expose_secret())
-        .await
-        .expect("Failed to connect to the database");
-    // let app_settings_clone = Arc::clone(&app_settings);
-
-    // // refresh session every minute
-    // tokio::spawn(async move {
-    //     // let settings = app_settings_clone.clone();
-    //     let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-    //
-    //     loop {
-    //         let _ = load_comdirect_session((*app_settings).clone()).await;
-    //         interval.tick().await;
-    //         // Place the code to execute every minute here
-    //         println!("Running scheduled task every minute");
-    //     }
-    // });
-
-    let schema = create_schema(conn);
+    let schema = create_schema(Arc::clone(&conn), Arc::clone(&app_settings));
+    let cors_settings = Arc::clone(&app_settings);
     HttpServer::new(move || {
         App::new()
-            .wrap(
-                Cors::default()
-                    .allow_any_origin()
-                    .allowed_methods(vec!["GET", "POST"])
-                    .allow_any_header(),
-            )
+            .wrap(cors(&cors_settings))
             .app_data(web::Data::new(schema.clone()))
+            .app_data(web::Data::new(Arc::clone(&conn)))
             .route("/graphql", web::post().to(graphql_handler))
             .route("/playground", web::get().to(playground))
             .service(root)
             .service(data)
             .service(test_chart)
-            .service(fs::Files::new("/assets", ".").show_files_listing())
     })
     .bind(("0.0.0.0", 8080))?
     .run()

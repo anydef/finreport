@@ -171,6 +171,12 @@ type Me {
 }
 
 type Mutation {
+	"""
+	`login`/`logout` are the only unauthenticated mutations (§4/§5). A
+	bad username and a bad password return the same
+	`extensions.code = "INVALID_CREDENTIALS"` with the same message — no
+	user enumeration.
+	"""
 	login(input: LoginInput!): Me!
 	logout: Boolean!
 }
@@ -185,8 +191,8 @@ input PageInput {
 
 type Query {
 	"""
-	Unauthenticated field (§4/§5): no session support exists yet, so this
-	always returns `null` rather than guessing at a user.
+	Unauthenticated field (§4/§5): returns the caller's own identity, or
+	`null` when there is no valid session.
 	"""
 	me: Me
 	accounts: [Account!]!

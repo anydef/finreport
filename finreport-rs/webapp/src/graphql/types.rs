@@ -103,6 +103,20 @@ pub struct TransactionFilter {
     pub has_counterparty: Option<bool>,
 }
 
+impl Default for TransactionFilter {
+    fn default() -> Self {
+        Self {
+            start_date: None,
+            end_date: None,
+            account_ids: None,
+            search: None,
+            direction: None,
+            counterparty_names: None,
+            has_counterparty: None,
+        }
+    }
+}
+
 #[derive(InputObject)]
 pub struct PageInput {
     /// Clamped to `1..=200`.
@@ -110,6 +124,17 @@ pub struct PageInput {
     pub limit: i32,
     #[graphql(default = 0)]
     pub offset: i32,
+}
+
+impl Default for PageInput {
+    /// Mirrors the `@graphql(default*)` values above (see
+    /// `CashflowGraphInput`'s `Default` impl for why this is needed).
+    fn default() -> Self {
+        Self {
+            limit: 50,
+            offset: 0,
+        }
+    }
 }
 
 #[derive(SimpleObject)]
@@ -187,6 +212,19 @@ pub struct CashflowGraphInput {
     /// Remainder folded into one `Other` node.
     #[graphql(default = 8)]
     pub max_nodes_per_dimension: i32,
+}
+
+impl Default for CashflowGraphInput {
+    /// Mirrors the `@graphql(default*)` values above — needed because the
+    /// *argument* (`grouping: CashflowGraphInput`, not its fields) is what's
+    /// optional in the SDL, so a client omitting it entirely skips field
+    /// defaults and resolvers see a plain `None`.
+    fn default() -> Self {
+        Self {
+            dimensions: default_dimensions(),
+            max_nodes_per_dimension: 8,
+        }
+    }
 }
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
