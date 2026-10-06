@@ -7,7 +7,7 @@
 
 use chrono::{DateTime, Utc};
 use entity::entities::{account, account_balance, transaction, user_account};
-use sea_orm::sea_query::{Expr, OnConflict, SimpleExpr};
+use sea_orm::sea_query::{Expr, IntoIden, OnConflict, SimpleExpr};
 use sea_orm::{ActiveValue::Set, ColumnTrait, ConnectionTrait, DbErr, EntityTrait};
 use uuid::Uuid;
 
@@ -18,8 +18,13 @@ use crate::projection::records::{AccountRecord, BalanceRecord, TransactionRecord
 /// applied whenever the incoming record is a reconstruction, so a re-run
 /// backfill can never clobber a row a raw record already claimed. A `source`
 /// record carries no guard — it always wins, in either arrival order.
-fn legacy_guard<C: ColumnTrait>(origin_column: C) -> SimpleExpr {
-    Expr::col(origin_column).ne(ORIGIN_SOURCE)
+///
+/// `origin` is qualified with its own table rather than left bare: Postgres
+/// considers a bare column name in this `WHERE` ambiguous between the target
+/// row and `excluded` (the conflicting row being inserted), even though only
+/// one of them is actually in scope there.
+fn legacy_guard<E: IntoIden + Copy + 'static, C: ColumnTrait>(entity: E, origin_column: C) -> SimpleExpr {
+    Expr::col((entity, origin_column)).ne(ORIGIN_SOURCE)
 }
 
 /// Upserts one `account` row (§3, §2.8). `first_seen_at` is excluded from the
@@ -60,7 +65,7 @@ pub async fn upsert_account(
         account::Column::UpdatedAt,
     ]);
     if record.origin != ORIGIN_SOURCE {
-        on_conflict.action_cond_where(legacy_guard(account::Column::Origin));
+        on_conflict.action_cond_where(legacy_guard(account::Entity, account::Column::Origin));
     }
 
     account::Entity::insert(model)
@@ -143,7 +148,10 @@ pub async fn upsert_balance(
         account_balance::Column::ObservedAt,
     ]);
     if record.origin != ORIGIN_SOURCE {
-        on_conflict.action_cond_where(legacy_guard(account_balance::Column::Origin));
+        on_conflict.action_cond_where(legacy_guard(
+            account_balance::Entity,
+            account_balance::Column::Origin,
+        ));
     }
 
     account_balance::Entity::insert(model)
@@ -202,7 +210,10 @@ pub async fn upsert_transaction(
         transaction::Column::UpdatedAt,
     ]);
     if record.origin != ORIGIN_SOURCE {
-        on_conflict.action_cond_where(legacy_guard(transaction::Column::Origin));
+        on_conflict.action_cond_where(legacy_guard(
+            transaction::Entity,
+            transaction::Column::Origin,
+        ));
     }
 
     transaction::Entity::insert(model)
@@ -245,8 +256,11 @@ pub async fn link_default_owner(
 /// too (alongside `offsets::load_offsets`) so `upsert.rs`'s integration tests
 /// can assert on committed offsets without importing the whole `offsets`
 /// module's write path.
-#[cfg(test)]
-pub(crate) async fn offset_for(
+/// Available to unit tests directly and to the `integration`-gated
+/// integration tests (a separate test binary, hence `pub` rather than
+/// `pub(crate)`) — never compiled into the real binary otherwise.
+#[cfg(any(test, feature = "integration"))]
+pub async fn offset_for(
     db: &impl ConnectionTrait,
     topic: &str,
     partition: i32,
@@ -261,3 +275,4 @@ pub(crate) async fn offset_for(
         .await?;
     Ok(row.map(|r| r.next_offset))
 }
+
