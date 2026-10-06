@@ -1,0 +1,70 @@
+{
+  "query": "query Transactions($filter: TransactionFilter, $page: PageInput) {\n  transactions(filter: $filter, page: $page) {\n    items {\n      id\n      accountId\n      source\n      externalId\n      bookingDate\n      valutaDate\n      bookingStatus\n      amount\n      currency\n      counterpartyName\n      counterpartyIban\n      description\n      transactionType\n    }\n    totalCount\n    limit\n    offset\n  }\n}",
+  "variables": {
+    "filter": {
+      "accountIds": [
+        "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d"
+      ],
+      "startDate": "2024-01-01",
+      "endDate": "2024-02-29"
+    },
+    "page": {
+      "limit": 50,
+      "offset": 0
+    }
+  },
+  "data": {
+    "transactions": {
+      "items": [
+        {
+          "id": "966aa3c4-530f-5d92-b1b5-3afd7de55b3b",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-01-SALARY",
+          "bookingDate": "2024-01-02",
+          "valutaDate": "2024-01-02",
+          "bookingStatus": "BOOKED",
+          "amount": "2500.00",
+          "currency": "EUR",
+          "counterpartyName": "ACME GmbH",
+          "counterpartyIban": null,
+          "description": "Gehalt",
+          "transactionType": "Überweisungsgutschrift"
+        },
+        {
+          "id": "28c22a97-bb87-5656-bbfb-9e2137ac51e0",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-01-RENT",
+          "bookingDate": "2024-01-03",
+          "valutaDate": "2024-01-03",
+          "bookingStatus": "BOOKED",
+          "amount": "-950.00",
+          "currency": "EUR",
+          "counterpartyName": "Hausverwaltung Mustermann",
+          "counterpartyIban": "DE02500105170123456789",
+          "description": "Miete",
+          "transactionType": "Lastschrift"
+        },
+        {
+          "id": "936fcf84-237d-5ed6-96e9-8c0bf7458a64",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-CASH-01",
+          "bookingDate": "2024-02-20",
+          "valutaDate": "2024-02-20",
+          "bookingStatus": "BOOKED",
+          "amount": "-100.00",
+          "currency": "EUR",
+          "counterpartyName": null,
+          "counterpartyIban": null,
+          "description": "Bargeldauszahlung",
+          "transactionType": "Barauszahlung"
+        }
+      ],
+      "totalCount": 3,
+      "limit": 50,
+      "offset": 0
+    }
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "query": "query CashflowSummary($filter: TransactionFilter!, $granularity: Granularity!) {\n  cashflowSummary(filter: $filter, granularity: $granularity) {\n    buckets {\n      start\n      end\n      income\n      spending\n      net\n      transactionCount\n    }\n    total {\n      income\n      spending\n      net\n      transactionCount\n    }\n    currency\n  }\n}",
+  "variables": {
+    "filter": {
+      "accountIds": [
+        "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d"
+      ],
+      "startDate": "2024-01-01",
+      "endDate": "2024-01-31"
+    },
+    "granularity": "MONTH"
+  },
+  "data": {
+    "cashflowSummary": {
+      "buckets": [
+        {
+          "start": "2024-01-01",
+          "end": "2024-01-31",
+          "income": "2500.00",
+          "spending": "950.00",
+          "net": "1550.00",
+          "transactionCount": 2
+        }
+      ],
+      "total": {
+        "income": "2500.00",
+        "spending": "950.00",
+        "net": "1550.00",
+        "transactionCount": 2
+      },
+      "currency": "EUR"
+    }
+  }
+}

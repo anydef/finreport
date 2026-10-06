@@ -1,0 +1,143 @@
+{
+  "query": "query CashflowGraph($filter: TransactionFilter!, $grouping: CashflowGraphInput) {\n  cashflowGraph(filter: $filter, grouping: $grouping) {\n    nodes {\n      id\n      label\n      kind\n      depth\n      value\n      refType\n      refId\n    }\n    links {\n      sourceId\n      targetId\n      value\n    }\n    currency\n    dimensions\n    truncated\n  }\n}",
+  "variables": {
+    "filter": {
+      "accountIds": [
+        "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "dada8a91-51aa-5243-bcf6-12ff5423b400"
+      ],
+      "startDate": "2024-01-01",
+      "endDate": "2024-06-30"
+    },
+    "grouping": {
+      "dimensions": [
+        "INCOME_SOURCE",
+        "ACCOUNT",
+        "OUTCOME"
+      ],
+      "maxNodesPerDimension": 8
+    }
+  },
+  "data": {
+    "cashflowGraph": {
+      "nodes": [
+        {
+          "id": "income:acme-gmbh",
+          "label": "ACME GmbH",
+          "kind": "INCOME_SOURCE",
+          "depth": 0,
+          "value": "15000.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "income:comdirect-bank-ag",
+          "label": "Comdirect Bank AG",
+          "kind": "INCOME_SOURCE",
+          "depth": 0,
+          "value": "31.20",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "label": "Main",
+          "kind": "NET",
+          "depth": 1,
+          "value": "15000.00",
+          "refType": "account",
+          "refId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d"
+        },
+        {
+          "id": "account:dada8a91-51aa-5243-bcf6-12ff5423b400",
+          "label": "Joint",
+          "kind": "DEFICIT",
+          "depth": 1,
+          "value": "4531.20",
+          "refType": "account",
+          "refId": "dada8a91-51aa-5243-bcf6-12ff5423b400"
+        },
+        {
+          "id": "outcome:hausverwaltung-mustermann",
+          "label": "Hausverwaltung Mustermann",
+          "kind": "SPENDING",
+          "depth": 2,
+          "value": "5700.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:versicherung-ag",
+          "label": "Versicherung AG",
+          "kind": "SPENDING",
+          "depth": 2,
+          "value": "1800.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:unknown",
+          "label": "Unknown",
+          "kind": "SPENDING",
+          "depth": 2,
+          "value": "160.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:other",
+          "label": "Other",
+          "kind": "OTHER",
+          "depth": 2,
+          "value": "11871.20",
+          "refType": null,
+          "refId": null
+        }
+      ],
+      "links": [
+        {
+          "sourceId": "income:acme-gmbh",
+          "targetId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "value": "15000.00"
+        },
+        {
+          "sourceId": "income:comdirect-bank-ag",
+          "targetId": "account:dada8a91-51aa-5243-bcf6-12ff5423b400",
+          "value": "31.20"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:hausverwaltung-mustermann",
+          "value": "5700.00"
+        },
+        {
+          "sourceId": "account:dada8a91-51aa-5243-bcf6-12ff5423b400",
+          "targetId": "outcome:versicherung-ag",
+          "value": "1800.00"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:unknown",
+          "value": "160.00"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:other",
+          "value": "5000.00"
+        },
+        {
+          "sourceId": "account:dada8a91-51aa-5243-bcf6-12ff5423b400",
+          "targetId": "outcome:other",
+          "value": "6871.20"
+        }
+      ],
+      "currency": "EUR",
+      "dimensions": [
+        "INCOME_SOURCE",
+        "ACCOUNT",
+        "OUTCOME"
+      ],
+      "truncated": true
+    }
+  }
+}
