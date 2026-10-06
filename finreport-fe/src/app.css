@@ -1,3 +1,18 @@
 @import 'tailwindcss';
 @plugin '@tailwindcss/forms';
 @plugin '@tailwindcss/typography';
+
+/*
+ * Shared brand/semantic tokens (§6): the income/spending/net colour pair is
+ * used by both plain UI (totals, badges) and the LayerChart marks, so it is
+ * declared once here rather than duplicated in chart config — a chart
+ * colour cannot drift from its legend.
+ */
+@theme {
+	--color-brand: oklch(0.52 0.17 260);
+	--color-income: oklch(0.6 0.15 155);
+	--color-spending: oklch(0.58 0.2 25);
+	--color-net: oklch(0.52 0.17 260);
+	--color-account: oklch(0.65 0.13 230);
+	--color-muted: oklch(0.7 0.02 260);
+}

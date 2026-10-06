@@ -23,7 +23,7 @@
 		"@chromatic-com/storybook": "^4",
 		"@eslint/compat": "^1.2.5",
 		"@eslint/js": "^9.18.0",
-		"@playwright/test": "^1.49.1",
+		"@playwright/test": "^1.63.0",
 		"@storybook/addon-a11y": "^9.0.6",
 		"@storybook/addon-docs": "^9.0.6",
 		"@storybook/addon-svelte-csf": "^5.0.3",
@@ -35,6 +35,7 @@
 		"@tailwindcss/forms": "^0.5.9",
 		"@tailwindcss/typography": "^0.5.15",
 		"@tailwindcss/vite": "^4.0.0",
+		"@types/d3-scale": "^4.0.9",
 		"@types/node": "^20",
 		"eslint": "^9.18.0",
 		"eslint-config-prettier": "^10.0.1",
@@ -57,6 +58,6 @@
 	},
 	"dependencies": {
 		"@urql/svelte": "^4.2.3",
-		"chart.js": "^4.4.9"
+		"layerchart": "^2.5.2"
 	}
 }
