@@ -1,4 +1,476 @@
 //! Kafka-to-Postgres projector: per-source mappers and the `projector` batch
 //! loop (§2.3, §2.4).
 //!
-//! Stub for WP0 (contracts/schema only). WP3 owns this module's contents.
+//! [`process_batch`] is the pure half (map → upsert → commit offsets, all in
+//! one DB transaction, no Kafka I/O) and is what the integration tests drive
+//! directly; [`run`] is the thin, hard-to-unit-test half that polls a
+//! `StreamConsumer` and feeds it batches.
+
+pub mod comdirect;
+pub mod legacy;
+pub mod mapper;
+pub mod offsets;
+pub mod records;
+pub mod upsert;
+
+use std::collections::HashMap;
+use std::time::Duration;
+
+use chrono::{DateTime, Utc};
+use rdkafka::consumer::{Consumer, StreamConsumer};
+use rdkafka::message::{BorrowedMessage, Message};
+use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
+use rdkafka::{ClientConfig, Timestamp};
+use sea_orm::{DatabaseConnection, DatabaseTransaction, DbErr, TransactionTrait};
+use tracing::{error, info, warn};
+use uuid::Uuid;
+
+use crate::kafka::envelope::{
+    Envelope, SourceEvent, TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION,
+};
+use mapper::{MapperInput, MapperRegistry, SourceMapper};
+use records::MapError;
+
+// ---------------------------------------------------------------------------
+// Tuning (§2.3)
+// ---------------------------------------------------------------------------
+
+/// Upper bound on records folded into one DB transaction.
+pub const DEFAULT_BATCH_MAX_RECORDS: usize = 500;
+/// How long `run` waits for `DEFAULT_BATCH_MAX_RECORDS` to fill before
+/// flushing a smaller batch anyway — keeps latency bounded on a quiet topic.
+pub const DEFAULT_BATCH_MAX_WAIT: Duration = Duration::from_millis(500);
+/// After this many consecutive batch-write failures `run` gives up and
+/// returns an error, handing the restart decision to the process supervisor
+/// (§2.3) — a DB outage is retryable, a mapping bug is not, and this bound is
+/// what tells the two apart without a human watching.
+pub const DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 5;
+
+/// The three ingest topics the projector consumes — **not**
+/// `finreport.import-watermark`, which is importer-private (§2.3). All three
+/// are single-partition (§2.1's ordering guarantee), so partition 0 is the
+/// only partition that ever exists.
+pub const INGEST_TOPICS: [&str; 3] = [TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION];
+const INGEST_PARTITION: i32 = 0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EntityKind {
+    Account,
+    Balance,
+    Transaction,
+}
+
+fn entity_kind_for_topic(topic: &str) -> Option<EntityKind> {
+    match topic {
+        TOPIC_ACCOUNT => Some(EntityKind::Account),
+        TOPIC_ACCOUNT_BALANCE => Some(EntityKind::Balance),
+        TOPIC_TRANSACTION => Some(EntityKind::Transaction),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The pure half
+// ---------------------------------------------------------------------------
+
+/// One decoded ingest record, detached from the broker connection so batches
+/// can be assembled, replayed and asserted on in tests without a live
+/// consumer.
+#[derive(Debug, Clone)]
+pub struct ConsumedRecord {
+    pub topic: String,
+    pub partition: i32,
+    pub offset: i64,
+    pub key: Option<String>,
+    pub payload: Vec<u8>,
+    pub envelope: Envelope,
+}
+
+impl ConsumedRecord {
+    fn from_message(message: &BorrowedMessage<'_>) -> Self {
+        let message_timestamp = match message.timestamp() {
+            Timestamp::CreateTime(ms) | Timestamp::LogAppendTime(ms) => {
+                DateTime::from_timestamp_millis(ms).unwrap_or_else(Utc::now)
+            }
+            Timestamp::NotAvailable => Utc::now(),
+        };
+        let envelope = Envelope::parse(message.headers(), message_timestamp);
+
+        ConsumedRecord {
+            topic: message.topic().to_string(),
+            partition: message.partition(),
+            offset: message.offset(),
+            key: message.key().map(|k| String::from_utf8_lossy(k).into_owned()),
+            payload: message.payload().map(|p| p.to_vec()).unwrap_or_default(),
+            envelope,
+        }
+    }
+}
+
+/// Outcome of applying one batch — what the integration tests assert on.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct BatchStats {
+    pub applied: usize,
+    pub skipped: usize,
+}
+
+enum ApplyError {
+    Map(MapError),
+    Db(DbErr),
+}
+
+impl From<DbErr> for ApplyError {
+    fn from(e: DbErr) -> Self {
+        ApplyError::Db(e)
+    }
+}
+
+impl From<MapError> for ApplyError {
+    fn from(e: MapError) -> Self {
+        ApplyError::Map(e)
+    }
+}
+
+/// Maps, upserts and commits offsets for one batch inside a single DB
+/// transaction (§2.3). A mapping failure is a **poison record**: logged and
+/// skipped, the rest of the batch still applies. A DB write failure aborts
+/// the whole transaction — nothing in the batch commits, so the caller's
+/// retry re-applies the identical batch next time, which every upsert here
+/// is written to tolerate.
+pub async fn process_batch(
+    db: &DatabaseConnection,
+    registry: &MapperRegistry,
+    default_owner: Option<Uuid>,
+    records: &[ConsumedRecord],
+) -> Result<BatchStats, DbErr> {
+    let txn = db.begin().await?;
+    let mut stats = BatchStats::default();
+    let mut next_offsets: HashMap<(String, i32), i64> = HashMap::new();
+
+    for record in records {
+        next_offsets.insert((record.topic.clone(), record.partition), record.offset + 1);
+
+        let Some(kind) = entity_kind_for_topic(&record.topic) else {
+            warn!(topic = %record.topic, "projector: record on an unrecognized topic, skipped");
+            stats.skipped += 1;
+            continue;
+        };
+
+        let Some(mapper) = registry.resolve(&record.envelope.source, &record.envelope.origin) else {
+            error!(
+                topic = %record.topic,
+                partition = record.partition,
+                offset = record.offset,
+                source = %record.envelope.source,
+                origin = %record.envelope.origin,
+                "projector: no mapper registered for this (source, origin); record skipped"
+            );
+            stats.skipped += 1;
+            continue;
+        };
+
+        let input = MapperInput {
+            event: SourceEvent {
+                source: &record.envelope.source,
+                source_account_id: record.envelope.source_account_id.as_deref(),
+                key: record.key.as_deref().unwrap_or(""),
+                payload: &record.payload,
+                imported_at: record.envelope.imported_at,
+            },
+            comdirect_account_key: record.envelope.comdirect_account_key.as_deref(),
+            comdirect_account_name: record.envelope.comdirect_account_name.as_deref(),
+        };
+
+        let outcome = match kind {
+            EntityKind::Account => apply_account(&txn, mapper, &input, default_owner).await,
+            EntityKind::Balance => apply_balance(&txn, mapper, &input, default_owner).await,
+            EntityKind::Transaction => apply_transaction(&txn, mapper, &input, default_owner).await,
+        };
+
+        match outcome {
+            Ok(()) => stats.applied += 1,
+            Err(ApplyError::Map(map_err)) => {
+                error!(
+                    topic = %record.topic,
+                    partition = record.partition,
+                    offset = record.offset,
+                    error = %map_err,
+                    "projector: poison record skipped"
+                );
+                stats.skipped += 1;
+            }
+            Err(ApplyError::Db(db_err)) => return Err(db_err),
+        }
+    }
+
+    for ((topic, partition), next_offset) in &next_offsets {
+        offsets::commit_offset(&txn, topic, *partition, *next_offset, Utc::now()).await?;
+    }
+
+    txn.commit().await?;
+    Ok(stats)
+}
+
+async fn apply_account(
+    txn: &DatabaseTransaction,
+    mapper: &dyn SourceMapper,
+    input: &MapperInput<'_>,
+    default_owner: Option<Uuid>,
+) -> Result<(), ApplyError> {
+    let record = mapper.map_account(input)?;
+    upsert::upsert_account(txn, &record).await?;
+    if let Some(owner) = default_owner {
+        upsert::link_default_owner(txn, owner, record.id, record.updated_at).await?;
+    }
+    Ok(())
+}
+
+async fn apply_balance(
+    txn: &DatabaseTransaction,
+    mapper: &dyn SourceMapper,
+    input: &MapperInput<'_>,
+    default_owner: Option<Uuid>,
+) -> Result<(), ApplyError> {
+    let record = mapper.map_balance(input)?;
+    // A successful `map_balance` guarantees `source_account_id` was present
+    // (§2.2) — that is exactly what it would have failed on otherwise.
+    let source_account_id = input
+        .event
+        .source_account_id
+        .expect("map_balance succeeded, so source_account_id must be present");
+
+    upsert::ensure_stub_account(
+        txn,
+        input.event.source,
+        source_account_id,
+        &record.currency,
+        record.observed_at,
+    )
+    .await?;
+    if let Some(owner) = default_owner {
+        upsert::link_default_owner(txn, owner, record.account_id, record.observed_at).await?;
+    }
+    upsert::upsert_balance(txn, &record).await?;
+    Ok(())
+}
+
+async fn apply_transaction(
+    txn: &DatabaseTransaction,
+    mapper: &dyn SourceMapper,
+    input: &MapperInput<'_>,
+    default_owner: Option<Uuid>,
+) -> Result<(), ApplyError> {
+    let record = mapper.map_transaction(input)?;
+    let source_account_id = input
+        .event
+        .source_account_id
+        .expect("map_transaction succeeded, so source_account_id must be present");
+
+    upsert::ensure_stub_account(
+        txn,
+        input.event.source,
+        source_account_id,
+        &record.currency,
+        record.imported_at,
+    )
+    .await?;
+    if let Some(owner) = default_owner {
+        upsert::link_default_owner(txn, owner, record.account_id, record.imported_at).await?;
+    }
+    upsert::upsert_transaction(txn, &record).await?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The Kafka-facing half
+// ---------------------------------------------------------------------------
+
+/// Everything `run` needs besides the DB connection it is handed.
+pub struct ProjectorConfig {
+    pub brokers: String,
+    pub batch_max_records: usize,
+    pub batch_max_wait: Duration,
+    pub max_consecutive_write_failures: u32,
+    /// Resolved `user.id` for `APP_projector_default_owner` (§4), already
+    /// looked up by the caller — `run` itself never touches usernames.
+    pub default_owner: Option<Uuid>,
+    /// `--until-caught-up`: exit once every ingest topic's high watermark has
+    /// been reached, instead of polling forever (§2.3, handy for CI/tests).
+    pub until_caught_up: bool,
+}
+
+impl ProjectorConfig {
+    pub fn new(brokers: String) -> Self {
+        Self {
+            brokers,
+            batch_max_records: DEFAULT_BATCH_MAX_RECORDS,
+            batch_max_wait: DEFAULT_BATCH_MAX_WAIT,
+            max_consecutive_write_failures: DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES,
+            default_owner: None,
+            until_caught_up: false,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ProjectorError {
+    Kafka(rdkafka::error::KafkaError),
+    Db(DbErr),
+    /// `max_consecutive_write_failures` batch writes in a row all failed;
+    /// `run` stops instead of retrying forever against a DB that is not
+    /// coming back on its own (§2.3).
+    TooManyConsecutiveWriteFailures,
+}
+
+impl std::fmt::Display for ProjectorError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProjectorError::Kafka(e) => write!(f, "kafka error: {e}"),
+            ProjectorError::Db(e) => write!(f, "database error: {e}"),
+            ProjectorError::TooManyConsecutiveWriteFailures => {
+                write!(f, "too many consecutive batch-write failures")
+            }
+        }
+    }
+}
+
+impl std::error::Error for ProjectorError {}
+
+/// Consumes the ingest topics and projects every record into the read model,
+/// forever (or until caught up, with `--until-caught-up`) — (§2.3).
+///
+/// No consumer group: offsets live in Postgres (`offsets::load_offsets`,
+/// committed alongside each batch's rows), and `assign()` resumes from
+/// exactly there, defaulting to `Offset::Beginning` for a topic this
+/// projector has never seen.
+pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), ProjectorError> {
+    let registry = MapperRegistry::with_default_mappers();
+
+    let consumer: StreamConsumer = ClientConfig::new()
+        .set("bootstrap.servers", &config.brokers)
+        .set("enable.auto.commit", "false")
+        .set("enable.partition.eof", "false")
+        .create()
+        .map_err(ProjectorError::Kafka)?;
+
+    let stored_offsets = offsets::load_offsets(&db).await.map_err(ProjectorError::Db)?;
+    let mut tpl = TopicPartitionList::new();
+    for topic in INGEST_TOPICS {
+        let offset = stored_offsets
+            .get(&(topic.to_string(), INGEST_PARTITION))
+            .map(|&next| Offset::Offset(next))
+            .unwrap_or(Offset::Beginning);
+        tpl.add_partition_offset(topic, INGEST_PARTITION, offset)
+            .map_err(ProjectorError::Kafka)?;
+    }
+    consumer.assign(&tpl).map_err(ProjectorError::Kafka)?;
+
+    let high_watermarks = if config.until_caught_up {
+        let mut marks = HashMap::new();
+        for topic in INGEST_TOPICS {
+            let (_, high) = consumer
+                .fetch_watermarks(topic, INGEST_PARTITION, Duration::from_secs(10))
+                .map_err(ProjectorError::Kafka)?;
+            marks.insert(topic.to_string(), high);
+        }
+        Some(marks)
+    } else {
+        None
+    };
+
+    let mut consecutive_write_failures = 0u32;
+
+    loop {
+        let batch = collect_batch(&consumer, config.batch_max_records, config.batch_max_wait).await;
+
+        if batch.is_empty() {
+            if let Some(marks) = &high_watermarks {
+                if is_caught_up(&consumer, marks).map_err(ProjectorError::Kafka)? {
+                    info!("projector: caught up with all ingest topics, exiting (--until-caught-up)");
+                    return Ok(());
+                }
+            }
+            continue;
+        }
+
+        match process_batch(&db, &registry, config.default_owner, &batch).await {
+            Ok(stats) => {
+                consecutive_write_failures = 0;
+                info!(applied = stats.applied, skipped = stats.skipped, "projector: batch applied");
+            }
+            Err(db_err) => {
+                consecutive_write_failures += 1;
+                error!(
+                    error = %db_err,
+                    attempt = consecutive_write_failures,
+                    "projector: batch write failed, batch not committed"
+                );
+                if consecutive_write_failures >= config.max_consecutive_write_failures {
+                    return Err(ProjectorError::TooManyConsecutiveWriteFailures);
+                }
+                let backoff_ms = 200u64.saturating_mul(1u64 << consecutive_write_failures.min(5));
+                tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
+            }
+        }
+    }
+}
+
+async fn collect_batch(
+    consumer: &StreamConsumer,
+    max_records: usize,
+    max_wait: Duration,
+) -> Vec<ConsumedRecord> {
+    let mut batch = Vec::new();
+    let deadline = tokio::time::Instant::now() + max_wait;
+
+    loop {
+        if batch.len() >= max_records {
+            break;
+        }
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+
+        match tokio::time::timeout(remaining, consumer.recv()).await {
+            Ok(Ok(message)) => batch.push(ConsumedRecord::from_message(&message)),
+            Ok(Err(e)) => warn!(error = %e, "projector: kafka poll error"),
+            Err(_elapsed) => break,
+        }
+    }
+
+    batch
+}
+
+/// Whether the consumer's current position has reached every ingest topic's
+/// high watermark at `assign()` time (`--until-caught-up`, §2.3). An empty
+/// topic (`high == 0`) is trivially caught up regardless of position.
+fn is_caught_up(
+    consumer: &StreamConsumer,
+    high_watermarks: &HashMap<String, i64>,
+) -> Result<bool, rdkafka::error::KafkaError> {
+    let position = consumer.position()?;
+
+    for topic in INGEST_TOPICS {
+        let high = *high_watermarks.get(topic).unwrap_or(&0);
+        if high == 0 {
+            continue;
+        }
+
+        let current = position
+            .elements_for_topic(topic)
+            .into_iter()
+            .find(|e| e.partition() == INGEST_PARTITION)
+            .and_then(|e| match e.offset() {
+                Offset::Offset(o) => Some(o),
+                _ => None,
+            });
+
+        match current {
+            Some(o) if o >= high => continue,
+            _ => return Ok(false),
+        }
+    }
+
+    Ok(true)
+}
