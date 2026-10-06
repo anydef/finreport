@@ -3,21 +3,13 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "account_balance")]
+#[sea_orm(table_name = "user_account")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub user_id: Uuid,
+    #[sea_orm(primary_key, auto_increment = false)]
     pub account_id: Uuid,
-    pub balance_date: Date,
-    #[sea_orm(column_type = "Decimal(Some((20, 4)))")]
-    pub amount: Decimal,
-    #[sea_orm(column_type = "Text")]
-    pub currency: String,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub raw_payload: Option<Json>,
-    #[sea_orm(column_type = "Text")]
-    pub origin: String,
-    pub observed_at: DateTimeWithTimeZone,
+    pub created_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -30,11 +22,25 @@ pub enum Relation {
         on_delete = "Cascade"
     )]
     Account,
+    #[sea_orm(
+        belongs_to = "super::app_user::Entity",
+        from = "Column::UserId",
+        to = "super::app_user::Column::Id",
+        on_update = "NoAction",
+        on_delete = "Cascade"
+    )]
+    AppUser,
 }
 
 impl Related<super::account::Entity> for Entity {
     fn to() -> RelationDef {
         Relation::Account.def()
+    }
+}
+
+impl Related<super::app_user::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::AppUser.def()
     }
 }
 

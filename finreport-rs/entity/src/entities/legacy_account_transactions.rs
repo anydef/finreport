@@ -3,7 +3,7 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel)]
-#[sea_orm(table_name = "account_transactions")]
+#[sea_orm(table_name = "legacy_account_transactions")]
 pub struct Model {
     #[sea_orm(primary_key)]
     pub id: i32,
@@ -26,18 +26,18 @@ pub struct Model {
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(
-        belongs_to = "super::account::Entity",
+        belongs_to = "super::legacy_account::Entity",
         from = "Column::AccountId",
-        to = "super::account::Column::AccountId",
+        to = "super::legacy_account::Column::AccountId",
         on_update = "NoAction",
         on_delete = "Cascade"
     )]
-    Account,
+    LegacyAccount,
 }
 
-impl Related<super::account::Entity> for Entity {
+impl Related<super::legacy_account::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::Account.def()
+        Relation::LegacyAccount.def()
     }
 }
 

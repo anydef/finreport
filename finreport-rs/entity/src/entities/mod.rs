@@ -4,8 +4,15 @@ pub mod prelude;
 
 pub mod account;
 pub mod account_balance;
-pub mod account_transactions;
+pub mod app_user;
 pub mod categories;
+pub mod legacy_account;
+pub mod legacy_account_balance;
+pub mod legacy_account_transactions;
 pub mod mandate_categories;
+pub mod projection_offset;
+pub mod transaction;
 pub mod transaction_categories;
 pub mod transactions;
+pub mod user_account;
+pub mod user_session;

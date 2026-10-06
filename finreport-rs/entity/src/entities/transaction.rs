@@ -3,21 +3,37 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "account_balance")]
+#[sea_orm(table_name = "transaction")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
     pub account_id: Uuid,
-    pub balance_date: Date,
+    #[sea_orm(column_type = "Text")]
+    pub source: String,
+    #[sea_orm(column_type = "Text")]
+    pub external_id: String,
+    pub booking_date: Date,
+    pub valuta_date: Option<Date>,
+    #[sea_orm(column_type = "Text")]
+    pub booking_status: String,
     #[sea_orm(column_type = "Decimal(Some((20, 4)))")]
     pub amount: Decimal,
     #[sea_orm(column_type = "Text")]
     pub currency: String,
-    #[sea_orm(column_type = "JsonBinary", nullable)]
-    pub raw_payload: Option<Json>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub counterparty_name: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub counterparty_iban: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub description: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub transaction_type: Option<String>,
+    #[sea_orm(column_type = "JsonBinary")]
+    pub raw_payload: Json,
     #[sea_orm(column_type = "Text")]
     pub origin: String,
-    pub observed_at: DateTimeWithTimeZone,
+    pub imported_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
