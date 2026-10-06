@@ -1,0 +1,26 @@
+{
+  "reference": "ACC2-SPEND-07",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-02-22",
+  "amount": {
+    "value": "-45.00",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "Buchhandlung Lesen",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-02-22",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Überweisung",
+  "transactionType": {
+    "key": "TRANSFER",
+    "text": "Überweisung"
+  }
+}

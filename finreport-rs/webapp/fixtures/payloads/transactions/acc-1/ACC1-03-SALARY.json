@@ -1,0 +1,24 @@
+{
+  "reference": "ACC1-03-SALARY",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-03-02",
+  "amount": {
+    "value": "2500.00",
+    "unit": "EUR"
+  },
+  "remitter": {
+    "holderName": "ACME GmbH"
+  },
+  "deptor": null,
+  "creditor": null,
+  "valutaDate": "2024-03-02",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Gehalt",
+  "transactionType": {
+    "key": "TRANSFER",
+    "text": "Überweisungsgutschrift"
+  }
+}
