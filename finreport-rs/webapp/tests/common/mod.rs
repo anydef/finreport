@@ -9,15 +9,15 @@
 #![allow(dead_code)]
 
 use chrono::Utc;
-use entity::entities::{account, app_user, transaction};
+use entity::entities::{account, app_user, transaction, user_account};
 use rust_decimal::Decimal;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
 use secrecy::SecretString;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
+use webapp::auth;
 use webapp::db::seaql;
-use webapp::graphql::auth_shim;
 
 const TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/finreport_wp4";
 
@@ -37,10 +37,10 @@ pub async fn db() -> Arc<DatabaseConnection> {
 
 pub fn dummy_settings() -> Arc<utils::settings::Settings> {
     Arc::new(utils::settings::Settings {
-        oauth_url: String::new(),
-        url: String::new(),
-        save_file_path: String::new(),
-        database_url: SecretString::from(TEST_DATABASE_URL.to_string()),
+        oauth_url: None,
+        url: None,
+        save_file_path: None,
+        database_url: Some(SecretString::from(TEST_DATABASE_URL.to_string())),
         kafka_brokers: None,
         cookie_secure: false,
         allowed_origins: "http://localhost:5173".to_string(),
@@ -68,7 +68,10 @@ pub async fn seed_user(db: &DatabaseConnection, username: &str, password: &str) 
     app_user::ActiveModel {
         id: Set(user_id),
         username: Set(unique_username.clone()),
-        password_hash: Set(auth_shim::hash_password(password)),
+        password_hash: Set(
+            auth::hash_password(&SecretString::from(password.to_string()))
+                .expect("hash password"),
+        ),
         display_name: Set(Some(username.to_string())),
         disabled: Set(false),
         created_at: Set(Utc::now().into()),
@@ -104,12 +107,19 @@ pub async fn seed_account(db: &DatabaseConnection, currency: &str, label: &str) 
     account_id
 }
 
-/// Links `user_id` to `account_id` via `auth_shim::link_account` — the same
-/// path a real `user-admin link` (WP2, not on this branch) would use.
+/// Links `user_id` to `account_id` by inserting a `user_account` row
+/// directly — `crate::auth::link_account` resolves by `username` +
+/// `source:external_id` (the `user-admin link` shape), but these tests
+/// already hold both ids, so the direct insert is equivalent and simpler.
 pub async fn link(db: &DatabaseConnection, user_id: Uuid, account_id: Uuid) {
-    auth_shim::link_account(db, user_id, account_id)
-        .await
-        .expect("link user to account");
+    user_account::ActiveModel {
+        user_id: Set(user_id),
+        account_id: Set(account_id),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(db)
+    .await
+    .expect("link user to account");
 }
 
 /// Inserts one transaction row. `booking_date` is `YYYY-MM-DD`.

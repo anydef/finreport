@@ -48,7 +48,6 @@ async fn cross_user_account_access_is_denied() {
     let caller = AuthenticatedUser {
         user_id: user_a,
         username: "alice-scope-test".to_string(),
-        display_name: None,
         account_ids: vec![account_a],
     };
 
@@ -84,7 +83,6 @@ async fn cashflow_summary_matches_a_hand_computed_fixture_sum() {
     let caller = AuthenticatedUser {
         user_id: user,
         username: "carol-summary-test".to_string(),
-        display_name: None,
         account_ids: vec![account],
     };
 
@@ -132,7 +130,6 @@ async fn cashflow_graph_conserves_flow_and_reconciles_with_summary() {
     let caller = AuthenticatedUser {
         user_id: user,
         username: "dave-graph-test".to_string(),
-        display_name: None,
         account_ids: vec![account],
     };
 

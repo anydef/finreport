@@ -22,6 +22,7 @@ async fn login_cookie_round_trips_and_identifies_the_caller() {
             .wrap(cors(&settings))
             .app_data(web::Data::new(schema))
             .app_data(web::Data::new(db))
+            .app_data(web::Data::new(settings.clone()))
             .route("/graphql", web::post().to(graphql_handler)),
     )
     .await;
