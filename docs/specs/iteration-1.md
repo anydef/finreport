@@ -78,7 +78,8 @@ The four topics from phase 1 stay exactly as they are (`finreport.account`,
 They are **retroactively defined as the Comdirect raw topics**. A second source
 gets its own topics under `finreport.<source>.<entity>` (e.g.
 `finreport.c24.transaction`), with the unprefixed names grandfathered as
-`comdirect`. One topic per source keeps the raw-payload rule intact and lets
+`comdirect`. The three `finreport.comdirect.legacy-*` topics (§2.8) follow that
+same convention. One topic per source keeps the raw-payload rule intact and lets
 the projector pick a mapper from the topic it polled.
 
 **Rejected: a common envelope topic** (`{source, type, payload}`). It would
@@ -96,6 +97,7 @@ and WP3 (consumer); neither side may change it unilaterally.
 |---|---|---|
 | `source` | yes | `comdirect` (stable source id, lowercase) |
 | `source_account_id` | yes, on all but `account` | the source's own account id (`accountId`) |
+| `origin` | yes | `source` (fetched from the provider) or `legacy-backfill` (reconstructed from the old Postgres tables, §2.8) |
 | `schema_version` | yes | `1` — bumped only if the *header* contract changes |
 | `imported_at` | yes | RFC 3339, when the importer fetched the record |
 | `comdirect_account_key` | existing | config key of the login (`0`, `1`, …) |
@@ -165,9 +167,10 @@ Comdirect vocabulary into the records (`deptor`, `directDebitMandateId`,
 functions of bytes + headers: no DB, no clock, no network. That is what makes
 them unit-testable and replay-deterministic.
 
-Registration is a `HashMap<&'static str, Box<dyn SourceMapper>>` keyed by
-`source`, with the topic → entity-kind decided by which topic the record came
-from. Unknown `source` → log and skip.
+Registration is a `HashMap<(&'static str, Origin), Box<dyn SourceMapper>>`,
+with the topic → entity-kind decided by which topic the record came from.
+`ComdirectMapper` handles `(comdirect, source)`, `LegacyMapper` handles
+`(comdirect, legacy-backfill)` (§2.8). Unknown pair → log and skip.
 
 ### 2.5 Normalization rules (comdirect)
 
@@ -213,24 +216,57 @@ startup, early-stop pagination with the ordering guard in `comdirect-rs` —
 **do not remove that guard**). One change: the watermark is only advanced after
 every transaction in the batch has been published successfully (§2.6).
 
-### 2.8 Migration of existing data
+### 2.8 Migration of existing data — legacy backfill, no truncation
 
 Current Postgres rows came from the dual-write path and have no raw payload, so
-they cannot be back-converted into the new shape, and they cannot be
-republished to Kafka as raw bank JSON (the bytes were never kept). Therefore:
+they cannot be republished as raw bank JSON (the bytes were never kept). They
+are still real history that Comdirect's API may no longer return, so they are
+**reconstructed into the log, not discarded**:
 
-1. Migrations reshape `account` / `account_balance` / `account_transactions`
-   (§3) and **truncate them**. Postgres is a read model now; losing it is a
-   rebuild, not a loss.
-2. Before the first projector run, tombstone the watermark topic (one
-   null-valued record per `account_id`, see `docs/kafka-migration.md` §5) so
-   the next import walks the full Comdirect history and republishes it raw.
-3. The projector then builds the read model from offset 0.
+1. The reshaping migration **renames** `account` / `account_balance` /
+   `account_transactions` to `legacy_account` / `legacy_account_balance` /
+   `legacy_account_transactions` and creates the new tables (§3) alongside
+   them. Nothing is dropped or truncated.
+2. `legacy-backfill` (a one-off bin) reads the `legacy_*` tables and publishes
+   one record per row to dedicated topics:
+   `finreport.comdirect.legacy-account`,
+   `finreport.comdirect.legacy-account-balance`,
+   `finreport.comdirect.legacy-transaction` (compacted, same keys as their live
+   counterparts: `account_id`, `account_id`, `reference`).
+3. Tombstone the watermark topic so the next import re-walks the full Comdirect
+   history and republishes whatever the bank still returns, raw.
+4. The projector consumes legacy and live topics alike and builds the read model
+   from offset 0.
+5. The `legacy_*` tables are dropped **in a later iteration**, only after
+   projected row counts and per-account sums have been verified against them.
 
-History older than what Comdirect's transactions endpoint still returns is not
-recoverable. That is accepted: it is a personal-finance MVP, and keeping the
-old Comdirect-shaped tables around to preserve it would permanently fork the
-schema.
+**Legacy payloads are the one further exception to the raw-payload rule.** Their
+value is our own JSON — the `legacy_*` column set, serialized — because there is
+no bank payload to forward. They are marked as such and must never be mistaken
+for bank data:
+
+- header `origin=legacy-backfill` (live records carry `origin=source`, added to
+  the §2.2 envelope),
+- `source`, `source_account_id`, `schema_version` as usual,
+- separate topics, so a consumer wanting only bank-verbatim data simply does not
+  subscribe to them.
+
+**Precedence: a raw record always beats a reconstructed one, in either arrival
+order.** The read-model tables carry `origin TEXT NOT NULL` (§3). The projector:
+
+- `origin=source` → upsert unconditionally, setting `origin='source'`.
+- `origin=legacy-backfill` → insert when absent; on conflict update **only if the
+  stored row is itself `origin='legacy'`** (`DO UPDATE … WHERE
+  transaction.origin = 'legacy'`).
+
+That single guard is order-independent and therefore replay-safe: a replay from
+offset 0, in any interleaving, converges on the same state with raw data winning
+every contested identity. Contested identity is `(source, external_id)` for
+transactions and accounts, `(account_id, balance_date)` for balances.
+
+`LegacyMapper` (§2.4, a second `SourceMapper` selected by the legacy topics) does
+the field mapping; `raw_payload` holds the reconstructed JSON, and the `origin`
+column is what tells a later consumer it is not the bank's own bytes.
 
 **Joint accounts** (same IBAN under two logins, two `accountId`s) still produce
 two account rows — the unique IBAN constraint is dropped (§3) precisely so this
@@ -288,6 +324,7 @@ account(id UUID PK,
         label TEXT NULL,                       -- was account_name (login label)
         currency TEXT NOT NULL DEFAULT 'EUR',
         raw_payload JSONB NULL,
+        origin TEXT NOT NULL,                  -- 'source' | 'legacy'; see §2.8
         first_seen_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
         UNIQUE (source, external_id))
 ```
@@ -299,6 +336,7 @@ foreign keys go away).
 account_balance(id UUID PK, account_id UUID -> account.id ON DELETE CASCADE,
                 balance_date DATE NOT NULL, amount NUMERIC(20,4) NOT NULL,
                 currency TEXT NOT NULL, raw_payload JSONB NULL,
+                origin TEXT NOT NULL,          -- 'source' | 'legacy'; see §2.8
                 observed_at TIMESTAMPTZ NOT NULL,
                 UNIQUE (account_id, balance_date))
 ```
@@ -314,6 +352,7 @@ transaction(id UUID PK, account_id UUID -> account.id ON DELETE CASCADE,
             counterparty_name TEXT NULL, counterparty_iban TEXT NULL,
             description TEXT NULL, transaction_type TEXT NULL,
             raw_payload JSONB NOT NULL,
+            origin TEXT NOT NULL,              -- 'source' | 'legacy'; see §2.8
             imported_at TIMESTAMPTZ NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
             UNIQUE (source, external_id))
 ```
@@ -332,6 +371,11 @@ projection_offset(topic TEXT NOT NULL, partition INT NOT NULL,
                   next_offset BIGINT NOT NULL, updated_at TIMESTAMPTZ NOT NULL,
                   PRIMARY KEY (topic, partition))
 ```
+
+**Renamed, not dropped**: the three current read-model tables become
+`legacy_account` / `legacy_account_balance` / `legacy_account_transactions`
+(§2.8) and survive this iteration untouched — the backfill's source, and the
+verification baseline before they are dropped later.
 
 **Dropped**: the legacy `transactions`, `categories`, `transaction_categories`,
 `mandate_categories` entities are untouched by this iteration (iteration 2
@@ -859,8 +903,9 @@ developed in its own worktree
 `finreport-fe/src/lib/graphql/{schema.graphql,mocks/**}`,
 `finreport-rs/utils/src/settings.rs`, plus the four shared files above.
 
-Migrations from §3 (users, membership, sessions, reshaped read model,
-`projection_offset`) + regenerated entities; `envelope.rs`; the committed SDL
+Migrations from §3 (users, membership, sessions, reshaped read model with its
+`origin` columns, the `legacy_*` renames, `projection_offset`) + regenerated
+entities; `envelope.rs`; the committed SDL
 (hand-written to §5 — the exporter check in WP4 must match it); the fixture
 corpus and its derived GraphQL mock responses (including a `cashflowGraph`
 response with truncation, an `Other` node and a `DEFICIT` period, so the
@@ -883,11 +928,16 @@ validates against it.
 Remove all Postgres writes and the `sea-orm`/`entity` dependency from the
 importer; emit the §2.2 headers via `envelope.rs`; require `APP_kafka_brokers`;
 publish failure → `error` + watermark not advanced; implement `fixture-replay`
-against the WP0 corpus; rewrite `docs/kafka-migration.md` for phase 2.
+against the WP0 corpus; implement the one-off `legacy-backfill` bin (§2.8:
+reads `legacy_*`, publishes to the three `finreport.comdirect.legacy-*` topics
+with `origin=legacy-backfill`); rewrite `docs/kafka-migration.md` for phase 2
+and for the legacy-payload exception.
 *Depends on:* WP0. *Parallel with:* WP2–WP6 (no file overlap).
 *Done when:* the importer compiles without `sea-orm`, a local run publishes
 records carrying every required header, `fixture-replay` fills all four topics,
-and `rpk topic consume` shows byte-unmodified payloads.
+`rpk topic consume` shows byte-unmodified payloads, and `legacy-backfill`
+re-runs idempotently (same keys, same values) against a populated `legacy_*`
+set.
 
 ### WP2 — Auth core & admin CLI
 **Owns:** `finreport-rs/webapp/src/auth/**`,
@@ -908,14 +958,16 @@ against a local DB.
 (`mod.rs`, `mapper.rs`, `comdirect.rs`, `records.rs`, `offsets.rs`, `upsert.rs`),
 `finreport-rs/webapp/src/bin/projector.rs`.
 
-`SourceMapper` trait + `ComdirectMapper`, batch consume → map → upsert →
-offset commit in one transaction, stub accounts, poison-record skip,
-retry/exit policy, optional default-owner linking.
+`SourceMapper` trait + `ComdirectMapper` + `LegacyMapper` and the
+raw-beats-legacy upsert guard (§2.8), batch consume → map → upsert → offset
+commit in one transaction, stub accounts, poison-record skip, retry/exit
+policy, optional default-owner linking.
 *Depends on:* WP0 (entities + envelope). *Parallel with:* WP1, WP2, WP4, WP5.
 Does **not** depend on WP1: it consumes fixture-replayed topics.
 *Done when:* replaying the fixture corpus fills the read model, a second replay
-changes no rows, reset + replay reproduces identical state, and a mid-batch
-kill leaves no duplicates and no gaps.
+changes no rows, reset + replay reproduces identical state, a mid-batch kill
+leaves no duplicates and no gaps, and a legacy record and a raw record for the
+same identity converge on the raw one **in both arrival orders**.
 
 ### WP4 — GraphQL API & HTTP surface
 **Owns:** `finreport-rs/webapp/src/graphql/**`, `finreport-rs/webapp/src/main.rs`,
@@ -962,7 +1014,9 @@ against `just dev-demo`.
 `finreport-rs/tests/**` (integration harness), `.gitea/**`, root `CLAUDE.md`,
 `terraform/kafka/main.tf` comments kept in step with the local topic init.
 
-Redpanda + topic-init services; the `dev-up`/`dev-down`/`dev-projector`/
+Redpanda + topic-init services (including the three
+`finreport.comdirect.legacy-*` topics, mirrored into `terraform/kafka/main.tf`
+with the same `prevent_destroy` guard); the `dev-up`/`dev-down`/`dev-projector`/
 `seed-user`/`seed-events`/`dev-demo`/`dev-reset` recipes; the testcontainers
 harness behind the `integration` feature + `just test-integration`; deployed
 compose updates (importer loses `APP_database_url`, gains required
@@ -998,8 +1052,10 @@ WP4 ↔ WP2 (function signatures, fixed in §4) and WP4 ↔ WP5 (the SDL, fixed 
 
 **Assumptions made (decided here, not escalated)**
 
-1. Current Postgres contents are expendable; the read model is rebuilt from
-   Kafka plus a full Comdirect re-walk (§2.8).
+1. Current Postgres history is **not** expendable: it is renamed to `legacy_*`,
+   republished to dedicated legacy topics as reconstructed (non-raw) records and
+   re-projected, with raw records winning any contested identity. The `legacy_*`
+   tables are dropped only after verification, in a later iteration (§2.8).
 2. Single currency (EUR) across the board; mixed-currency account sets are
    summed without conversion and logged.
 3. Offset storage in Postgres rather than Kafka consumer-group offsets, for
