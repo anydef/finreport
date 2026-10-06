@@ -137,9 +137,12 @@ async fn replay_is_idempotent_and_reset_replay_reproduces_identical_state() {
     );
     assert_eq!(
         first.skipped, second.skipped,
-        "an identical replay must skip the same poison records (ACC1-MISSING-ACCOUNT-0001)"
+        "an identical replay must skip the same poison records (ACC1-MISSING-ACCOUNT-0001, ACC1-PHASE1-0001)"
     );
-    assert!(first.skipped >= 1, "the missing-source-account-id fixture must be skipped");
+    assert_eq!(
+        first.skipped, 2,
+        "exactly the two source_account_id-less fixtures must be skipped (§2.2 skip+log)"
+    );
 
     // Reset (as a fresh DB would be) and replay once more: must reproduce
     // exactly the same row counts.

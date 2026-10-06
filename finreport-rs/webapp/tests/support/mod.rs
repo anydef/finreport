@@ -59,6 +59,12 @@ fn unique_suffix() -> String {
 /// it. Dropping this drops the container (testcontainers' own cleanup).
 pub struct TestDb {
     pub conn: DatabaseConnection,
+    /// The URL `conn` was built from, kept around so a test that needs a
+    /// second, independent `DatabaseConnection` against the *same* running
+    /// container (sea-orm's `DatabaseConnection` isn't `Clone` once the
+    /// `mock` feature is enabled, which `webapp` does) can call
+    /// `seaql::init_db` again instead.
+    pub database_url: String,
     _container: ContainerAsync<Postgres>,
 }
 
@@ -89,6 +95,7 @@ pub async fn start_postgres() -> TestDb {
 
     TestDb {
         conn,
+        database_url,
         _container: container,
     }
 }
@@ -108,7 +115,8 @@ pub async fn start_redpanda() -> TestBroker {
     let listen = format!("PLAINTEXT://0.0.0.0:{REDPANDA_HOST_PORT}");
 
     let image = GenericImage::new("redpandadata/redpanda", "v24.2.18")
-        .with_wait_for(WaitFor::message_on_stdout("Successfully started Redpanda!"))
+        .with_exposed_port(REDPANDA_HOST_PORT.tcp())
+        .with_wait_for(WaitFor::message_on_stderr("Successfully started Redpanda!"))
         .with_cmd([
             "redpanda",
             "start",
