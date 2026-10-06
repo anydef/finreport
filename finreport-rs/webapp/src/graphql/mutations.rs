@@ -1,15 +1,15 @@
-//! Mutation root (§5). `login`/`logout` call `auth_shim` (WP2's temporary
-//! stand-in, see that module's doc comment) and set/clear the session
-//! cookie via `ctx.append_http_header`, which the actix integration
-//! propagates onto the HTTP response (§4).
+//! Mutation root (§5). `login`/`logout` call `crate::auth` (WP2's real auth
+//! core) and set/clear the session cookie via `ctx.append_http_header`,
+//! which the actix integration propagates onto the HTTP response (§4).
 
 use async_graphql::{Context, ErrorExtensions, Object, Result as GqlResult};
 use sea_orm::DatabaseConnection;
-use secrecy::SecretString;
+use secrecy::{ExposeSecret, SecretString};
 use std::sync::Arc;
 use utils::settings::Settings;
 
-use crate::graphql::auth_shim;
+use crate::auth;
+use crate::graphql::cookies::{clear_cookie_header, cookie_header};
 use crate::graphql::types::{LoginInput, Me};
 use crate::graphql::RawSessionToken;
 
@@ -30,28 +30,28 @@ impl MutationRoot {
             .and_then(|t| t.user_agent.clone());
         let password = SecretString::from(input.password);
 
-        match auth_shim::authenticate(
-            db,
-            &input.username,
-            &password,
-            settings.session_ttl_days,
-            user_agent,
-        )
-        .await
-        {
-            Ok((user, token)) => {
-                ctx.append_http_header(
-                    "set-cookie",
-                    auth_shim::cookie_header(&token, settings.session_ttl_days, settings.cookie_secure),
-                );
-                Ok(Me {
-                    id: user.user_id.into(),
-                    username: user.username,
-                    display_name: user.display_name,
-                })
-            }
-            Err(_) => Err(invalid_credentials()),
-        }
+        let user = match auth::authenticate(db, &input.username, &password).await {
+            Ok(user) => user,
+            Err(_) => return Err(invalid_credentials()),
+        };
+
+        let token = auth::create_session(db, user.id, settings.session_ttl_days, user_agent)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+
+        ctx.append_http_header(
+            "set-cookie",
+            cookie_header(
+                token.expose_secret(),
+                settings.session_ttl_days,
+                settings.cookie_secure,
+            ),
+        );
+        Ok(Me {
+            id: user.id.into(),
+            username: user.username,
+            display_name: user.display_name,
+        })
     }
 
     async fn logout(&self, ctx: &Context<'_>) -> GqlResult<bool> {
@@ -59,13 +59,12 @@ impl MutationRoot {
         let settings = ctx.data::<Arc<Settings>>()?;
         if let Ok(token) = ctx.data::<RawSessionToken>() {
             if let Some(raw) = &token.raw {
-                auth_shim::revoke_session(db, raw).await?;
+                auth::revoke_session(db, raw)
+                    .await
+                    .map_err(|e| async_graphql::Error::new(e.to_string()))?;
             }
         }
-        ctx.append_http_header(
-            "set-cookie",
-            auth_shim::clear_cookie_header(settings.cookie_secure),
-        );
+        ctx.append_http_header("set-cookie", clear_cookie_header(settings.cookie_secure));
         Ok(true)
     }
 }

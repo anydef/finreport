@@ -5,16 +5,7 @@
 use async_graphql::{Context, ErrorExtensions, Result as GqlResult};
 use uuid::Uuid;
 
-/// Injected into the async-graphql context as `Option<AuthenticatedUser>` by
-/// the actix handler in `main.rs` after cookie extraction + session lookup.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AuthenticatedUser {
-    pub user_id: Uuid,
-    pub username: String,
-    pub display_name: Option<String>,
-    /// `account.id`s this user may see, from `user_account`.
-    pub account_ids: Vec<Uuid>,
-}
+pub use crate::auth::AuthenticatedUser;
 
 /// The error every unauthenticated field but `me`/`login` returns:
 /// `extensions.code = "UNAUTHENTICATED"` (§5), so the frontend can key its
@@ -73,7 +64,6 @@ mod tests {
         AuthenticatedUser {
             user_id: uuid(0),
             username: "default".to_string(),
-            display_name: None,
             account_ids: vec![uuid(1), uuid(2)],
         }
     }
@@ -118,7 +108,6 @@ mod tests {
         let u = AuthenticatedUser {
             user_id: uuid(0),
             username: "default".to_string(),
-            display_name: None,
             account_ids: vec![],
         };
         let result = scoped_account_ids(&u, None).expect("should succeed");

@@ -11,16 +11,19 @@ use sea_orm::DatabaseConnection;
 use std::sync::Arc;
 use utils::settings::Settings;
 
-use crate::graphql::{auth_shim, request_with_auth, AppSchema, RawSessionToken};
+use crate::auth;
+use crate::graphql::cookies::extract_token;
+use crate::graphql::{request_with_auth, AppSchema, RawSessionToken};
 
 /// Extracts `fr_session` from the raw `Cookie` header, looks up its session
-/// (via `auth_shim`, WP2's temporary stand-in — see that module) and injects
-/// `Option<AuthenticatedUser>` plus the raw token into the GraphQL request
-/// context (§4). Every resolver but `me`/`login`/`logout` goes through that
-/// context — there is no unscoped query path.
+/// (via `crate::auth::verify_session`) and injects `Option<AuthenticatedUser>`
+/// plus the raw token into the GraphQL request context (§4). Every resolver
+/// but `me`/`login`/`logout` goes through that context — there is no
+/// unscoped query path.
 pub async fn graphql_handler(
     schema: web::Data<AppSchema>,
     db: web::Data<Arc<DatabaseConnection>>,
+    settings: web::Data<Arc<Settings>>,
     http_req: HttpRequest,
     gql_req: GraphQLRequest,
 ) -> GraphQLResponse {
@@ -28,7 +31,7 @@ pub async fn graphql_handler(
         .headers()
         .get(header::COOKIE)
         .and_then(|v| v.to_str().ok())
-        .and_then(auth_shim::extract_token);
+        .and_then(extract_token);
     let user_agent = http_req
         .headers()
         .get(header::USER_AGENT)
@@ -36,7 +39,12 @@ pub async fn graphql_handler(
         .map(str::to_string);
 
     let auth_user = match &raw_token {
-        Some(token) => auth_shim::session_user(&db, token).await.unwrap_or(None),
+        // An invalid/expired/unknown token (or a disabled user) resolves to
+        // "no session" rather than an error — the request just proceeds
+        // unauthenticated, same as having no cookie at all.
+        Some(token) => auth::verify_session(&db, token, settings.session_ttl_days)
+            .await
+            .ok(),
         None => None,
     };
 

@@ -3,7 +3,8 @@
 //! `accounts.rs`, `transactions.rs` and `cashflow/`.
 
 use async_graphql::{Context, Object, Result as GqlResult};
-use sea_orm::DatabaseConnection;
+use entity::entities::app_user;
+use sea_orm::{DatabaseConnection, EntityTrait};
 use std::sync::Arc;
 
 use crate::graphql::cashflow;
@@ -19,16 +20,23 @@ pub struct QueryRoot;
 #[Object(name = "Query")]
 impl QueryRoot {
     /// Unauthenticated field (§4/§5): returns the caller's own identity, or
-    /// `null` when there is no valid session.
+    /// `null` when there is no valid session. `AuthenticatedUser` (§4) does
+    /// not carry `display_name` — it's loaded here with one extra query,
+    /// the only place in the schema that needs it.
     async fn me(&self, ctx: &Context<'_>) -> GqlResult<Option<Me>> {
         let user = match ctx.data::<Option<AuthenticatedUser>>()? {
             Some(u) => u,
             None => return Ok(None),
         };
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let display_name = app_user::Entity::find_by_id(user.user_id)
+            .one(db)
+            .await?
+            .and_then(|row| row.display_name);
         Ok(Some(Me {
             id: user.user_id.into(),
             username: user.username.clone(),
-            display_name: user.display_name.clone(),
+            display_name,
         }))
     }
 

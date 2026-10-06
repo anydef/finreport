@@ -1,6 +1,6 @@
 mod accounts;
-pub mod auth_shim;
 mod cashflow;
+pub mod cookies;
 pub mod current_user;
 pub mod http;
 mod loaders;
@@ -10,7 +10,7 @@ pub mod scalars;
 pub mod transactions;
 pub mod types;
 
-use crate::graphql::current_user::AuthenticatedUser;
+use crate::auth::AuthenticatedUser;
 use crate::graphql::mutations::MutationRoot;
 use crate::graphql::queries::QueryRoot;
 use async_graphql::{EmptySubscription, Schema};
