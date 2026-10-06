@@ -87,7 +87,8 @@ unreadable with `rpk`/jq. Source and metadata belong in headers.
 ### 2.2 Envelope = headers (shared contract)
 
 Every record on every ingest topic carries these headers. This is a contract
-between WP1 and WP3; neither side may change it unilaterally.
+frozen by WP0 as `webapp/src/kafka/envelope.rs` and consumed by WP1 (producer)
+and WP3 (consumer); neither side may change it unilaterally.
 
 | Header | Required | Value |
 |---|---|---|
@@ -403,8 +404,10 @@ and it never unlinks.
 
 ## 5. GraphQL API
 
-Shared contract between WP4 and WP5. Export with `graphql_schema_exporter`
-and commit the SDL so the frontend can type against it.
+Shared contract, frozen by WP0 as `finreport-rs/webapp/schema.graphql` (and
+mirrored into the frontend) before WP4 or WP5 start. WP4's
+`graphql_schema_exporter` output must equal it byte-for-byte, enforced by a
+test — the exporter verifies the contract, it does not define it.
 
 ```graphql
 scalar Date      # "YYYY-MM-DD"
@@ -636,80 +639,180 @@ a `integration` cargo feature so `just test` stays fast and offline; a new
 
 ## 9. Work packages
 
-Six packages. The two shared contracts — the **header envelope (§2.2)** and the
-**SDL (§5)** — are frozen by this document, so packages that depend on them can
-start immediately against the contract rather than against each other's code.
+Seven packages, built for **maximum parallelism**: presentation work and
+data-processing work never touch the same files. The rule that makes that
+possible is **WP0 lands every shared contract first** — schema, SDL, event
+envelope, fixtures, settings keys, module stubs, Cargo entries — so that
+afterwards each package writes into files nobody else owns.
 
-### WP1 — Event contract & importer cutover
-Headers (`source`, `source_account_id`, `schema_version`) in `RecordMeta`;
-remove all Postgres writes and the DB dependency from `import_transactions`;
-make `APP_kafka_brokers` required there; publish failures become `error` +
-watermark not advanced; `fixture-replay` bin + the fixture corpus;
-`docs/kafka-migration.md` updated to describe phase 2 (it currently says
-"Postgres stays the source of truth").
-*Depends on:* nothing. *Blocks:* WP3 (contract only — already written here),
-WP6 (fixture format).
-*Done when:* the importer compiles without `sea-orm`, a local run against
-Redpanda produces records carrying all required headers, `fixture-replay`
-populates the four topics, and `rpk topic consume` shows unmodified payloads.
+**Contract freeze (WP0 output).** Three artifacts are the integration surface;
+once merged they change only by an explicit, announced amendment to this spec:
 
-### WP2 — Schema, entities, auth core, CLI
+1. **Postgres read model** — the migrations in §3 plus the regenerated entities.
+2. **GraphQL SDL** — §5, committed as `finreport-rs/webapp/schema.graphql` and
+   mirrored to `finreport-fe/src/lib/graphql/schema.graphql`.
+3. **Kafka event envelope** — §2.2, as code
+   (`webapp/src/kafka/envelope.rs`: header name constants, `RecordMeta`,
+   `SourceEvent`, parse + build helpers) rather than prose, so producer and
+   consumer cannot drift.
+
+Plus a **fixture corpus** (`finreport-rs/webapp/fixtures/`, §7) and a JSON
+mock of each GraphQL operation's response derived from it
+(`finreport-fe/src/lib/graphql/mocks/`). These are contract artifacts, not test
+scaffolding: the frontend renders real-shaped data from day one without a
+backend, and the projector tests assert against the same bytes.
+
+### Shared-file protocol
+
+Only four files are legitimately touched by more than one package, and WP0
+pre-populates all of them so later edits are zero-conflict:
+
+- `finreport-rs/webapp/src/lib.rs` — WP0 declares `pub mod auth; pub mod projection;`
+  (with empty module files) and the `kafka::envelope` export. Nobody else edits it.
+- `finreport-rs/webapp/Cargo.toml` — WP0 adds every dependency this iteration
+  needs (`argon2`, `rand_core`, `sha2`, `uuid`, `base64`, `rust_decimal`,
+  `testcontainers` dev-dep, the `integration` feature) and all `[[bin]]` entries
+  (`projector`, `user-admin`, `fixture-replay`). Nobody else edits it.
+- `finreport-rs/migration/src/lib.rs` — WP0 only. No other package adds a migration
+  in this iteration; a package that believes it needs one amends the spec instead.
+- `finreport-rs/utils/src/settings.rs` — WP0 adds all new keys at once
+  (`cookie_secure`, `allowed_origins`, `session_ttl_days`, `projector_default_owner`,
+  and making `kafka_brokers` required for the importer entry point).
+
+Everything else below is owned outright by exactly one package. Each package is
+developed in its own worktree
+(`git worktree add ../finreport-worktrees/<branch> -b <branch>`).
+
+---
+
+### WP0 — Contracts, schema & fixtures (blocking, do first)
+**Owns:** `finreport-rs/migration/**`, `finreport-rs/entity/**`,
+`finreport-rs/webapp/src/kafka/envelope.rs`, `finreport-rs/webapp/fixtures/**`,
+`finreport-rs/webapp/schema.graphql`,
+`finreport-fe/src/lib/graphql/{schema.graphql,mocks/**}`,
+`finreport-rs/utils/src/settings.rs`, plus the four shared files above.
+
 Migrations from §3 (users, membership, sessions, reshaped read model,
-`projection_offset`); regenerated entities; Argon2id hashing + session
-create/verify/revoke module; `user-admin` bin; `APP_cookie_secure`,
-`APP_allowed_origins`, `APP_projector_default_owner` in `utils::settings`.
-*Depends on:* nothing. *Blocks:* WP3, WP4.
-*Done when:* `make migrate` is clean on an empty and on an existing DB,
-entities regenerate, `user-admin create-user`/`link` work against local PG, and
-unit tests cover hash/verify + session expiry.
+`projection_offset`) + regenerated entities; `envelope.rs`; the committed SDL
+(hand-written to §5 — the exporter check in WP4 must match it); the fixture
+corpus and its derived GraphQL mock responses; all settings keys; empty
+`auth`/`projection` module files; Cargo deps and bin entries.
 
-### WP3 — Projector
-`projector` bin, `SourceMapper` trait + `ComdirectMapper`, batch consume →
-map → upsert → offset commit in one transaction, stub-account handling,
-poison-record skip, retry/exit policy, optional default-owner linking.
-*Depends on:* WP2 (tables/entities), WP1's header contract (§2.2).
-*Blocks:* WP4's integration tests and WP5's demo data.
-*Done when:* `just dev-demo` fills the read model from fixtures, a second
-replay changes no rows, `dev-reset` + replay reproduces the same state, and a
-mid-run kill leaves no duplicates.
+*Depends on:* nothing. *Blocks:* everything (briefly — this is a small,
+mechanical package, kept deliberately thin so it clears fast).
+*Done when:* `make migrate` is clean on an empty and on a populated DB,
+`make generate-entities` produces the committed entities, the workspace builds
+with empty modules and stub bins, `schema.graphql` parses, and the mock JSON
+validates against it.
+
+### WP1 — Importer cutover & fixture replay
+**Owns:** `finreport-rs/webapp/src/bin/import_transactions.rs`,
+`finreport-rs/webapp/src/bin/fixture_replay.rs`,
+`finreport-rs/webapp/src/kafka/{producer.rs,mod.rs,events.rs,watermark.rs}`,
+`finreport-rs/comdirect-rs/**`, `docs/kafka-migration.md`.
+
+Remove all Postgres writes and the `sea-orm`/`entity` dependency from the
+importer; emit the §2.2 headers via `envelope.rs`; require `APP_kafka_brokers`;
+publish failure → `error` + watermark not advanced; implement `fixture-replay`
+against the WP0 corpus; rewrite `docs/kafka-migration.md` for phase 2.
+*Depends on:* WP0. *Parallel with:* WP2–WP6 (no file overlap).
+*Done when:* the importer compiles without `sea-orm`, a local run publishes
+records carrying every required header, `fixture-replay` fills all four topics,
+and `rpk topic consume` shows byte-unmodified payloads.
+
+### WP2 — Auth core & admin CLI
+**Owns:** `finreport-rs/webapp/src/auth/**`,
+`finreport-rs/webapp/src/bin/user_admin.rs`.
+
+Argon2id hash/verify, token generation + SHA-256 storage, session
+create/verify/revoke/prune, `AuthenticatedUser` loading (user + linked
+`account_ids`) as plain library functions — **no actix, no async-graphql** here,
+so WP4 can wire them without waiting. `user-admin` subcommands per §4.
+*Depends on:* WP0. *Parallel with:* WP1, WP3, WP5, WP6. *Blocks:* WP4's wiring
+(API shape is fixed here in the spec, so WP4 can code against it immediately).
+*Done when:* unit tests cover hash/verify, wrong-password rejection, token
+hashing and the expiry boundary, and `user-admin create-user`/`link` work
+against a local DB.
+
+### WP3 — Projector (data processing)
+**Owns:** `finreport-rs/webapp/src/projection/**`
+(`mod.rs`, `mapper.rs`, `comdirect.rs`, `records.rs`, `offsets.rs`, `upsert.rs`),
+`finreport-rs/webapp/src/bin/projector.rs`.
+
+`SourceMapper` trait + `ComdirectMapper`, batch consume → map → upsert →
+offset commit in one transaction, stub accounts, poison-record skip,
+retry/exit policy, optional default-owner linking.
+*Depends on:* WP0 (entities + envelope). *Parallel with:* WP1, WP2, WP4, WP5.
+Does **not** depend on WP1: it consumes fixture-replayed topics.
+*Done when:* replaying the fixture corpus fills the read model, a second replay
+changes no rows, reset + replay reproduces identical state, and a mid-batch
+kill leaves no duplicates and no gaps.
 
 ### WP4 — GraphQL API & HTTP surface
-Cookie extraction + auth context, `login`/`logout`/`me`, rewritten
-`current_user`, `accounts`/`transactions`/`cashflowSummary` resolvers against
-the new tables, dense bucketing, `Decimal`/`Date`/`UUID` scalars, CORS
-allow-list + credentials, `Origin` check, exported SDL committed.
-*Depends on:* WP2. Uses WP3's output for integration tests (can be unblocked
-with hand-seeded SQL).
-*Done when:* the SDL matches §5, unauthenticated/cross-user access is denied by
-test, `cashflowSummary` totals match a fixture-derived expectation, and the
-login cookie round-trips in a real HTTP test.
+**Owns:** `finreport-rs/webapp/src/graphql/**`, `finreport-rs/webapp/src/main.rs`,
+`finreport-rs/webapp/src/bin/graphql_schema_exporter.rs`.
 
-### WP5 — Frontend
-`/api/graphql` proxy route, `hooks.server.ts` + layout guard, `/login`,
+Cookie extraction + auth context injection (calling WP2's library),
+`login`/`logout`/`me`, rewritten `current_user`, `accounts`/`transactions`/
+`cashflowSummary`, dense bucketing, `Decimal`/`Date`/`UUID` scalars, CORS
+allow-list + credentials + `Origin` check.
+*Depends on:* WP0 (entities, SDL), WP2 (auth functions — stub them locally if
+WP2 has not merged; the signatures are fixed in §4).
+*Done when:* the exporter's output equals the committed `schema.graphql`
+byte-for-byte (enforced by a test), unauthenticated and cross-user access are
+denied by test, `cashflowSummary` matches a hand-computed fixture sum, and a
+real HTTP test round-trips the login cookie.
+
+### WP5 — Frontend (presentation)
+**Owns:** `finreport-fe/**` except the WP0-owned `src/lib/graphql/schema.graphql`
+and `src/lib/graphql/mocks/**` (read-only to this package).
+
+`/api/graphql` proxy route, `hooks.server.ts` + layout auth guard, `/login`,
 dashboard (period selector, totals, chart.js chart, paged transaction list),
-`src/lib/period.ts`, updated `/transactions`, `finreport-fe/CLAUDE.md` updated
-for the proxy + retired `PUBLIC_GRAPHQL_URL`.
-*Depends on:* the SDL (§5) only — may start against a mocked proxy response.
+`src/lib/period.ts`, updated `/transactions`, updated `finreport-fe/CLAUDE.md`.
+*Depends on:* WP0's SDL + mocks only. **Never blocked on a running backend**:
+development and vitest run against the mock responses; a `PUBLIC_USE_MOCKS=1`
+switch in the proxy route returns them without a network call.
+*Parallel with:* every backend package, by construction — it shares no file
+with any of them.
 *Done when:* `npm run check` and `npm run lint` pass, vitest covers the period
-helpers, and the Playwright smoke passes against `just dev-demo`.
+and chart-shaping helpers, the UI renders fully from mocks, and the Playwright
+smoke passes against `just dev-demo`.
 
 ### WP6 — Local dev stack & test harness
-Redpanda + topic-init services in `docker-compose.local.yml` (kept in step with
-`terraform/kafka`), `dev-up`/`dev-down`/`dev-projector`/`seed-user`/
-`seed-events`/`dev-demo`/`dev-reset` recipes, testcontainers harness + the
-`integration` feature + `just test-integration`, deployed-compose env updates
-(importer loses `APP_database_url`, gains required `APP_kafka_brokers`;
-new `finreport-be-projector` service with `APP_database_url` +
-`APP_kafka_brokers`), root `CLAUDE.md` updated.
-*Depends on:* WP1 (fixture format), WP3 (projector bin name/flags).
-*Done when:* a clean checkout reaches a working, logged-in dashboard with
-seeded data via documented commands, with no bank credentials and no access to
-the central broker.
+**Owns:** `docker-compose.local.yml`, `docker-compose.yml`, `justfile`,
+`finreport-rs/tests/**` (integration harness), `.gitea/**`, root `CLAUDE.md`,
+`terraform/kafka/main.tf` comments kept in step with the local topic init.
 
-**Parallelism:** WP1, WP2, WP5, and the compose half of WP6 can run
-concurrently from the start. WP3 and WP4 start once WP2's migrations land.
-WP4 and WP5 touch disjoint trees. Only WP2 and WP3 both touch
-`finreport-rs/migration` and `entity` — WP3 must not add migrations.
+Redpanda + topic-init services; the `dev-up`/`dev-down`/`dev-projector`/
+`seed-user`/`seed-events`/`dev-demo`/`dev-reset` recipes; the testcontainers
+harness behind the `integration` feature + `just test-integration`; deployed
+compose updates (importer loses `APP_database_url`, gains required
+`APP_kafka_brokers`; new `finreport-be-projector` service).
+*Depends on:* WP0 (bin names/flags are fixed there). *Parallel with:* WP1–WP5
+— it owns only orchestration files.
+*Done when:* a clean checkout reaches a logged-in dashboard with seeded data
+using only documented commands, with no bank credentials and no access to the
+central broker.
+
+---
+
+### Parallelism summary
+
+```
+WP0  ████ (short, blocking)
+     └─> WP1 importer        ─┐
+         WP2 auth core       ─┤
+         WP3 projector       ─┤  all concurrent, disjoint file sets
+         WP4 graphql api *   ─┤  (* soft dep on WP2's signatures)
+         WP5 frontend        ─┤
+         WP6 dev stack       ─┘
+```
+
+Presentation (WP5) and data processing (WP3) share nothing but the SDL and the
+fixture corpus, both frozen in WP0. The only cross-package integration risk is
+WP4 ↔ WP2 (function signatures, fixed in §4) and WP4 ↔ WP5 (the SDL, fixed in
+§5 and enforced by WP4's exporter equality test).
 
 ---
 
