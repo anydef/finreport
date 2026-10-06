@@ -58,3 +58,28 @@ A web UI for exploring personal and family finances: income and spending by peri
   - When a transaction is split, totals use the parts instead of the whole transaction.
   - Splits belong to the user's override layer: replaying or re-running the LLM never overwrites them.
 - **LLM-suggested categories:** the LLM can propose a new category. A proposal goes to the admin review queue and is never created automatically. Until it's approved, the transaction stays in the queue.
+
+## Rules engine (iteration 2)
+Goal: don't ask the LLM again for repeating patterns, such as Lidl → groceries.
+- **Order of precedence:**
+  1. the user's override
+  2. a matching rule
+  3. the LLM cache (an exact fingerprint match)
+  4. a new LLM call
+  
+  Each label records its source (`user | rule:<id> | llm-cache | llm`), so the UI can highlight how it was set.
+- **What a rule matches:** conditions on normalized, source-independent fields:
+  - normalized counterparty name
+  - counterparty IBAN
+  - a regex or keyword on the description
+  - direction
+  - amount range
+  - account
+
+  Several conditions are combined with AND.
+- **What a rule does:** assigns a category. Later it can also set tags and the recurring flag. Rules have a priority, and the most specific rule wins.
+- **Where rules come from:**
+  - the user creates or edits them in the admin UI
+  - **learned rules**: when the same normalized counterparty has had the same confirmed category N times (default 3), the system proposes a rule for admin review. Proposed rules are never activated automatically.
+- **Changing a rule** can be applied retroactively, on demand, to transactions without a user override. The operation is idempotent and never touches user overrides.
+- **Ambiguous merchants** (Lidl also sells non-food items): a rule sets the default, and the user corrects individual transactions with an override or a split.
