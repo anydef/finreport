@@ -44,3 +44,17 @@ A web UI for exploring personal and family finances: income and spending by peri
   - any OpenAI-compatible endpoint set by its URL, which covers Unsloth models served through llama.cpp, vLLM or LM Studio
 - The LLM cache key includes the provider, the model and the prompt version.
 - For local dev, Ollama is available as an optional profile in Docker Compose.
+
+## Categories (iteration 2)
+- The category tree is per tenant, seeded from a default taxonomy, and at most 3 levels deep.
+- Each category has a `kind`: `income | expense | transfer | saving`. `kind` drives the totals:
+  - transfers are never counted as spending
+  - savings and investments count as savings, not spending
+- Each transaction gets one category, at any level. The LLM aims for the deepest level.
+- Category ids and slugs stay stable, so renaming a category doesn't invalidate the LLM cache.
+- The default taxonomy keeps German-specific items, e.g. Rundfunk and Kfz-Steuer.
+- **Split transactions:** one transaction can be split into parts, each with its own category and amount (e.g. an Amazon order covering groceries and electronics).
+  - The parts must add up exactly to the transaction amount.
+  - When a transaction is split, totals use the parts instead of the whole transaction.
+  - Splits belong to the user's override layer: replaying or re-running the LLM never overwrites them.
+- **LLM-suggested categories:** the LLM can propose a new category. A proposal goes to the admin review queue and is never created automatically. Until it's approved, the transaction stays in the queue.
