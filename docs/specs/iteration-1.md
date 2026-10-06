@@ -359,33 +359,11 @@ Money is `NUMERIC(20,4)` everywhere — never `double`. Ids are `UUID`, generate
 in Rust: v4 for user-owned rows, **v5 (deterministic)** for everything the
 projector owns (§2.3).
 
-**`m2026…_users`**
-
-```
-app_user(id UUID PK, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
-         display_name TEXT NULL, disabled BOOL NOT NULL DEFAULT false,
-         created_at TIMESTAMPTZ NOT NULL)
-```
-`username` is lowercased by the application (no `citext` dependency); the
-unique index is on the stored value.
-
-```
-user_account(user_id UUID -> app_user.id ON DELETE CASCADE,
-             account_id UUID -> account.id ON DELETE CASCADE,
-             created_at TIMESTAMPTZ NOT NULL,
-             PRIMARY KEY (user_id, account_id))
-```
-Index on `account_id` for the reverse lookup. No role column — RBAC is later.
-
-```
-user_session(id UUID PK, user_id UUID -> app_user.id ON DELETE CASCADE,
-             token_hash BYTEA NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL,
-             expires_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL,
-             user_agent TEXT NULL)
-```
-Index on `expires_at` for pruning. Session lookup joins `app_user` and rejects
-`disabled = true`, so disabling a user takes effect on the next request rather
-than waiting out a 30-day cookie.
+> **Migration order note:** the read model migration is listed first and the
+> users migration second — `user_account.account_id` references the new
+> `account.id`, which only exists once the read-model migration has run. An
+> earlier draft listed `users` first; that ordering does not apply cleanly to
+> an empty database and has been corrected here.
 
 **`m2026…_source_agnostic_read_model`** — renames the three existing tables to
 `legacy_*` and creates the new ones beside them. Nothing is truncated (§2.8).
@@ -450,6 +428,34 @@ projection_offset(topic TEXT NOT NULL, partition INT NOT NULL,
 **Renamed, not dropped**: the three current read-model tables become
 `legacy_*` (§2.8) and survive this iteration untouched — the backfill's source,
 and the verification baseline before they are dropped later.
+
+**`m2026…_users`**
+
+```
+app_user(id UUID PK, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
+         display_name TEXT NULL, disabled BOOL NOT NULL DEFAULT false,
+         created_at TIMESTAMPTZ NOT NULL)
+```
+`username` is lowercased by the application (no `citext` dependency); the
+unique index is on the stored value.
+
+```
+user_account(user_id UUID -> app_user.id ON DELETE CASCADE,
+             account_id UUID -> account.id ON DELETE CASCADE,
+             created_at TIMESTAMPTZ NOT NULL,
+             PRIMARY KEY (user_id, account_id))
+```
+Index on `account_id` for the reverse lookup. No role column — RBAC is later.
+
+```
+user_session(id UUID PK, user_id UUID -> app_user.id ON DELETE CASCADE,
+             token_hash BYTEA NOT NULL UNIQUE, created_at TIMESTAMPTZ NOT NULL,
+             expires_at TIMESTAMPTZ NOT NULL, last_seen_at TIMESTAMPTZ NOT NULL,
+             user_agent TEXT NULL)
+```
+Index on `expires_at` for pruning. Session lookup joins `app_user` and rejects
+`disabled = true`, so disabling a user takes effect on the next request rather
+than waiting out a 30-day cookie.
 
 **Untouched**: `transactions`, `categories`, `transaction_categories`,
 `mandate_categories` — iteration 2 redesigns categories; leave them alone
