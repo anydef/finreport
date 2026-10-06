@@ -690,15 +690,22 @@ LayerChart renders SVG marks that accept `class` props, so charts are styled
 with the same utilities and `@theme` tokens as everything around them — which
 is the main reason it was chosen over a canvas library (see below).
 
-**Charting: `layerchart` (LayerChart 2.x), replacing `chart.js`.**
+**Charting: `layerchart`, replacing `chart.js` — decided, not open.**
 
-The deciding requirement is Sankey: cash-flow Sankeys are wanted for categories
+LayerChart is **the** charting library for this project: every chart, including
+every Sankey, is built with it. Pin a Svelte 5 compatible release (`^2.5`, the
+v2 line rebuilt for runes and snippets); v1 is Svelte 4 and must not be used.
+No second charting dependency is added in this iteration or the next ones — a
+chart LayerChart cannot do is a reason to raise it, not to quietly install
+something else.
+
+The deciding requirement was Sankey: cash-flow Sankeys are wanted for categories
 (iteration 2) and for flows between accounts (iteration 3), and picking the bar
 library now without that in mind means replacing it twice. `chart.js` has no
 first-class Sankey (only a third-party plugin), so it loses on the one axis
 that matters most.
 
-| | LayerChart 2.x | ECharts (+ `svelte-echarts`) |
+| | LayerChart 2.x (chosen) | ECharts (+ `svelte-echarts`) |
 |---|---|---|
 | Sankey | built in, d3-sankey under the hood, node/link props (alignment, node width/padding, link colour) | built in, mature, good labels/tooltips |
 | Svelte 5 | native: runes + snippets, components are the API | wrapper component around an imperative `setOption` lifecycle |
@@ -714,10 +721,10 @@ also Svelte-native (no imperative wrapper to babysit across Svelte 5 lifecycle
 changes) and covers bars and Sankey with one dependency.
 
 Consequence: `chart.js` is **removed** from `finreport-fe/package.json` in this
-iteration — one charting library, not two. ECharts stays the documented
-fallback if LayerChart's Sankey turns out to be too limited for iteration 3's
-account-to-account flows (the `cashflowGraph` contract in §5 is library-neutral
-nodes/links, so swapping is a frontend-only change).
+iteration — one charting library, not two. The `cashflowGraph` contract (§5)
+stays library-neutral nodes/links anyway, so it constrains nothing on the
+server side; that is insurance against a future surprise, not an invitation to
+re-litigate the choice.
 
 **Iteration 1 Sankey (included — it is cheap).** Below the bar chart, a single
 Sankey of `income sources → account → spending / net`, from the same
@@ -933,7 +940,8 @@ and `src/lib/graphql/mocks/**` (read-only to this package).
 
 `/api/graphql` proxy route, `hooks.server.ts` + layout auth guard, `/login`,
 dashboard (period selector, totals, LayerChart bar chart + Sankey, paged
-transaction list), removal of the `chart.js` dependency,
+transaction list), `layerchart@^2.5` added and `chart.js` removed from
+`package.json` (LayerChart is the only charting dependency),
 `src/lib/period.ts`, shared Tailwind-styled primitives in
 `src/lib/components/`, conversion of the two remaining Svelte `<style>` blocks
 to utilities, updated `/transactions`, updated `finreport-fe/CLAUDE.md`.
@@ -1001,8 +1009,9 @@ WP4 ↔ WP2 (function signatures, fixed in §4) and WP4 ↔ WP5 (the SDL, fixed 
    `projection_offset`. Not enforced with a lock in this iteration.
 5. Offset-based pagination, not cursors. A household's transaction list does not
    reach the depth where offset paging hurts.
-6. `layerchart` over `chart.js` and ECharts, driven by the Sankey requirement
-   and by SVG marks being Tailwind-styleable (§6). `chart.js` is removed.
+6. `layerchart` (`^2.5`, Svelte 5) is the single charting library for all
+   charts including Sankey — a user decision, not an open trade-off.
+   `chart.js` is removed (§6).
 7. Tailwind 4 utilities only — no component library, no `@apply`, no dark
    mode in this iteration (§6).
 8. Session TTL 30 days, sliding; no "remember me" distinction.
@@ -1031,10 +1040,9 @@ WP4 ↔ WP2 (function signatures, fixed in §4) and WP4 ↔ WP5 (the SDL, fixed 
   retention limit.
 - Whether `account_balance` should keep a full observation history rather than
   one row per account-day once a balance chart exists (iteration 4).
-- Whether LayerChart's Sankey handles iteration 3's account-to-account flows
-  (mutual transfers, many small links) acceptably. If not, the fallback is
-  ECharts behind the same `cashflowGraph` contract — a frontend-only swap,
-  which is exactly why the query returns neutral nodes/links rather than a
-  library-shaped payload.
+- How LayerChart's Sankey copes with iteration 3's account-to-account flows
+  (mutual transfers, many small links). The library choice is settled either
+  way; this is a question about node-count limits and label legibility, to be
+  answered with real data in iteration 3.
 - Whether top-N truncation at 8 per dimension is the right default once real
   data is on screen; it is a query argument, so changing it costs nothing.
