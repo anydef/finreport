@@ -6,8 +6,8 @@
 //! memory); hashing takes a plain `&str` because the resulting digest is not
 //! secret — it is a database lookup key, not a credential by itself.
 
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use rand_core::{OsRng, RngCore};
 use secrecy::SecretString;
 use sha2::{Digest, Sha256};
@@ -40,10 +40,11 @@ mod tests {
 
         assert_ne!(a.expose_secret(), b.expose_secret());
         // base64url alphabet, no padding.
-        assert!(a
-            .expose_secret()
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
+        assert!(
+            a.expose_secret()
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        );
         assert!(!a.expose_secret().contains('='));
     }
 

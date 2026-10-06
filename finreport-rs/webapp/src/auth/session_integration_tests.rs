@@ -13,13 +13,15 @@ use entity::entities::{app_user, user_session};
 use sea_orm::{ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use secrecy::{ExposeSecret, SecretString};
 use testcontainers_modules::postgres::Postgres;
-use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use testcontainers_modules::testcontainers::ContainerAsync;
+use testcontainers_modules::testcontainers::runners::AsyncRunner;
 use uuid::Uuid;
 
-use crate::auth::session::{create_session, prune_expired_sessions, revoke_session, verify_session};
-use crate::auth::user::create_user;
 use crate::auth::AuthError;
+use crate::auth::session::{
+    create_session, prune_expired_sessions, revoke_session, verify_session,
+};
+use crate::auth::user::create_user;
 use crate::db::seaql::init_db;
 
 /// Keeps the container alive for the test's duration — `testcontainers` tears
@@ -40,7 +42,9 @@ async fn test_db() -> TestDb {
         .expect("failed to get mapped port");
     let url = format!("postgres://postgres:postgres@127.0.0.1:{port}/postgres");
 
-    let conn = init_db(&url).await.expect("migrations should apply cleanly");
+    let conn = init_db(&url)
+        .await
+        .expect("migrations should apply cleanly");
     TestDb {
         _container: container,
         conn,
@@ -231,7 +235,10 @@ async fn recent_refresh_is_not_rewritten() {
     let delta = (unchanged.last_seen_at.with_timezone(&Utc) - recent_last_seen)
         .num_seconds()
         .abs();
-    assert!(delta < 2, "last_seen_at should not have moved, delta={delta}s");
+    assert!(
+        delta < 2,
+        "last_seen_at should not have moved, delta={delta}s"
+    );
 }
 
 #[tokio::test]
@@ -242,14 +249,22 @@ async fn prune_removes_only_expired_sessions() {
     let live = create_session(&db.conn, user.id, 30, None).await.unwrap();
     let expired = create_session(&db.conn, user.id, 30, None).await.unwrap();
     let now = Utc::now();
-    set_session_times(&db.conn, expired.expose_secret(), now - Duration::days(1), now).await;
+    set_session_times(
+        &db.conn,
+        expired.expose_secret(),
+        now - Duration::days(1),
+        now,
+    )
+    .await;
 
     let removed = prune_expired_sessions(&db.conn).await.unwrap();
     assert_eq!(removed, 1);
 
-    assert!(verify_session(&db.conn, live.expose_secret(), 30)
-        .await
-        .is_ok());
+    assert!(
+        verify_session(&db.conn, live.expose_secret(), 30)
+            .await
+            .is_ok()
+    );
 
     let expired_hash = crate::auth::token::hash_token(expired.expose_secret());
     let gone = user_session::Entity::find()

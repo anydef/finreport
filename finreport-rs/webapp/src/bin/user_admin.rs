@@ -68,7 +68,9 @@ enum AccountSelector {
 async fn main() -> ExitCode {
     dotenv().ok();
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     let args: Vec<String> = env::args().skip(1).collect();
@@ -98,7 +100,8 @@ async fn run(command: Command) -> Result<(), Box<dyn Error>> {
             display_name,
         } => {
             let password = read_password()?;
-            let user = auth::create_user(&db, &username, &password, display_name.as_deref()).await?;
+            let user =
+                auth::create_user(&db, &username, &password, display_name.as_deref()).await?;
             println!("created user {} ({})", user.username, user.id);
         }
         Command::SetPassword { username } => {
@@ -212,11 +215,16 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
             let account = match (flags.get("--account"), rest.iter().any(|a| a == "--all")) {
                 (Some(spec), false) => {
                     let (source, external_id) = split_account(spec)?;
-                    AccountSelector::One { source, external_id }
+                    AccountSelector::One {
+                        source,
+                        external_id,
+                    }
                 }
                 (None, true) => AccountSelector::All,
                 (Some(_), true) => return Err("--account and --all are mutually exclusive".into()),
-                (None, false) => return Err("link requires --account <source>:<external-id> or --all".into()),
+                (None, false) => {
+                    return Err("link requires --account <source>:<external-id> or --all".into());
+                }
             };
             Ok(Command::Link { username, account })
         }

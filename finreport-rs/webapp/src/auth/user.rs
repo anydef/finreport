@@ -33,10 +33,7 @@ fn normalize_username(username: &str) -> String {
 
 /// Loads the `account_id`s linked to `user_id` via `user_account`, in the
 /// stable `AuthenticatedUser.account_ids` shape.
-async fn load_account_ids(
-    db: &DatabaseConnection,
-    user_id: Uuid,
-) -> Result<Vec<Uuid>, AuthError> {
+async fn load_account_ids(db: &DatabaseConnection, user_id: Uuid) -> Result<Vec<Uuid>, AuthError> {
     let ids = user_account::Entity::find()
         .filter(user_account::Column::UserId.eq(user_id))
         .all(db)
@@ -217,7 +214,10 @@ async fn link_user_to_account(
 /// `user-admin link --all`: links every account not yet linked to this user.
 /// Returns how many links were newly created (already-linked accounts are
 /// skipped, not errors).
-pub async fn link_all_accounts(db: &DatabaseConnection, username: &str) -> Result<usize, AuthError> {
+pub async fn link_all_accounts(
+    db: &DatabaseConnection,
+    username: &str,
+) -> Result<usize, AuthError> {
     let user = find_user(db, username).await?;
     let txn = db.begin().await?;
 

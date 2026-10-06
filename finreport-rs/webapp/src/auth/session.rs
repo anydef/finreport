@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 use super::error::AuthError;
 use super::token::{generate_token, hash_token};
-use super::user::{load_authenticated_user, AuthenticatedUser};
+use super::user::{AuthenticatedUser, load_authenticated_user};
 
 /// Sliding refresh granularity (§4): `last_seen_at`/`expires_at` are only
 /// rewritten once an hour has passed since the last write, so a busy session

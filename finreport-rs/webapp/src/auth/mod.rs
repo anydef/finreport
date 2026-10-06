@@ -26,6 +26,6 @@ pub use password::{hash_password, verify_password};
 pub use session::{create_session, prune_expired_sessions, revoke_session, verify_session};
 pub use token::{generate_token, hash_token};
 pub use user::{
-    authenticate, create_user, link_account, link_all_accounts, list_accounts, list_users,
-    load_authenticated_user, set_password, unlink_account, AuthenticatedUser,
+    AuthenticatedUser, authenticate, create_user, link_account, link_all_accounts, list_accounts,
+    list_users, load_authenticated_user, set_password, unlink_account,
 };

@@ -4,8 +4,8 @@
 //! logged, never in a `Debug` impl. Only the PHC-formatted hash (not secret)
 //! leaves this module.
 
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
+use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use rand_core::OsRng;
 use secrecy::{ExposeSecret, SecretString};
 
@@ -55,7 +55,9 @@ mod tests {
     fn wrong_password_is_rejected() {
         let hash = hash_password(&secret("correct horse battery staple")).unwrap();
 
-        assert!(!verify_password(&secret("wrong password"), &hash).expect("verify should not error"));
+        assert!(
+            !verify_password(&secret("wrong password"), &hash).expect("verify should not error")
+        );
     }
 
     #[test]
