@@ -56,10 +56,23 @@ pub const DEFAULT_ACCOUNT_KEY: &str = "default";
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Settings {
-    pub oauth_url: String,
-    pub url: String,
-    pub save_file_path: String,
-    pub database_url: SecretString,
+    /// Comdirect OAuth base URL. Only the importer entry points
+    /// (`import-transactions`, `init-session`) need this — `webapp` and the
+    /// projector never call the Comdirect API — so it is `None` rather than
+    /// required, and validated lazily via [`Settings::profiles`] /
+    /// [`Settings::select_profile`] the moment a profile is actually built.
+    pub oauth_url: Option<String>,
+    /// Comdirect REST API base URL; same optionality as `oauth_url`.
+    pub url: Option<String>,
+    /// Base path for a Comdirect login's session-token file; same
+    /// optionality as `oauth_url`.
+    pub save_file_path: Option<String>,
+    /// Postgres connection string. Only binaries that touch Postgres
+    /// (`webapp`, `user-admin`, `legacy-backfill`) need this — the importer
+    /// writes only to Kafka (§2.6) — so it is `None` rather than required;
+    /// use [`Settings::require_database_url`] at the entry points that do
+    /// need it.
+    pub database_url: Option<SecretString>,
 
     /// Kafka bootstrap servers for the event-log dual-write, e.g.
     /// `kafka.lab.anydef.de:9092` — central homelab infrastructure, not
@@ -130,6 +143,14 @@ pub enum SettingsError {
     /// The importer entry point requires `APP_kafka_brokers`; the GraphQL
     /// server does not (§2.6).
     MissingKafkaBrokers,
+    /// A binary that touches Postgres (`webapp`, `user-admin`,
+    /// `legacy-backfill`) requires `APP_database_url`; the importer does not
+    /// (it writes only to Kafka).
+    MissingDatabaseUrl,
+    /// Building a Comdirect profile requires `oauth_url`/`url`/
+    /// `save_file_path`, shared across every configured login; `webapp` and
+    /// the projector never build a profile and so never hit this.
+    MissingComdirectUrls { missing: Vec<String> },
 }
 
 impl Display for SettingsError {
@@ -168,6 +189,15 @@ impl Display for SettingsError {
                 "APP_kafka_brokers is required for the importer; the event log \
                  has no broker configured"
             ),
+            SettingsError::MissingDatabaseUrl => write!(
+                f,
+                "APP_database_url is required to connect to Postgres"
+            ),
+            SettingsError::MissingComdirectUrls { missing } => write!(
+                f,
+                "Comdirect configuration is missing: {}",
+                missing.join(", ")
+            ),
         }
     }
 }
@@ -191,6 +221,45 @@ impl Settings {
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .ok_or(SettingsError::MissingKafkaBrokers)
+    }
+
+    /// `APP_database_url`, or an error — the entry points that touch
+    /// Postgres (`webapp`, `user-admin`, `legacy-backfill`) call this
+    /// instead of reading `database_url` directly, so a missing value fails
+    /// fast on startup rather than surfacing as an `Option::unwrap` panic.
+    pub fn require_database_url(&self) -> Result<&SecretString, SettingsError> {
+        self.database_url
+            .as_ref()
+            .ok_or(SettingsError::MissingDatabaseUrl)
+    }
+
+    /// `oauth_url`/`url`/`save_file_path`, trimmed and validated non-blank,
+    /// or the names of whichever are missing. Shared by `profile_from` and
+    /// `flat_profile` — every profile needs the same three values.
+    fn require_comdirect_urls(&self) -> Result<(&str, &str, &str), SettingsError> {
+        fn non_blank(value: &Option<String>) -> Option<&str> {
+            value.as_deref().map(str::trim).filter(|v| !v.is_empty())
+        }
+
+        let oauth_url = non_blank(&self.oauth_url);
+        let url = non_blank(&self.url);
+        let save_file_path = non_blank(&self.save_file_path);
+
+        let missing: Vec<String> = [
+            ("oauth_url", oauth_url),
+            ("url", url),
+            ("save_file_path", save_file_path),
+        ]
+        .into_iter()
+        .filter(|(_, value)| value.is_none())
+        .map(|(name, _)| name.to_string())
+        .collect();
+
+        if !missing.is_empty() {
+            return Err(SettingsError::MissingComdirectUrls { missing });
+        }
+
+        Ok((oauth_url.unwrap(), url.unwrap(), save_file_path.unwrap()))
     }
 
     /// `APP_allowed_origins`, split on commas and trimmed, blank entries
@@ -269,6 +338,8 @@ impl Settings {
             });
         }
 
+        let (oauth_url, url, save_file_path) = self.require_comdirect_urls()?;
+
         Ok(ComdirectProfile {
             key: key.to_string(),
             name: display_name(&credentials.name),
@@ -276,12 +347,12 @@ impl Settings {
             client_secret: credentials.client_secret.clone(),
             zugangsnummer: credentials.zugangsnummer.clone(),
             pin: credentials.pin.clone(),
-            oauth_url: self.oauth_url.clone(),
-            url: self.url.clone(),
+            oauth_url: oauth_url.to_string(),
+            url: url.to_string(),
             save_file_path: credentials
                 .save_file_path
                 .clone()
-                .unwrap_or_else(|| session_path_for(&self.save_file_path, key)),
+                .unwrap_or_else(|| session_path_for(save_file_path, key)),
         })
     }
 
@@ -295,7 +366,7 @@ impl Settings {
             client_secret: secret_or_empty(&self.client_secret),
             zugangsnummer: secret_or_empty(&self.zugangsnummer),
             pin: secret_or_empty(&self.pin),
-            save_file_path: Some(self.save_file_path.clone()),
+            save_file_path: self.save_file_path.clone(),
         };
 
         // Docker compose passes these as `${APP_client_id:-}`, so "unset" shows
@@ -630,6 +701,57 @@ mod test {
             "/app/data/.session.joint.json"
         );
         assert_eq!(session_path_for("session", "0"), "session.0");
+    }
+
+    /// `webapp`/`user-admin`/`legacy-backfill` load settings with no
+    /// Comdirect configuration at all — not even `oauth_url`/`url`/
+    /// `save_file_path` — and `import-transactions`/`init-session` load with
+    /// no `database_url`. Neither is a deserialization error; each is only
+    /// validated by the accessor the binary that actually needs it calls.
+    #[test]
+    fn database_url_and_comdirect_urls_are_independently_optional() {
+        // No database_url at all: fine for a binary that never touches it,
+        // caught only by `require_database_url`.
+        let webapp_like = settings_from(&[
+            ("APP_accounts__0__client_id", "id-0"),
+            ("APP_accounts__0__client_secret", "secret-0"),
+            ("APP_accounts__0__zugangsnummer", "zugang-0"),
+            ("APP_accounts__0__pin", "pin-0"),
+        ]);
+        assert!(webapp_like.database_url.is_none());
+        assert!(matches!(
+            webapp_like.require_database_url(),
+            Err(SettingsError::MissingDatabaseUrl)
+        ));
+
+        // No oauth_url/url/save_file_path at all: fine for a binary that
+        // never builds a Comdirect profile; `profiles()` reports exactly
+        // what's missing only once something actually asks for a profile.
+        let importer_like = settings_from(&[("APP_database_url", "postgresql://localhost/finreport")]);
+        assert!(importer_like.oauth_url.is_none());
+        assert!(importer_like.url.is_none());
+        assert!(importer_like.save_file_path.is_none());
+        assert!(
+            importer_like
+                .require_database_url()
+                .unwrap()
+                .expose_secret()
+                == "postgresql://localhost/finreport"
+        );
+
+        let mut vars: Vec<(&str, &str)> = vec![("APP_database_url", "postgresql://localhost/finreport")];
+        vars.extend([
+            ("APP_accounts__0__client_id", "id-0"),
+            ("APP_accounts__0__client_secret", "secret-0"),
+            ("APP_accounts__0__zugangsnummer", "zugang-0"),
+            ("APP_accounts__0__pin", "pin-0"),
+        ]);
+        match settings_from(&vars).profiles() {
+            Err(SettingsError::MissingComdirectUrls { missing }) => {
+                assert_eq!(missing, ["oauth_url", "url", "save_file_path"]);
+            }
+            other => panic!("expected MissingComdirectUrls, got {other:?}"),
+        }
     }
 
     #[test]
