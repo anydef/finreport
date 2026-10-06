@@ -66,7 +66,33 @@ pub struct Settings {
     /// deployed by this repo. Unset disables publishing entirely: during the
     /// migration Postgres is still the source of truth, so an importer with no
     /// broker configured is a supported setup (local dev runs this way).
+    /// `webapp` (the GraphQL server) keeps treating this as optional; the
+    /// importer entry point additionally calls `require_kafka_brokers`,
+    /// which turns a missing value into a startup error (§2.6).
     pub kafka_brokers: Option<String>,
+
+    /// `Secure` flag on the `fr_session` cookie (§4). Defaults to `true`;
+    /// local dev's `.env` sets this `false` so plain-HTTP localhost still
+    /// gets the cookie back.
+    #[serde(default = "default_cookie_secure")]
+    pub cookie_secure: bool,
+
+    /// Comma-separated CORS allow-list checked against the request's `Origin`
+    /// header (§4). Stored as the raw string (rather than `Vec<String>`,
+    /// which config-rs's env source does not parse out of a scalar value) —
+    /// use `allowed_origins()` to get the parsed, trimmed list.
+    #[serde(default)]
+    pub allowed_origins: String,
+
+    /// Session TTL in days (§4). `user_session.expires_at` is set this far
+    /// out from login; the sliding refresh only ever extends it.
+    #[serde(default = "default_session_ttl_days")]
+    pub session_ttl_days: i64,
+
+    /// Username the projector links every newly projected account to, in the
+    /// same transaction (§4). Unset: accounts stay unlinked until an explicit
+    /// `user-admin link`.
+    pub projector_default_owner: Option<String>,
 
     /// Comdirect logins keyed by the segment in `APP_accounts__<key>__*`.
     /// A `BTreeMap` rather than a `Vec` because config-rs turns numbered env
@@ -101,6 +127,9 @@ pub enum SettingsError {
     },
     /// More than one profile is configured and none was selected.
     AmbiguousAccount { available: Vec<String> },
+    /// The importer entry point requires `APP_kafka_brokers`; the GraphQL
+    /// server does not (§2.6).
+    MissingKafkaBrokers,
 }
 
 impl Display for SettingsError {
@@ -134,6 +163,11 @@ impl Display for SettingsError {
                 available.len(),
                 available.join(", ")
             ),
+            SettingsError::MissingKafkaBrokers => write!(
+                f,
+                "APP_kafka_brokers is required for the importer; the event log \
+                 has no broker configured"
+            ),
         }
     }
 }
@@ -145,6 +179,30 @@ impl Settings {
     /// keys, so `APP_accounts__0__pin` lands in `accounts["0"].pin`.
     pub fn from_env() -> Result<Settings, ConfigError> {
         Self::from_source(env_source())
+    }
+
+    /// `APP_kafka_brokers`, parsed and trimmed, or an error. The importer
+    /// entry point calls this instead of reading `kafka_brokers` directly, so
+    /// it fails fast on startup rather than silently running with publishing
+    /// disabled (§2.6); `webapp` keeps using the field as optional.
+    pub fn require_kafka_brokers(&self) -> Result<&str, SettingsError> {
+        self.kafka_brokers
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .ok_or(SettingsError::MissingKafkaBrokers)
+    }
+
+    /// `APP_allowed_origins`, split on commas and trimmed, blank entries
+    /// dropped. Empty when unset — the caller treats an empty list as "allow
+    /// nothing" (fail closed), not "allow all".
+    pub fn allowed_origins(&self) -> Vec<String> {
+        self.allowed_origins
+            .split(',')
+            .map(str::trim)
+            .filter(|origin| !origin.is_empty())
+            .map(str::to_string)
+            .collect()
     }
 
     /// Every configured Comdirect login, ordered by account key.
@@ -278,6 +336,17 @@ fn blank_fields(credentials: &ComdirectAccount) -> Vec<String> {
     .filter(|(_, value)| value.trim().is_empty())
     .map(|(name, _)| name.to_string())
     .collect()
+}
+
+/// `APP_cookie_secure` default: secure-by-default, opted out explicitly for
+/// plain-HTTP local dev (§4).
+fn default_cookie_secure() -> bool {
+    true
+}
+
+/// `APP_session_ttl_days` default (§4).
+fn default_session_ttl_days() -> i64 {
+    30
 }
 
 fn env_source() -> Environment {
@@ -561,5 +630,59 @@ mod test {
             "/app/data/.session.joint.json"
         );
         assert_eq!(session_path_for("session", "0"), "session.0");
+    }
+
+    #[test]
+    fn new_wp0_settings_default_when_unset() {
+        let settings = settings_from(&base_vars());
+
+        assert!(settings.cookie_secure);
+        assert_eq!(settings.session_ttl_days, 30);
+        assert_eq!(settings.projector_default_owner, None);
+        assert_eq!(settings.allowed_origins(), Vec::<String>::new());
+        assert!(matches!(
+            settings.require_kafka_brokers(),
+            Err(SettingsError::MissingKafkaBrokers)
+        ));
+    }
+
+    #[test]
+    fn allowed_origins_is_parsed_from_a_comma_separated_list() {
+        let mut vars = base_vars();
+        vars.push((
+            "APP_allowed_origins",
+            " https://app.example.com ,https://admin.example.com,",
+        ));
+
+        assert_eq!(
+            settings_from(&vars).allowed_origins(),
+            vec!["https://app.example.com", "https://admin.example.com"]
+        );
+    }
+
+    #[test]
+    fn kafka_brokers_can_be_required_or_left_optional() {
+        let mut vars = base_vars();
+        vars.push(("APP_kafka_brokers", "kafka.lab.anydef.de:9092"));
+
+        let settings = settings_from(&vars);
+        assert_eq!(
+            settings.require_kafka_brokers().unwrap(),
+            "kafka.lab.anydef.de:9092"
+        );
+        // webapp keeps reading the field directly, unaffected by the
+        // importer-only accessor.
+        assert_eq!(
+            settings.kafka_brokers.as_deref(),
+            Some("kafka.lab.anydef.de:9092")
+        );
+    }
+
+    #[test]
+    fn cookie_secure_can_be_disabled_for_local_dev() {
+        let mut vars = base_vars();
+        vars.push(("APP_cookie_secure", "false"));
+
+        assert!(!settings_from(&vars).cookie_secure);
     }
 }
