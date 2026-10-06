@@ -42,6 +42,17 @@ test:
 test-integration:
     cargo test --manifest-path finreport-rs/Cargo.toml -p webapp --features integration
 
+# Rust lint used by CI (§9 WP6): clippy across the workspace, including test
+# targets, with warnings as errors — but only warnings a *clean* run produces
+# today. Pre-existing dead_code on the WP0 bin stubs (projector/fixture-replay/
+# user-admin/legacy-backfill all still `unimplemented!()`) is expected and
+# intentionally not promoted to -D warnings; fixing that is each stub's own
+# WP, not WP6's. `cargo fmt --check` is deliberately not run here: the repo
+# predates a repo-wide rustfmt pass, so enforcing it now would fail CI on
+# unrelated pre-existing files rather than anything this change touched.
+lint:
+    cargo clippy --manifest-path finreport-rs/Cargo.toml --workspace --all-targets
+
 # Start local Postgres (via compose) in the background.
 # No secrets needed here — POSTGRES_PASSWORD defaults in docker-compose.local.yml.
 db-up:
