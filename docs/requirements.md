@@ -101,7 +101,11 @@ A goal is a threshold that the user sets against a **scope** of transactions and
   - `saving_target`: reach at least the amount. Only `saving`-kind categories count toward it.
 - **Scope:** one or more categories and/or tags.
   - A category includes its subcategories.
-  - Several items are combined as OR, and each transaction is counted once.
+  - Categories and tags combine with **AND**: a transaction must match the category condition *and* the tag condition. Example: category Leisure › Travel AND tag `italy-2026`.
+  - Within categories, several categories combine with OR. A transaction (or split part) has only one category, so AND would never match anything.
+  - Within tags, several tags combine with AND by default (the transaction carries all of them), with an option to switch to `any`.
+  - A scope that has only categories, or only tags, uses just that condition.
+  - Each transaction is counted once.
   - Split transactions count by their parts.
   - Internal transfers never count.
 - **Period**
