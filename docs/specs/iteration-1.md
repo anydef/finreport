@@ -731,6 +731,15 @@ WP4 and WP5 touch disjoint trees. Only WP2 and WP3 both touch
 6. `chart.js` over `layerchart` (§6).
 7. Session TTL 30 days, sliding; no "remember me" distinction.
 
+**Noted for iteration 2 (not used in iteration 1)**
+
+- The categorizer's LLM provider will be **Anthropic**, not the OpenAI path the
+  current `categorizer` crate uses via `rig` (`rig` ships an Anthropic provider).
+  The key flows `TF_VAR_anthropic_api_key` (a single `op://` reference in
+  `.env.tpl`, per the `.env.tpl` rule in `CLAUDE.md`) → `APP_anthropic_api_key`,
+  loaded through `utils::settings` as a `SecretString`. Iteration 1 neither
+  reads nor requires it.
+
 **Open questions (do not block iteration 1)**
 
 - Does Comdirect actually return transactions newest-first? Still unverified;
