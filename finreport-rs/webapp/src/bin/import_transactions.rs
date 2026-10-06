@@ -10,7 +10,7 @@ use comdirect_rs::comdirect::session::{load_comdirect_session, refresh_comdirect
 use comdirect_rs::comdirect::session_client::Session;
 use comdirect_rs::comdirect::transaction::ImportStop;
 use dotenv::dotenv;
-use entities::{account, account_balance};
+use entities::{legacy_account as account, legacy_account_balance as account_balance};
 use entity::entities;
 use sea_orm::sea_query::OnConflict;
 use sea_orm::{DbConn, EntityTrait, Set, Unchanged};
@@ -453,7 +453,7 @@ async fn run_import(
                     )
                     .await;
             }
-            let transaction_orm = entities::account_transactions::ActiveModel {
+            let transaction_orm = entities::legacy_account_transactions::ActiveModel {
                 reference: Set(transaction.reference.to_owned()),
                 account_id: Set(account.account.account_id.to_owned()),
                 booking_status: Set(transaction.booking_status.clone()),
@@ -483,20 +483,20 @@ async fn run_import(
                 ..Default::default()
             };
 
-            match entities::account_transactions::Entity::insert(transaction_orm)
+            match entities::legacy_account_transactions::Entity::insert(transaction_orm)
                 .on_conflict(
-                    OnConflict::column(entities::account_transactions::Column::Reference)
+                    OnConflict::column(entities::legacy_account_transactions::Column::Reference)
                         .update_columns([
-                            entities::account_transactions::Column::BookingStatus,
-                            entities::account_transactions::Column::BookingDate,
-                            entities::account_transactions::Column::Amount,
-                            entities::account_transactions::Column::Remitter,
-                            entities::account_transactions::Column::Deptor,
-                            entities::account_transactions::Column::Creditor,
-                            entities::account_transactions::Column::CreditorId,
-                            entities::account_transactions::Column::CreditorMandateId,
-                            entities::account_transactions::Column::RemittanceInfo,
-                            entities::account_transactions::Column::TransactionType,
+                            entities::legacy_account_transactions::Column::BookingStatus,
+                            entities::legacy_account_transactions::Column::BookingDate,
+                            entities::legacy_account_transactions::Column::Amount,
+                            entities::legacy_account_transactions::Column::Remitter,
+                            entities::legacy_account_transactions::Column::Deptor,
+                            entities::legacy_account_transactions::Column::Creditor,
+                            entities::legacy_account_transactions::Column::CreditorId,
+                            entities::legacy_account_transactions::Column::CreditorMandateId,
+                            entities::legacy_account_transactions::Column::RemittanceInfo,
+                            entities::legacy_account_transactions::Column::TransactionType,
                         ])
                         .to_owned(),
                 )
