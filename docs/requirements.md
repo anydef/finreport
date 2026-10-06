@@ -80,6 +80,15 @@ Goal: don't ask the LLM again for repeating patterns, such as Lidl → groceries
 - **What a rule does:** assigns a category. Later it can also set tags and the recurring flag. Rules have a priority, and the most specific rule wins.
 - **Where rules come from:**
   - the user creates or edits them in the admin UI
-  - **learned rules**: when the same normalized counterparty has had the same confirmed category N times (default 3), the system proposes a rule for admin review. Proposed rules are never activated automatically.
+  - **learned rules**: when the same normalized counterparty has had the same category N times (default 3), the system creates a candidate rule with a **confidence** score:
+    - The score comes from the LLM confidences of the underlying labels, taking the minimum, so one weak label lowers it.
+    - A label the user confirmed counts as 1.0.
+    - Any conflicting label for that counterparty disqualifies the candidate.
+    - The rule stores its score and the transactions it was built from.
+  - Candidates with confidence **≥ threshold** (default 0.9, configurable) are approved automatically, but stay **visible**:
+    - they carry an "auto-approved" badge
+    - they appear in an admin list of recently auto-approved rules
+    - the user can revoke one, and its labels then go back to the next source in the order of precedence
+  - Candidates **below the threshold** go to the admin review queue.
 - **Changing a rule** can be applied retroactively, on demand, to transactions without a user override. The operation is idempotent and never touches user overrides.
 - **Ambiguous merchants** (Lidl also sells non-food items): a rule sets the default, and the user corrects individual transactions with an override or a split.
