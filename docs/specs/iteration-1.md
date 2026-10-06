@@ -560,6 +560,42 @@ outside that group. Login is a form action → `login` mutation → relay
   first) filtered by the same period and by clicking a bucket.
 - `/transactions` — the existing list page, re-pointed at the new SDL.
 
+**Styling: Tailwind CSS 4, and nothing else.** `finreport-fe` already has
+Tailwind 4 wired through `@tailwindcss/vite` with `@tailwindcss/forms` and
+`@tailwindcss/typography` enabled in `src/app.css`. Iteration 1 adds **no
+component library and no second CSS system** — no DaisyUI, Skeleton,
+shadcn-svelte, bits-ui, Flowbite, no CSS modules, no Sass. Rules:
+
+- All styling is Tailwind utility classes in markup. Svelte `<style>` blocks
+  are not used; the two existing ones (`+layout.svelte`'s `.tabs`,
+  `transactions/+page.svelte`) are converted to utilities as part of this work,
+  so the codebase ends the iteration with one styling mechanism, not two.
+- Repeated class strings become **Svelte components** (`Button.svelte`,
+  `Card.svelte`, `Table.svelte`, `Field.svelte` in `src/lib/components/`), not
+  `@apply` rules. `@apply` recreates a second, invisible style layer in CSS and
+  is the usual way a Tailwind codebase drifts back into bespoke CSS.
+- `src/app.css` stays as it is, except for `@theme` tokens when a value is
+  genuinely shared (brand colour, the income/spending/net colour pair). Those
+  tokens are the single source for both the UI and the chart datasets, so a
+  chart colour cannot drift from the legend beside it.
+- Form controls lean on `@tailwindcss/forms`; the period inputs are plain
+  `<input type="date">` / `<select>`, styled with utilities. No custom
+  date-picker dependency.
+- Layout: mobile-first, a single `max-w-6xl mx-auto` content column, cards for
+  totals, a responsive grid that collapses to one column below `md`. Dark mode
+  is **out of scope** — no `dark:` variants in iteration 1, so nobody half-ships
+  a theme.
+- Accessibility basics are part of "done": focus-visible rings kept (never
+  `outline-none` without a replacement), amounts carry a textual sign and not
+  colour alone, the chart has a table fallback (the transaction list already
+  serves as one) and an `aria-label` summarizing the period.
+- Prettier with `prettier-plugin-tailwindcss` (already installed) orders classes;
+  `npm run lint` enforces it, so class ordering is never a review topic.
+
+`chart.js` renders into a `<canvas>` and is therefore unaffected by this rule —
+it is a drawing library, not a style framework. Its colours come from the
+`@theme` tokens above.
+
 **Charting: `chart.js`.** It is already a dependency of `finreport-fe`, it is
 framework-agnostic (a `<canvas>` + a Svelte 5 `$effect` to update it is ~30
 lines), and a grouped bar chart of income/spending per bucket with a net line
@@ -769,15 +805,20 @@ and `src/lib/graphql/mocks/**` (read-only to this package).
 
 `/api/graphql` proxy route, `hooks.server.ts` + layout auth guard, `/login`,
 dashboard (period selector, totals, chart.js chart, paged transaction list),
-`src/lib/period.ts`, updated `/transactions`, updated `finreport-fe/CLAUDE.md`.
+`src/lib/period.ts`, shared Tailwind-styled primitives in
+`src/lib/components/`, conversion of the two remaining Svelte `<style>` blocks
+to utilities, updated `/transactions`, updated `finreport-fe/CLAUDE.md`.
+*Styling is Tailwind 4 only* (§6) — this package adds no component or CSS
+framework dependency; a PR that adds one is rejected on sight.
 *Depends on:* WP0's SDL + mocks only. **Never blocked on a running backend**:
 development and vitest run against the mock responses; a `PUBLIC_USE_MOCKS=1`
 switch in the proxy route returns them without a network call.
 *Parallel with:* every backend package, by construction — it shares no file
 with any of them.
 *Done when:* `npm run check` and `npm run lint` pass, vitest covers the period
-and chart-shaping helpers, the UI renders fully from mocks, and the Playwright
-smoke passes against `just dev-demo`.
+and chart-shaping helpers, the UI renders fully from mocks, no `<style>` block
+or non-Tailwind styling dependency remains, and the Playwright smoke passes
+against `just dev-demo`.
 
 ### WP6 — Local dev stack & test harness
 **Owns:** `docker-compose.local.yml`, `docker-compose.yml`, `justfile`,
@@ -832,7 +873,9 @@ WP4 ↔ WP2 (function signatures, fixed in §4) and WP4 ↔ WP5 (the SDL, fixed 
 5. Offset-based pagination, not cursors. A household's transaction list does not
    reach the depth where offset paging hurts.
 6. `chart.js` over `layerchart` (§6).
-7. Session TTL 30 days, sliding; no "remember me" distinction.
+7. Tailwind 4 utilities only — no component library, no `@apply`, no dark
+   mode in this iteration (§6).
+8. Session TTL 30 days, sliding; no "remember me" distinction.
 
 **Noted for iteration 2 (not used in iteration 1)**
 
