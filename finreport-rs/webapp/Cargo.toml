@@ -44,7 +44,7 @@ rust_decimal = "1"
 # Projector/backfill/GraphQL integration tests (§8), gated behind the
 # `integration` feature so `just test` stays fast and offline.
 testcontainers = "0.23"
-testcontainers-modules = { version = "0.11", features = ["postgres"] }
+testcontainers-modules = { version = "0.11", features = ["postgres", "kafka"] }
 
 [features]
 # Gates the testcontainers-based integration tests (projector replay
