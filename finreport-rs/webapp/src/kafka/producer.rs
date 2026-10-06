@@ -1,54 +1,32 @@
-//! Best-effort publisher for imported bank data.
+//! Publisher for the event log (§2.6).
+//!
+//! Kafka is now the importer's only output: there is no Postgres write to
+//! fall back on, so a publish failure is data loss, not a degraded
+//! side-channel. `publish` surfaces that failure as a `Result` for callers
+//! that must react to it (the transaction loop skips advancing the
+//! account's watermark on failure, §2.6/§2.7); `publish_best_effort` stays
+//! available for callers content to log and move on (account/balance
+//! snapshots, which the next import cycle naturally re-publishes).
 //!
 //! Message values on the account/balance/transaction topics are the raw
-//! Comdirect JSON, byte for byte. Nothing is re-serialized on the way through:
-//! the bank's payload is the payload. Everything we know *about* the record —
-//! which login imported it, when — travels in Kafka headers instead, so the
-//! value stays exactly what the API returned.
+//! Comdirect JSON, byte for byte. Nothing is re-serialized on the way
+//! through: the bank's payload is the payload. Everything we know *about*
+//! the record travels in the §2.2 envelope headers instead, built by
+//! `super::envelope::RecordMeta` — never hand this a re-serialized struct.
 
 use std::time::Duration;
 
 use rdkafka::error::KafkaError;
-use rdkafka::message::{Header, OwnedHeaders};
+use rdkafka::message::OwnedHeaders;
 use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
 use tracing::warn;
 
+use super::envelope::RecordMeta;
+
 /// How long a single publish may block before we give up on it. Short on
 /// purpose: the import loop must not stall behind an unreachable broker.
 const PUBLISH_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// Provenance attached to every published record as Kafka headers.
-pub struct RecordMeta<'a> {
-    /// Account key of the Comdirect login that imported this (`0`, `1`, ...).
-    pub account_key: &'a str,
-    /// That login's human-readable label, when one is configured.
-    pub account_name: Option<&'a str>,
-    /// When the importer fetched the record, RFC 3339.
-    pub imported_at: &'a str,
-}
-
-impl RecordMeta<'_> {
-    fn headers(&self) -> OwnedHeaders {
-        let headers = OwnedHeaders::new()
-            .insert(Header {
-                key: "comdirect_account_key",
-                value: Some(self.account_key),
-            })
-            .insert(Header {
-                key: "imported_at",
-                value: Some(self.imported_at),
-            });
-
-        match self.account_name {
-            Some(name) => headers.insert(Header {
-                key: "comdirect_account_name",
-                value: Some(name),
-            }),
-            None => headers,
-        }
-    }
-}
 
 pub struct EventPublisher {
     producer: FutureProducer,
@@ -58,8 +36,6 @@ impl EventPublisher {
     pub fn connect(brokers: &str) -> Result<Self, KafkaError> {
         let producer: FutureProducer = ClientConfig::new()
             .set("bootstrap.servers", brokers)
-            // Don't let a queued backlog wedge the importer; the DB write has
-            // already happened by then and Postgres is authoritative.
             .set("message.timeout.ms", "10000")
             .set("compression.type", "snappy")
             .create()?;
@@ -67,16 +43,18 @@ impl EventPublisher {
         Ok(Self { producer })
     }
 
-    /// Publishes one record verbatim. `value` must be the bytes as received
-    /// from Comdirect — do not hand this a re-serialized struct.
-    pub async fn publish_raw(
+    /// Publishes one record verbatim with the given headers. `value` must be
+    /// the bytes as received from the source — do not hand this a
+    /// re-serialized struct. The lowest-level primitive; `publish` and
+    /// `publish_best_effort` build their headers from a `RecordMeta` and call
+    /// this.
+    pub async fn publish_with_headers(
         &self,
         topic: &str,
         key: &str,
         value: &[u8],
-        meta: &RecordMeta<'_>,
+        headers: OwnedHeaders,
     ) -> Result<(), KafkaError> {
-        let headers = meta.headers();
         let record = FutureRecord::to(topic)
             .key(key)
             .payload(value)
@@ -88,9 +66,25 @@ impl EventPublisher {
         }
     }
 
-    /// Publish, logging failures instead of propagating them. This is the call
-    /// the import loop uses: during dual-write a publish failure costs us an
-    /// event, not the import.
+    /// Publishes one record verbatim, propagating a failure instead of
+    /// swallowing it. Used wherever losing the publish must be visible to the
+    /// caller — the transaction loop skips advancing the watermark on `Err`
+    /// (§2.6/§2.7).
+    pub async fn publish(
+        &self,
+        topic: &str,
+        key: &str,
+        value: &[u8],
+        meta: &RecordMeta<'_>,
+    ) -> Result<(), KafkaError> {
+        self.publish_with_headers(topic, key, value, meta.headers())
+            .await
+    }
+
+    /// Publish, logging failures instead of propagating them. Used for
+    /// records whose loss is self-healing (the next import cycle republishes
+    /// the account/balance snapshot it describes), unlike a transaction,
+    /// which exists exactly once in the bank's history.
     pub async fn publish_best_effort(
         &self,
         topic: &str,
@@ -98,8 +92,8 @@ impl EventPublisher {
         value: &[u8],
         meta: &RecordMeta<'_>,
     ) {
-        if let Err(e) = self.publish_raw(topic, key, value, meta).await {
-            warn!(%topic, %key, %e, "failed to publish event; Postgres still has it");
+        if let Err(e) = self.publish(topic, key, value, meta).await {
+            warn!(%topic, %key, %e, "failed to publish event");
         }
     }
 }
