@@ -1,0 +1,265 @@
+type Account {
+	id: UUID!
+	"""
+	`"comdirect"`.
+	"""
+	source: String!
+	externalId: String!
+	displayId: String
+	accountType: String
+	iban: String
+	bic: String
+	institute: String
+	"""
+	Login label, display only.
+	"""
+	label: String
+	currency: String!
+	latestBalance: Balance
+}
+
+type Balance {
+	date: Date!
+	amount: Decimal!
+	currency: String!
+}
+
+type CashflowBucket {
+	"""
+	Inclusive.
+	"""
+	start: Date!
+	"""
+	Inclusive.
+	"""
+	end: Date!
+	"""
+	Sum of `amount > 0`, positive.
+	"""
+	income: Decimal!
+	"""
+	Sum of `|amount|` for `amount < 0`, positive.
+	"""
+	spending: Decimal!
+	"""
+	`income - spending`.
+	"""
+	net: Decimal!
+	transactionCount: Int!
+}
+
+"""
+`CATEGORY` (iteration 2) and `TAG` (iteration 3) are reserved: declared,
+rejected until implemented, so an old server never silently returns a
+graph it did not build (§5).
+"""
+enum CashflowDimension {
+	INCOME_SOURCE
+	ACCOUNT
+	OUTCOME
+	CATEGORY
+	TAG
+}
+
+type CashflowGraph {
+	nodes: [CashflowNode!]!
+	links: [CashflowLink!]!
+	currency: String!
+	"""
+	Echoes what the server applied.
+	"""
+	dimensions: [CashflowDimension!]!
+	truncated: Boolean!
+}
+
+input CashflowGraphInput {
+	"""
+	Left-to-right dimensions. Iteration 1 accepts only the default and
+	errors otherwise.
+	"""
+	dimensions: [CashflowDimension!]! = [INCOME_SOURCE, ACCOUNT, OUTCOME]
+	"""
+	Remainder folded into one `Other` node.
+	"""
+	maxNodesPerDimension: Int! = 8
+}
+
+type CashflowLink {
+	sourceId: ID!
+	targetId: ID!
+	"""
+	Always positive.
+	"""
+	value: Decimal!
+}
+
+type CashflowNode {
+	"""
+	Opaque, stable within one response.
+	"""
+	id: ID!
+	label: String!
+	kind: CashflowNodeKind!
+	"""
+	Column index; the server lays out, not the client.
+	"""
+	depth: Int!
+	"""
+	`max(inflow, outflow)`.
+	"""
+	value: Decimal!
+	"""
+	e.g. `"account"` | `"category"` — null for synthetic nodes.
+	"""
+	refType: String
+	"""
+	Id within `refType`, for drill-down.
+	"""
+	refId: String
+}
+
+enum CashflowNodeKind {
+	INCOME_SOURCE
+	ACCOUNT
+	SPENDING
+	NET
+	DEFICIT
+	OTHER
+	CATEGORY
+	TAG
+}
+
+type CashflowSummary {
+	buckets: [CashflowBucket!]!
+	total: CashflowTotals!
+	currency: String!
+}
+
+type CashflowTotals {
+	income: Decimal!
+	spending: Decimal!
+	net: Decimal!
+	transactionCount: Int!
+}
+
+scalar Date
+
+scalar DateTime
+
+scalar Decimal
+
+enum Direction {
+	INCOME
+	SPENDING
+}
+
+enum Granularity {
+	DAY
+	WEEK
+	MONTH
+}
+
+input LoginInput {
+	username: String!
+	password: String!
+}
+
+type Me {
+	id: UUID!
+	username: String!
+	displayName: String
+}
+
+type Mutation {
+	login(input: LoginInput!): Me!
+	logout: Boolean!
+}
+
+input PageInput {
+	"""
+	Clamped to `1..=200`.
+	"""
+	limit: Int! = 50
+	offset: Int! = 0
+}
+
+type Query {
+	"""
+	Unauthenticated field (§4/§5): no session support exists yet, so this
+	always returns `null` rather than guessing at a user.
+	"""
+	me: Me
+	accounts: [Account!]!
+	transactions(filter: TransactionFilter, page: PageInput): TransactionPage!
+	cashflowSummary(filter: TransactionFilter!, granularity: Granularity!): CashflowSummary!
+	cashflowGraph(filter: TransactionFilter!, grouping: CashflowGraphInput): CashflowGraph!
+}
+
+type Transaction {
+	id: UUID!
+	accountId: UUID!
+	source: String!
+	externalId: String!
+	bookingDate: Date!
+	valutaDate: Date
+	bookingStatus: String!
+	amount: Decimal!
+	currency: String!
+	counterpartyName: String
+	counterpartyIban: String
+	description: String
+	transactionType: String
+}
+
+input TransactionFilter {
+	"""
+	Inclusive; `None` = unbounded.
+	"""
+	startDate: Date
+	"""
+	Inclusive; `None` = unbounded.
+	"""
+	endDate: Date
+	"""
+	`None`/empty = all of the caller's accounts.
+	"""
+	accountIds: [UUID!]
+	"""
+	Case-insensitive substring over `counterpartyName` + `description`.
+	"""
+	search: String
+	"""
+	`None` = both.
+	"""
+	direction: Direction
+	"""
+	Sankey drill-down: OR-ed exact matches.
+	"""
+	counterpartyNames: [String!]
+	"""
+	`false` selects the "Unknown" node's rows.
+	"""
+	hasCounterparty: Boolean
+}
+
+type TransactionPage {
+	items: [Transaction!]!
+	totalCount: Int!
+	limit: Int!
+	offset: Int!
+}
+
+scalar UUID
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+schema {
+	query: Query
+	mutation: Mutation
+}
