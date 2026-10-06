@@ -16,6 +16,8 @@
 pub mod error;
 pub mod password;
 pub mod session;
+#[cfg(all(test, feature = "integration"))]
+mod session_integration_tests;
 pub mod token;
 pub mod user;
 
