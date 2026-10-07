@@ -86,7 +86,10 @@ module "portainer_stack" {
   # form utils::settings reads. Accounts left empty are dropped, so the stack
   # never receives half-populated credentials.
   extra_env = merge(
-    { POSTGRES_PASSWORD = var.postgres_password },
+    {
+      POSTGRES_PASSWORD     = var.postgres_password
+      APP_anthropic_api_key = var.anthropic_api_key
+    },
     merge([
       for index, account in local.comdirect_accounts : {
         "APP_accounts__${index}__client_id"     = account.client_id

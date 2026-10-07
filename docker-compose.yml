@@ -177,14 +177,11 @@ services:
       APP_llm_provider: anthropic
       APP_llm_model: claude-sonnet-4-5
       # Secret — sourced from TF_VAR_anthropic_api_key in .env.tpl via
-      # terraform/variables.tf's `anthropic_api_key`, which still needs an
-      # `APP_anthropic_api_key = var.anthropic_api_key` entry in
+      # terraform/variables.tf's `anthropic_api_key` and
       # terraform/main.tf's `module "portainer_stack"` extra_env (same
-      # mechanism as POSTGRES_PASSWORD there) — that file is outside WP7's
-      # files (docs/specs/iteration-2.md §10) and is a follow-up for whoever
-      # owns it next. Until then this resolves empty and the labeler refuses
-      # to build an Anthropic provider (lazy validation, §4) rather than
-      # failing to start.
+      # mechanism as POSTGRES_PASSWORD there). Resolves empty if that secret
+      # is unset, and the labeler then refuses to build an Anthropic
+      # provider (lazy validation, §4) rather than failing to start.
       APP_anthropic_api_key: ${APP_anthropic_api_key:-}
     networks:
       services-lan:
