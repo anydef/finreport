@@ -18,6 +18,7 @@ import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
 import cashflowGraphNetDeficitMock from '$lib/graphql/mocks/cashflow-graph-net-deficit.json';
 import cashflowGraphTruncatedMock from '$lib/graphql/mocks/cashflow-graph-truncated.json';
 import transactionsMock from '$lib/graphql/mocks/transactions.json';
+import categoriesMock from '$lib/graphql/mocks/categories.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
 import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
@@ -123,6 +124,108 @@ function mockCashflowGraph(variables: Record<string, unknown> | undefined): unkn
 	return cashflowGraphNetDeficitMock.data;
 }
 
+/**
+ * `/admin/rules` + `/admin/categories` (§5, §10 WP6) mutations: the real
+ * backend only publishes-then-upserts (§2.1, async via the labeler), so a
+ * static fixture can't stand in the way `SplitTransaction`'s does. These
+ * echo the caller's own input back as the "fresh row", which is enough for
+ * the admin screens to round-trip against in mock mode.
+ */
+function findMockCategory(slug: string | undefined): {
+	id: string;
+	slug: string;
+	name: string;
+	kind: string;
+} {
+	const found = categoriesMock.data.categories.find((c) => c.slug === slug);
+	return (
+		found ?? {
+			id: '00000000-0000-0000-0000-000000000000',
+			slug: slug ?? '',
+			name: slug ?? '',
+			kind: 'EXPENSE'
+		}
+	);
+}
+
+function mockCreateOrUpdateRule(
+	variables: Record<string, unknown> | undefined,
+	existingId?: string
+): unknown {
+	const input = (variables?.input ?? {}) as {
+		name?: string;
+		categorySlug?: string;
+		conditions?: unknown;
+		priority?: number;
+	};
+	const existing = existingId ? rulesMock.data.rules.find((r) => r.id === existingId) : undefined;
+	return {
+		id: existingId ?? crypto.randomUUID(),
+		name: input.name ?? existing?.name ?? 'Untitled rule',
+		category: findMockCategory(input.categorySlug) ?? existing?.category,
+		conditions: input.conditions ?? existing?.conditions ?? {},
+		priority: input.priority ?? existing?.priority ?? 0,
+		state: existing?.state ?? 'ACTIVE',
+		origin: existing?.origin ?? 'USER',
+		autoApproved: existing?.autoApproved ?? false,
+		confidence: existing?.confidence ?? null,
+		evidenceCount: existing?.evidenceCount ?? 0,
+		createdAt: existing?.createdAt ?? new Date().toISOString()
+	};
+}
+
+function mockSetRuleState(variables: Record<string, unknown> | undefined): unknown {
+	const id = variables?.id as string | undefined;
+	const state = variables?.state as string | undefined;
+	const existing = rulesMock.data.rules.find((r) => r.id === id);
+	return {
+		...((existing ?? mockCreateOrUpdateRule(undefined, id)) as Record<string, unknown>),
+		id,
+		state: state ?? existing?.state ?? 'ACTIVE'
+	};
+}
+
+/** `reapplyRule` returns how many transactions it will re-queue (§5); a fixed, plausible count in mock mode. */
+function mockReapplyRule(): unknown {
+	return 7;
+}
+
+function mockCreateOrUpdateCategory(
+	variables: Record<string, unknown> | undefined,
+	existingId?: string
+): unknown {
+	const input = (variables?.input ?? {}) as {
+		slug?: string;
+		name?: string;
+		kind?: string;
+		parentSlug?: string | null;
+	};
+	const parent = input.parentSlug ? findMockCategory(input.parentSlug) : undefined;
+	return {
+		id: existingId ?? crypto.randomUUID(),
+		slug: input.slug ?? '',
+		name: input.name ?? '',
+		kind: input.kind ?? 'EXPENSE',
+		parentId: parent?.id ?? null,
+		depth: parent ? 2 : 1,
+		archived: false,
+		origin: 'user'
+	};
+}
+
+function mockRenameCategory(variables: Record<string, unknown> | undefined): unknown {
+	const id = variables?.id as string | undefined;
+	const name = variables?.name as string | undefined;
+	const existing = categoriesMock.data.categories.find((c) => c.id === id);
+	return { id, slug: existing?.slug ?? '', name: name ?? existing?.name ?? '' };
+}
+
+function mockArchiveCategory(variables: Record<string, unknown> | undefined): unknown {
+	const id = variables?.id as string | undefined;
+	const existing = categoriesMock.data.categories.find((c) => c.id === id);
+	return { id, slug: existing?.slug ?? '', archived: true };
+}
+
 function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBackendResult | null {
 	switch (operationNameOf(body)) {
 		case 'Me':
@@ -147,10 +250,65 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'ReviewQueue':
 			return { status: 200, body: { data: reviewQueueMock.data }, setCookies: [] };
 		case 'Rules':
-		case 'RecentlyAutoApprovedRules':
 			return { status: 200, body: { data: rulesMock.data }, setCookies: [] };
+		case 'RecentlyAutoApprovedRules':
+			// Field name differs from `Rules` (`recentlyAutoApprovedRules`, not
+			// `rules`), and only auto-approved learned rules qualify (§2.8).
+			return {
+				status: 200,
+				body: {
+					data: {
+						recentlyAutoApprovedRules: rulesMock.data.rules.filter(
+							(r) => r.origin === 'LEARNED' && r.autoApproved
+						)
+					}
+				},
+				setCookies: []
+			};
 		case 'SplitTransaction':
 			return { status: 200, body: { data: transactionSplitMock.data }, setCookies: [] };
+		case 'Categories':
+			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
+		case 'CreateRule':
+			return {
+				status: 200,
+				body: { data: { createRule: mockCreateOrUpdateRule(body.variables) } },
+				setCookies: []
+			};
+		case 'UpdateRule':
+			return {
+				status: 200,
+				body: {
+					data: { updateRule: mockCreateOrUpdateRule(body.variables, body.variables?.id as string) }
+				},
+				setCookies: []
+			};
+		case 'SetRuleState':
+			return {
+				status: 200,
+				body: { data: { setRuleState: mockSetRuleState(body.variables) } },
+				setCookies: []
+			};
+		case 'ReapplyRule':
+			return { status: 200, body: { data: { reapplyRule: mockReapplyRule() } }, setCookies: [] };
+		case 'CreateCategory':
+			return {
+				status: 200,
+				body: { data: { createCategory: mockCreateOrUpdateCategory(body.variables) } },
+				setCookies: []
+			};
+		case 'RenameCategory':
+			return {
+				status: 200,
+				body: { data: { renameCategory: mockRenameCategory(body.variables) } },
+				setCookies: []
+			};
+		case 'ArchiveCategory':
+			return {
+				status: 200,
+				body: { data: { archiveCategory: mockArchiveCategory(body.variables) } },
+				setCookies: []
+			};
 		default:
 			return null;
 	}

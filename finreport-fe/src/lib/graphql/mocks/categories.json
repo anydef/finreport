@@ -1,0 +1,117 @@
+{
+  "query": "query Categories($includeArchived: Boolean) {\n  categories(includeArchived: $includeArchived) {\n    id\n    slug\n    name\n    kind\n    parentId\n    depth\n    archived\n    origin\n  }\n}",
+  "data": {
+    "categories": [
+      {
+        "id": "10000000-0000-0000-0000-000000000001",
+        "slug": "food",
+        "name": "Food",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "7f5a7e2e-7d0a-5f3d-9c8a-2f1b6a0c4d11",
+        "slug": "food.groceries",
+        "name": "Groceries",
+        "kind": "EXPENSE",
+        "parentId": "10000000-0000-0000-0000-000000000001",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000002",
+        "slug": "food.dining",
+        "name": "Dining",
+        "kind": "EXPENSE",
+        "parentId": "10000000-0000-0000-0000-000000000001",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000003",
+        "slug": "personal",
+        "name": "Personal",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+        "slug": "personal.gym",
+        "name": "Gym",
+        "kind": "EXPENSE",
+        "parentId": "10000000-0000-0000-0000-000000000003",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000004",
+        "slug": "personal.gym.membership",
+        "name": "Membership",
+        "kind": "EXPENSE",
+        "parentId": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+        "depth": 3,
+        "archived": false,
+        "origin": "user"
+      },
+      {
+        "id": "9a2c3d4e-5f60-5718-8293-a4b5c6d7e8f9",
+        "slug": "transportation",
+        "name": "Transportation",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000005",
+        "slug": "salary",
+        "name": "Salary",
+        "kind": "INCOME",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000006",
+        "slug": "internal_transfer",
+        "name": "Internal transfer",
+        "kind": "TRANSFER",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000007",
+        "slug": "investment_saving",
+        "name": "Investment saving",
+        "kind": "SAVING",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "10000000-0000-0000-0000-000000000008",
+        "slug": "food.takeaway",
+        "name": "Takeaway (old)",
+        "kind": "EXPENSE",
+        "parentId": "10000000-0000-0000-0000-000000000001",
+        "depth": 2,
+        "archived": true,
+        "origin": "user"
+      }
+    ]
+  }
+}
