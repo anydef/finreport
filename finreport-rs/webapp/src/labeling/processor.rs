@@ -902,6 +902,17 @@ impl From<DbErr> for LabelerError {
     }
 }
 
+impl std::fmt::Display for LabelerError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LabelerError::Kafka(e) => write!(f, "kafka error: {e}"),
+            LabelerError::Db(e) => write!(f, "database error: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for LabelerError {}
+
 impl From<ResolveError> for LabelerError {
     fn from(e: ResolveError) -> Self {
         match e {
