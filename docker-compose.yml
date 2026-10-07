@@ -67,6 +67,46 @@ services:
   # no port — so nothing ever needs to address it and there is no HAProxy or
   # DNS entry to point at a fixed one. It still joins `services-lan` to reach
   # those two.
+  # One-shot seed of the default category taxonomy. `category` is a
+  # projection like every other table, and the only thing that ever writes
+  # the `finreport.category` topic is this binary — so without it the
+  # taxonomy is empty, the labeler's catalog is empty, and nothing can be
+  # categorized at all.
+  #
+  # Idempotent, hence safe on every deploy: ids are a deterministic
+  # `category_uuid(slug)`, so re-running an unchanged tree is a no-op beyond
+  # a `revision` bump. It never deletes a category, including ones a user
+  # created through the admin UI and ones this taxonomy no longer lists —
+  # seeding defaults and managing categories dynamically coexist.
+  #
+  # Dual-writes (Kafka *and* the `category` projection, the same way the
+  # labeler's consume loop would), so it needs the database as well as the
+  # broker, and the table is populated the moment it exits rather than one
+  # projector lap later. `/app/prompts/taxonomy.json` is where the image
+  # ships the file; the binary's own default is a relative path that only
+  # resolves from a repo checkout.
+  finreport-be-category-seed:
+    image: ${DOCKER_REGISTRY}/finreport-be:latest
+    pull_policy: always
+    container_name: finreport-be-category-seed
+    entrypoint: ["category-seed"]
+    command: ["/app/prompts/taxonomy.json"]
+    restart: "no"
+    depends_on:
+      finreport-be-migrate:
+        condition: service_completed_successfully
+    environment:
+      RUST_LOG: info
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
+      APP_kafka_brokers: kafka.lab.anydef.de:9092
+      # Migrations are the explicit `finreport-be-migrate` step, as for every
+      # other service here — this binary would otherwise run them itself.
+      APP_run_migrations: "false"
+    networks:
+      - services-lan
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
   finreport-be-legacy-backfill:
     image: ${DOCKER_REGISTRY}/finreport-be:latest
     pull_policy: always
