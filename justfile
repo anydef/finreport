@@ -187,9 +187,14 @@ dev-demo: dev-up
     just seed-user
     just seed-events
     just seed-categories
-    just _dev-demo-loop
+    # Accounts must be projected and linked to the demo user *before* the
+    # detection pass runs (iteration-3 §3.1 rule 2: a transfer pair needs a
+    # common owning user) — otherwise every `_dev-demo-loop` round detects
+    # zero transfers no matter how many times it repeats.
+    just dev-projector --until-caught-up
     cd finreport-rs && \
         {{local_env}} cargo run -p webapp --bin user-admin -- link --username dev --all
+    just _dev-demo-loop
     just _dev-demo-assert
     @echo "==> Ready: just dev-be (backend) + just dev-fe (frontend), log in as dev/\${FINREPORT_PASSWORD:-dev}"
 
@@ -212,7 +217,13 @@ _dev-demo-loop:
             psql -U finreport -d finreport -tAc \
             'SELECT (SELECT count(*) FROM transaction) + (SELECT count(*) FROM transaction_label) + (SELECT count(*) FROM rule);')
         {{local_env}} RUST_LOG=info cargo run -p webapp --bin projector -- --until-caught-up
-        {{local_env}} RUST_LOG=info cargo run -p webapp --bin labeler -- --until-caught-up
+        # The WP0 demo fixtures (webapp/fixtures) use fixed 2024 dates for the
+        # recurring-series cases; a wide window keeps the demo's recurring
+        # detection independent of wall-clock "today" instead of letting it
+        # silently stop asserting anything once 2024 falls outside the
+        # default 18-month lookback.
+        {{local_env}} APP_recurring_window_months="${APP_recurring_window_months:-9999}" \
+            RUST_LOG=info cargo run -p webapp --bin labeler -- --until-caught-up
         after=$(docker compose -f ../docker-compose.local.yml exec -T finreport-be-postgres \
             psql -U finreport -d finreport -tAc \
             'SELECT (SELECT count(*) FROM transaction) + (SELECT count(*) FROM transaction_label) + (SELECT count(*) FROM rule);')
@@ -239,6 +250,17 @@ _dev-demo-assert:
         exit 1
     fi
     echo "==> dev-demo: asserted ${learned} learned rule(s), ${review} needs_review label(s)"
+    transfers=$(docker compose -f docker-compose.local.yml exec -T finreport-be-postgres \
+        psql -U finreport -d finreport -tAc \
+        "SELECT count(*) FROM transaction_insight WHERE is_transfer;")
+    recurring_series=$(docker compose -f docker-compose.local.yml exec -T finreport-be-postgres \
+        psql -U finreport -d finreport -tAc \
+        "SELECT count(*) FROM (SELECT recurring_series_id FROM transaction_insight WHERE is_recurring GROUP BY recurring_series_id) s;")
+    if [ "${transfers:-0}" -lt 1 ] || [ "${recurring_series:-0}" -lt 1 ]; then
+        echo "==> dev-demo: assertion failed — transfer legs: ${transfers:-0}, recurring series: ${recurring_series:-0}" >&2
+        exit 1
+    fi
+    echo "==> dev-demo: asserted ${transfers} transfer leg(s) across >=1 pair, ${recurring_series} recurring series"
 
 # Apply all migrations to the local `dev-up` Postgres (no .env needed).
 dev-migrate:

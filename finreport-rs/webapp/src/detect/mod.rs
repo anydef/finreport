@@ -15,8 +15,8 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use uuid::Uuid;
 
-pub use recurring::{detect_recurring, RecurringConfig, RecurringSeries};
-pub use transfer::{detect_transfers, TransferConfig, TransferPair};
+pub use recurring::{detect_recurring, Cadence, RecurringConfig, RecurringSeries};
+pub use transfer::{detect_transfers, TransferConfig, TransferMatchKind, TransferPair};
 
 /// One transaction's detection-relevant facts (iteration 3 §3), loaded by
 /// [`processor`] with a single query joining `transaction`, `account`,
@@ -26,12 +26,21 @@ pub use transfer::{detect_transfers, TransferConfig, TransferPair};
 pub struct TxnFacts {
     pub id: Uuid,
     pub account_id: Uuid,
+    /// `transaction.source`/`external_id`: needed by `processor` to key a
+    /// published `InsightRecord` (`<source>:<external_id>`, §2.2) — not
+    /// used by the pure detection algorithms themselves.
+    pub source: String,
+    pub external_id: String,
     /// Every user who owns `account_id` (via `user_account`); a transfer
     /// candidate pair must share at least one entry (§3.1 rule 2).
     pub owner_user_ids: Vec<Uuid>,
     pub booking_date: NaiveDate,
     pub amount: Decimal,
     pub counterparty_iban: Option<String>,
+    /// `account.iban` for `account_id` — the other leg's IBAN this one's
+    /// `counterparty_iban` is compared against for an `iban_confirmed`
+    /// transfer match (§3.1).
+    pub account_iban: Option<String>,
     /// Iteration 2's normalized counterparty key; `None` ⇒ never recurring
     /// (§3.2).
     pub counterparty_key: Option<String>,
