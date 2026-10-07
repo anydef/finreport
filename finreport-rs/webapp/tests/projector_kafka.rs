@@ -108,10 +108,11 @@ async fn replay_over_kafka_projects_the_whole_fixture_corpus() {
     // — so transactions land two short of the manifest's transaction count,
     // and every balance/account record applies cleanly. The two new
     // `finreport.user-label` fixture entries are not ingest-topic records and
-    // do not affect this count.
+    // do not affect this count. Iteration 3 adds 13 more: a 2-leg transfer
+    // pair plus monthly (4), quarterly (3) and amount-drifting (4) series.
     assert_eq!(balance_count, 6, "every balance fixture must project");
     assert_eq!(
-        tx_count, 54,
+        tx_count, 67,
         "every transaction fixture but the two source_account_id-less poison records must project"
     );
     assert!(
