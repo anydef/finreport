@@ -34,6 +34,8 @@ pub struct Model {
     pub origin: String,
     pub imported_at: DateTimeWithTimeZone,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub counterparty_key: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

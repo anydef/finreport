@@ -3,12 +3,14 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "mandate_categories")]
+#[sea_orm(table_name = "transaction_user_label")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
-    pub creditor_mandate_id: String,
-    pub category_id: i32,
-    pub description: Option<String>,
+    pub transaction_id: Uuid,
+    pub category_id: Option<Uuid>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub note: Option<String>,
+    pub revision: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
