@@ -1,0 +1,10 @@
+{
+  "model": "llama3.1",
+  "created_at": "2026-03-01T12:00:00.000000Z",
+  "message": {
+    "role": "assistant",
+    "content": "{\"category_slug\": \"entertainment.subscriptions\", \"proposed_path\": null, \"confidence\": 0.9, \"ambiguous\": false, \"reasoning\": \"Netflix is a streaming subscription\"}"
+  },
+  "done": true,
+  "done_reason": "stop"
+}
