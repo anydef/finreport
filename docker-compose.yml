@@ -107,6 +107,46 @@ services:
     labels:
       - "net.unraid.docker.managed=composeman"
 
+  # One-shot repair for records the projector could not project. Between
+  # 2026-08-24 and 2026-09-30 a producer published ingest records whose
+  # envelope lacked the `source_account_id` header; the projector requires it,
+  # logged each one as poison, skipped it and advanced its offset — so 139
+  # transactions and 832 balance observations never reached the read model
+  # (a September salary among them, which is how this was found).
+  #
+  # The bank's own bytes are still on the topics, so this republishes them
+  # unchanged with the header filled in — from the record key on the account
+  # and balance topics, and from `legacy_account_transactions.reference` for
+  # transactions. `legacy-backfill` itself cannot do this: it skips any key
+  # already present, which these keys are.
+  #
+  # Safe on every deploy, like the other one-shots: a repaired record carries
+  # the header, so later runs find nothing and report zero. It needs the
+  # database for the transaction lookup as well as the broker.
+  #
+  # Once the historical window is repaired and confirmed, this service has
+  # nothing left to do and can be dropped — it is a recovery step, not part
+  # of the steady-state pipeline.
+  finreport-be-repair-headers:
+    image: ${DOCKER_REGISTRY}/finreport-be:latest
+    pull_policy: always
+    container_name: finreport-be-repair-headers
+    entrypoint: ["legacy-backfill"]
+    command: ["--repair-headers"]
+    restart: "no"
+    depends_on:
+      finreport-be-migrate:
+        condition: service_completed_successfully
+    environment:
+      RUST_LOG: info
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
+      APP_kafka_brokers: kafka.lab.anydef.de:9092
+      APP_run_migrations: "false"
+    networks:
+      - services-lan
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
   finreport-be-legacy-backfill:
     image: ${DOCKER_REGISTRY}/finreport-be:latest
     pull_policy: always
