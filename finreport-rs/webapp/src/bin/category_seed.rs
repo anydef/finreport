@@ -56,48 +56,6 @@ fn taxonomy_path() -> String {
         .unwrap_or_else(|| "prompts/taxonomy.json".to_string())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Parses the real `prompts/taxonomy.json` (not a fixture copy, so this
-    /// test breaks the moment the taxonomy and this flattener disagree) and
-    /// checks the depth/parent invariants §3's `category` CHECK constraints
-    /// rely on.
-    #[test]
-    fn flattens_the_real_taxonomy_with_valid_depths_and_parents() {
-        let raw = fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../prompts/taxonomy.json"
-        ))
-        .expect("prompts/taxonomy.json must exist");
-        let roots: Vec<TaxonomyNode> = serde_json::from_str(&raw).unwrap();
-        assert!(!roots.is_empty());
-
-        let mut flattened = Vec::new();
-        for root in &roots {
-            flatten(root, None, 1, &mut flattened);
-        }
-
-        // 16 roots + however many children the fixture carries today; this
-        // is really just "every node reachable from a root was visited".
-        let expected_total: usize = roots.iter().map(|r| 1 + r.children.len()).sum();
-        assert_eq!(flattened.len(), expected_total);
-
-        for (depth, parent_slug, node) in &flattened {
-            assert!((1..=3).contains(depth), "slug {} has depth {depth}", node.slug);
-            if *depth == 1 {
-                assert!(parent_slug.is_none(), "root {} must have no parent", node.slug);
-            } else {
-                assert!(parent_slug.is_some(), "child {} must have a parent", node.slug);
-            }
-            // `category_uuid` is deterministic by slug alone: re-running the
-            // seed twice must compute the same id for the same slug.
-            assert_eq!(category_uuid(&node.slug), category_uuid(&node.slug));
-        }
-    }
-}
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     tracing_subscriber::fmt()
@@ -181,4 +139,46 @@ async fn main() -> Result<(), Box<dyn Error>> {
         return Err(format!("{failed} categor{} failed to seed", if failed == 1 { "y" } else { "ies" }).into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Parses the real `prompts/taxonomy.json` (not a fixture copy, so this
+    /// test breaks the moment the taxonomy and this flattener disagree) and
+    /// checks the depth/parent invariants §3's `category` CHECK constraints
+    /// rely on.
+    #[test]
+    fn flattens_the_real_taxonomy_with_valid_depths_and_parents() {
+        let raw = fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../prompts/taxonomy.json"
+        ))
+        .expect("prompts/taxonomy.json must exist");
+        let roots: Vec<TaxonomyNode> = serde_json::from_str(&raw).unwrap();
+        assert!(!roots.is_empty());
+
+        let mut flattened = Vec::new();
+        for root in &roots {
+            flatten(root, None, 1, &mut flattened);
+        }
+
+        // 16 roots + however many children the fixture carries today; this
+        // is really just "every node reachable from a root was visited".
+        let expected_total: usize = roots.iter().map(|r| 1 + r.children.len()).sum();
+        assert_eq!(flattened.len(), expected_total);
+
+        for (depth, parent_slug, node) in &flattened {
+            assert!((1..=3).contains(depth), "slug {} has depth {depth}", node.slug);
+            if *depth == 1 {
+                assert!(parent_slug.is_none(), "root {} must have no parent", node.slug);
+            } else {
+                assert!(parent_slug.is_some(), "child {} must have a parent", node.slug);
+            }
+            // `category_uuid` is deterministic by slug alone: re-running the
+            // seed twice must compute the same id for the same slug.
+            assert_eq!(category_uuid(&node.slug), category_uuid(&node.slug));
+        }
+    }
 }
