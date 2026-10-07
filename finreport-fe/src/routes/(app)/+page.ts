@@ -99,7 +99,18 @@ export const load: PageLoad = async ({ fetch, url }) => {
 					page: { limit: PAGE_LIMIT, offset }
 				})
 				.toPromise(),
-			client.query(CATEGORY_BREAKDOWN_QUERY, { filter: periodFilter, level: 1 }).toPromise()
+			client
+				.query(CATEGORY_BREAKDOWN_QUERY, {
+					filter: periodFilter,
+					level: 1,
+					// "Spending by category" means spending. Without a kind the
+					// resolver returns every kind but transfer, so income
+					// categories were showing up under a spending card, and
+					// savings count as saving rather than spending (requirements,
+					// "Categories (iteration 2)").
+					kind: 'EXPENSE'
+				})
+				.toPromise()
 		]);
 
 	const error = [accountsResult, summaryResult, graphResult, transactionsResult].some(

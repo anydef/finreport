@@ -12,7 +12,13 @@ export interface DateRange {
 	end: string;
 }
 
-export type PeriodPresetId = 'this-month' | 'last-month' | 'last-3-months' | 'this-year' | 'custom';
+export type PeriodPresetId =
+	| 'last-30-days'
+	| 'this-month'
+	| 'last-month'
+	| 'last-3-months'
+	| 'this-year'
+	| 'custom';
 
 export interface PeriodPreset {
 	id: PeriodPresetId;
@@ -20,6 +26,7 @@ export interface PeriodPreset {
 }
 
 export const PERIOD_PRESETS: PeriodPreset[] = [
+	{ id: 'last-30-days', label: 'Last 30 days' },
 	{ id: 'this-month', label: 'This month' },
 	{ id: 'last-month', label: 'Last month' },
 	{ id: 'last-3-months', label: 'Last 3 months' },
@@ -69,6 +76,15 @@ export function defaultGranularity(range: DateRange): Granularity {
 /** Resolve a non-custom preset into a concrete inclusive date range. */
 export function presetRange(preset: PeriodPresetId, today: Date): DateRange {
 	switch (preset) {
+		// Rolling window, deliberately distinct from `this-month`: that preset
+		// runs from the 1st to today, which is month-to-date and therefore
+		// shorter and shorter the nearer the 1st you are. This one always
+		// covers the same span of days. Inclusive of both ends, so the start is
+		// 29 days back.
+		case 'last-30-days': {
+			const start = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 29);
+			return { start: toDateInputValue(start), end: toDateInputValue(today) };
+		}
 		case 'this-month': {
 			const start = new Date(today.getFullYear(), today.getMonth(), 1);
 			return { start: toDateInputValue(start), end: toDateInputValue(today) };

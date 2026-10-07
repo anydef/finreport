@@ -56,6 +56,23 @@ describe('defaultGranularity', () => {
 describe('presetRange', () => {
 	const today = new Date(2026, 6, 17); // 2026-07-17
 
+	it('last-30-days: a rolling 30-day window ending today, inclusive', () => {
+		expect(presetRange('last-30-days', today)).toEqual({ start: '2026-06-18', end: '2026-07-17' });
+	});
+
+	it('last-30-days: crosses a month and a year boundary', () => {
+		expect(presetRange('last-30-days', new Date(2026, 0, 5))).toEqual({
+			start: '2025-12-07',
+			end: '2026-01-05'
+		});
+	});
+
+	it('last-30-days: is not the same as this-month early in the month', () => {
+		const early = new Date(2026, 6, 3); // 2026-07-03
+		expect(presetRange('this-month', early)).toEqual({ start: '2026-07-01', end: '2026-07-03' });
+		expect(presetRange('last-30-days', early)).toEqual({ start: '2026-06-04', end: '2026-07-03' });
+	});
+
 	it('this-month: first of month through today', () => {
 		expect(presetRange('this-month', today)).toEqual({ start: '2026-07-01', end: '2026-07-17' });
 	});
