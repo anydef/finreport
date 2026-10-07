@@ -4,8 +4,11 @@
 //! path the real server runs, not a re-implementation of it.
 
 use actix_cors::Cors;
+use actix_web::body::MessageBody;
+use actix_web::dev::{HttpServiceFactory, ServiceRequest, ServiceResponse};
 use actix_web::http::header;
-use actix_web::{web, HttpRequest};
+use actix_web::middleware::{from_fn, Next};
+use actix_web::{web, Error, HttpRequest, HttpResponse};
 use async_graphql_actix_web::{GraphQLRequest, GraphQLResponse};
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
@@ -57,6 +60,55 @@ pub async fn graphql_handler(
         },
     );
     schema.execute(request).await.into()
+}
+
+/// `Content-Type` of a POST, ignoring parameters such as `; charset=utf-8`.
+fn is_json_content_type(req: &ServiceRequest) -> bool {
+    req.headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|v| {
+            v.split(';')
+                .next()
+                .unwrap_or("")
+                .trim()
+                .eq_ignore_ascii_case("application/json")
+        })
+        .unwrap_or(false)
+}
+
+/// Rejects any `/graphql` request whose `Content-Type` isn't
+/// `application/json` with `415 Unsupported Media Type`, before the body is
+/// ever read (§4 CSRF defense in depth). This has to sit in front of the
+/// `GraphQLRequest` extractor rather than inside `graphql_handler` itself:
+/// `async_graphql`'s body parser treats any non-multipart content type as
+/// JSON, so by the time the handler runs the "wrong Content-Type" signal is
+/// already gone. A cross-site HTML form cannot set an arbitrary
+/// `Content-Type` without turning the request into a CORS-preflighted one,
+/// which closes the "simple request" CSRF loophole this is meant to shut.
+pub async fn require_json_content_type(
+    req: ServiceRequest,
+    next: Next<impl MessageBody + 'static>,
+) -> Result<ServiceResponse<impl MessageBody>, Error> {
+    if !is_json_content_type(&req) {
+        return Ok(req
+            .into_response(
+                HttpResponse::UnsupportedMediaType()
+                    .body("Content-Type must be application/json"),
+            )
+            .map_into_right_body());
+    }
+
+    Ok(next.call(req).await?.map_into_left_body())
+}
+
+/// The `/graphql` route, with [`require_json_content_type`] wrapped around
+/// `graphql_handler` so `main.rs` and the HTTP integration tests exercise the
+/// exact same guard.
+pub fn graphql_resource() -> impl HttpServiceFactory {
+    web::resource("/graphql")
+        .wrap(from_fn(require_json_content_type))
+        .route(web::post().to(graphql_handler))
 }
 
 /// Explicit allow-list + credentials, never `allow_any_origin()` — that

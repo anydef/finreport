@@ -30,6 +30,9 @@ pub enum AuthError {
     Hash(argon2::password_hash::Error),
     /// Any database error, passed through.
     Db(sea_orm::DbErr),
+    /// A `spawn_blocking` task (argon2 hashing/verification off the async
+    /// executor) panicked or was cancelled instead of returning.
+    TaskJoin(String),
 }
 
 impl fmt::Display for AuthError {
@@ -45,6 +48,7 @@ impl fmt::Display for AuthError {
             AuthError::SessionNotFound => write!(f, "session not found or expired"),
             AuthError::Hash(e) => write!(f, "password hashing error: {e}"),
             AuthError::Db(e) => write!(f, "database error: {e}"),
+            AuthError::TaskJoin(e) => write!(f, "blocking task failed: {e}"),
         }
     }
 }

@@ -1,44 +1,12 @@
-use actix_files::NamedFile;
 use actix_web::web;
-use actix_web::{get, Error, HttpResponse, Responder};
-use actix_web::{App, HttpServer};
+use actix_web::{App, HttpResponse, HttpServer};
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use dotenv::dotenv;
 use secrecy::ExposeSecret;
 use std::sync::Arc;
 use utils::settings::Settings;
 use webapp::db::seaql;
-use webapp::graphql::{create_schema, http::cors, http::graphql_handler};
-
-#[get("/")]
-async fn root() -> Result<NamedFile, Error> {
-    Ok(NamedFile::open("../assets/index.html")?)
-}
-
-#[get("/data")]
-async fn data() -> impl Responder {
-    match tokio::fs::read_to_string("../assets/data.json").await {
-        Ok(contents) => HttpResponse::Ok()
-            .insert_header(("Access-Control-Allow-Origin", "*"))
-            .insert_header(("Access-Control-Allow-Methods", "GET"))
-            .content_type("application/json")
-            .body(contents),
-        Err(_) => HttpResponse::NotFound().finish(),
-    }
-}
-
-#[get("/test-chart")]
-async fn test_chart() -> impl Responder {
-    tracing::debug!("serving test-chart.json");
-    match tokio::fs::read_to_string("../assets/test-chart.json").await {
-        Ok(contents) => HttpResponse::Ok()
-            .insert_header(("Access-Control-Allow-Origin", "*"))
-            .insert_header(("Access-Control-Allow-Methods", "GET"))
-            .content_type("application/json")
-            .body(contents),
-        Err(_) => HttpResponse::NotFound().finish(),
-    }
-}
+use webapp::graphql::{create_schema, http::cors, http::graphql_resource};
 
 async fn playground() -> HttpResponse {
     HttpResponse::Ok()
@@ -72,16 +40,22 @@ async fn main() -> std::io::Result<()> {
     let cors_settings = Arc::clone(&app_settings);
     let handler_settings = Arc::clone(&app_settings);
     HttpServer::new(move || {
-        App::new()
+        let app = App::new()
             .wrap(cors(&cors_settings))
             .app_data(web::Data::new(schema.clone()))
             .app_data(web::Data::new(Arc::clone(&conn)))
             .app_data(web::Data::new(Arc::clone(&handler_settings)))
-            .route("/graphql", web::post().to(graphql_handler))
-            .route("/playground", web::get().to(playground))
-            .service(root)
-            .service(data)
-            .service(test_chart)
+            .service(graphql_resource());
+
+        // `/playground` is unauthenticated and has no business being
+        // reachable from a release build — only wired up in debug builds
+        // (`cargo build`/`cargo run` without `--release`), never in the
+        // images actually deployed.
+        if cfg!(debug_assertions) {
+            app.route("/playground", web::get().to(playground))
+        } else {
+            app
+        }
     })
     .bind(("0.0.0.0", 8080))?
     .run()

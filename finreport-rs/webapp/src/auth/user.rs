@@ -12,7 +12,7 @@ use secrecy::SecretString;
 use uuid::Uuid;
 
 use super::error::AuthError;
-use super::password::{hash_password, verify_password};
+use super::password::{hash_password_async, verify_dummy_password_async, verify_password_async};
 
 /// The identity + account scope injected into the GraphQL request context
 /// (§4). `account_ids` comes from `user_account` in one query per request —
@@ -62,6 +62,11 @@ pub async fn load_authenticated_user(
 /// password" (no username enumeration), and
 /// [`AuthError::UserDisabled`] only once the password has actually matched —
 /// a disabled account does not leak whether the password was right.
+///
+/// An unknown username still runs a (dummy) Argon2id verify before
+/// returning, so the two "invalid credentials" branches cost the same CPU
+/// time — otherwise a request timer could distinguish "no such user" from
+/// "wrong password" even though both map to the same error (§4).
 pub async fn authenticate(
     db: &DatabaseConnection,
     username: &str,
@@ -71,10 +76,14 @@ pub async fn authenticate(
     let user = app_user::Entity::find()
         .filter(app_user::Column::Username.eq(&username))
         .one(db)
-        .await?
-        .ok_or(AuthError::InvalidCredentials)?;
+        .await?;
 
-    if !verify_password(password, &user.password_hash)? {
+    let Some(user) = user else {
+        verify_dummy_password_async(password.clone()).await;
+        return Err(AuthError::InvalidCredentials);
+    };
+
+    if !verify_password_async(password.clone(), user.password_hash.clone()).await? {
         return Err(AuthError::InvalidCredentials);
     }
     if user.disabled {
@@ -106,7 +115,7 @@ pub async fn create_user(
     let model = app_user::ActiveModel {
         id: Set(Uuid::new_v4()),
         username: Set(username),
-        password_hash: Set(hash_password(password)?),
+        password_hash: Set(hash_password_async(password.clone()).await?),
         display_name: Set(display_name.map(str::to_string)),
         disabled: Set(false),
         created_at: Set(Utc::now().fixed_offset()),
@@ -129,7 +138,7 @@ pub async fn set_password(
         .ok_or_else(|| AuthError::UnknownUser(username.clone()))?;
 
     let mut active: app_user::ActiveModel = user.into();
-    active.password_hash = Set(hash_password(password)?);
+    active.password_hash = Set(hash_password_async(password.clone()).await?);
     active.update(db).await?;
     Ok(())
 }
