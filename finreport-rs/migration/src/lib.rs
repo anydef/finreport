@@ -11,6 +11,8 @@ mod m20261101_000001_categories;
 mod m20261101_000002_labels;
 mod m20261101_000003_rules;
 mod m20261101_000004_counterparty_key;
+mod m20261201_000001_tags;
+mod m20261201_000002_insights;
 
 pub struct Migrator;
 
@@ -36,6 +38,12 @@ impl MigratorTrait for Migrator {
             Box::new(m20261101_000002_labels::Migration),
             Box::new(m20261101_000003_rules::Migration),
             Box::new(m20261101_000004_counterparty_key::Migration),
+            // Iteration 3 §2.3: tags + the recurring override column, then
+            // the detector's insights projection (independent of tags, but
+            // registered after so a fresh DB always has the override column
+            // before anything reads `transaction_user_label.recurring`).
+            Box::new(m20261201_000001_tags::Migration),
+            Box::new(m20261201_000002_insights::Migration),
         ]
     }
 }
