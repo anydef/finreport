@@ -195,3 +195,35 @@ edited at all.
   - Opening a transaction held for review should offer the same resolution
     actions as the review queue, so the queue becomes one entry point rather
     than a separate flow.
+
+## Dashboard transaction filters (next planned feature)
+The dashboard's transaction list gets the same filter controls `/transactions`
+already has, placed next to the list: **account(s), category(ies), tag(s),
+amount range, and flags**.
+
+- **Mostly already supported.** `TransactionFilter` accepts `accountIds`,
+  `categorySlugs` (OR-ed, descendants included), `tags` (AND-ed), `direction`,
+  `search`, and the flags `recurring`, `transfer`, `needsReview`,
+  `uncategorized` and `labelSources`. `/transactions` and the admin pages
+  already render controls for most of these (`CategoryFilter`, the tag filter,
+  the account select).
+- **The one backend gap: amount range.** Add `amountMin` / `amountMax`
+  (inclusive, either side optional) to `TransactionFilter` and to every
+  resolver that takes it, so the dashboard, `/transactions`, the cashflow
+  queries and the goal drill-down all honour it identically. Decide in spec
+  whether the bound applies to the signed amount or its magnitude — magnitude
+  is what a user means by "over €100", but signed is what "income above X"
+  needs; the likely answer is magnitude plus the existing `direction`.
+- **Open design question: what the filter narrows.** Today the dashboard's
+  Sankey/bar drill-down narrows *only the transaction list* and deliberately
+  leaves the charts scoped to the whole period. A filter panel next to the
+  list could do either. Narrowing the charts too makes the totals agree with
+  the list, which is probably what a user expects; keeping them whole
+  preserves the "see the period, drill into a slice" behaviour. Pick one
+  explicitly and say so in the UI, rather than leaving it ambiguous.
+- **Reuse, don't re-add:** extract the filter panel from `/transactions` into
+  one component used by both pages, so the two cannot drift. Filter state
+  stays in search params, as it does today, so a filtered view is linkable.
+- **Edge cases:** an empty result reads as "no transactions match" rather than
+  an empty chart; flags are tri-state (on / off / don't care), not checkboxes
+  that silently mean "off"; clearing all filters is one action.

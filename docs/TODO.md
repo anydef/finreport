@@ -21,12 +21,15 @@ See `docs/runbooks/iteration-1-deploy.md`.
 3. Transaction detail modal: edit category, splits, tags and the recurring
    flag from any list, via a shared `TransactionItem` + modal (see
    requirements). Frontend-only — the mutations already exist.
-4. Admin user management in the UI.
-5. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+4. Dashboard transaction filters: account, category, tag, amount, flags —
+   reusing `/transactions`' controls. Needs `amountMin`/`amountMax` added to
+   `TransactionFilter`; everything else already exists (see requirements).
+5. Admin user management in the UI.
+6. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
    decision about credential storage** (security-critical).
-6. C24, PayPal and Scalable Capital integrations. First research the access
+7. C24, PayPal and Scalable Capital integrations. First research the access
    method for each (API vs. CSV fallback).
-7. Sankey cash-flow views.
+8. Sankey cash-flow views.
 
 ## Open debt
 
