@@ -50,6 +50,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })?;
 
     let settings = Settings::from_env()?;
+    info!(group_id = %settings.projection_group, "[startup] projection group (offsets are scoped to it; change APP_projection_group to replay from the beginning)");
     let brokers = settings.require_kafka_brokers()?.to_string();
 
     info!("[startup] Connecting to database");
@@ -68,7 +69,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "[startup] checking projector is caught up before the labeler starts"
     );
     if let Err(lagging) =
-        check_projection_lag(&db, &brokers, settings.labeler_max_projection_lag).await
+        check_projection_lag(&db, &settings.projection_group, &brokers, settings.labeler_max_projection_lag).await
     {
         for lag in &lagging {
             error!(
@@ -98,6 +99,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let config = LabelerConfig {
         brokers,
+        group_id: settings.projection_group.clone(),
         batch_max_records: 200,
         batch_max_wait: Duration::from_millis(500),
         llm_max_requests_per_run: settings.llm_max_requests_per_run,

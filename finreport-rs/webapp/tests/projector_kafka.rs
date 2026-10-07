@@ -71,7 +71,7 @@ async fn replay_over_kafka_projects_the_whole_fixture_corpus() {
         );
     }
 
-    let mut config = ProjectorConfig::new(broker.bootstrap_servers().to_string());
+    let mut config = ProjectorConfig::new(broker.bootstrap_servers().to_string(), "test-group".to_string());
     config.until_caught_up = true;
     config.batch_max_wait = Duration::from_millis(200);
 
@@ -125,7 +125,7 @@ async fn replay_over_kafka_projects_the_whole_fixture_corpus() {
     // stored offsets already cover every published record, so `run` should
     // see no new messages before its watermarks are already satisfied and
     // return immediately with an unchanged read model.
-    let mut second_config = ProjectorConfig::new(broker.bootstrap_servers().to_string());
+    let mut second_config = ProjectorConfig::new(broker.bootstrap_servers().to_string(), "test-group".to_string());
     second_config.until_caught_up = true;
     second_config.batch_max_wait = Duration::from_millis(200);
     let conn2 = webapp::db::seaql::init_db(db.database_url())

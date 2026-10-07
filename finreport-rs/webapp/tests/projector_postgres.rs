@@ -23,9 +23,11 @@ use std::str::FromStr;
 use uuid::Uuid;
 use webapp::kafka::envelope::Envelope;
 use webapp::projection::mapper::MapperRegistry;
+use webapp::projection::offsets::load_offsets;
 use webapp::projection::upsert::offset_for;
 use webapp::projection::{process_batch, ConsumedRecord};
 
+const GROUP: &str = "default";
 const ACCOUNT_TOPIC: &str = "finreport.account";
 const BALANCE_TOPIC: &str = "finreport.account-balance";
 const TRANSACTION_TOPIC: &str = "finreport.transaction";
@@ -113,7 +115,7 @@ async fn replay_is_idempotent_and_reset_replay_reproduces_identical_state() {
     let registry = MapperRegistry::with_default_mappers();
     let fixtures = support::load_fixture_records();
 
-    let first = process_batch(db.connection(), &registry, None, &fixtures)
+    let first = process_batch(db.connection(), GROUP, &registry, None, &fixtures)
         .await
         .expect("first replay must apply cleanly");
 
@@ -122,7 +124,7 @@ async fn replay_is_idempotent_and_reset_replay_reproduces_identical_state() {
     let tx_count_1 = transaction::Entity::find().all(db.connection()).await.unwrap().len();
 
     // Second replay of the identical corpus: nothing should change.
-    let second = process_batch(db.connection(), &registry, None, &fixtures)
+    let second = process_batch(db.connection(), GROUP, &registry, None, &fixtures)
         .await
         .expect("second replay must also apply cleanly");
 
@@ -152,7 +154,7 @@ async fn replay_is_idempotent_and_reset_replay_reproduces_identical_state() {
     // Reset (as a fresh DB would be) and replay once more: must reproduce
     // exactly the same row counts.
     let fresh = support::TestPostgres::start().await;
-    let reset_replay = process_batch(fresh.connection(), &registry, None, &fixtures)
+    let reset_replay = process_batch(fresh.connection(), GROUP, &registry, None, &fixtures)
         .await
         .expect("reset+replay must apply cleanly");
     let account_count_3 = account::Entity::find().all(fresh.connection()).await.unwrap().len();
@@ -190,10 +192,10 @@ async fn source_precedence_wins_regardless_of_arrival_order() {
 
     // Order A: source arrives first, legacy-backfill arrives second — must
     // not overwrite the raw record.
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&source_record))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&source_record))
         .await
         .unwrap();
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&legacy_record))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&legacy_record))
         .await
         .unwrap();
 
@@ -211,10 +213,10 @@ async fn source_precedence_wins_regardless_of_arrival_order() {
     // Order B: legacy-backfill arrives first, source arrives second — source
     // must still win (it always wins, regardless of order).
     let db2 = support::TestPostgres::start().await;
-    process_batch(db2.connection(), &registry, None, std::slice::from_ref(&legacy_record))
+    process_batch(db2.connection(), GROUP, &registry, None, std::slice::from_ref(&legacy_record))
         .await
         .unwrap();
-    process_batch(db2.connection(), &registry, None, std::slice::from_ref(&source_record))
+    process_batch(db2.connection(), GROUP, &registry, None, std::slice::from_ref(&source_record))
         .await
         .unwrap();
 
@@ -256,10 +258,10 @@ async fn balance_precedence_also_prefers_source_regardless_of_order() {
         envelope: legacy_envelope,
     };
 
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&legacy_balance))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&legacy_balance))
         .await
         .unwrap();
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&source_balance))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&source_balance))
         .await
         .unwrap();
 
@@ -286,7 +288,7 @@ async fn stub_account_is_filled_in_by_a_later_real_account_record() {
         Some("ACC-STUB"),
         "source",
     );
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&tx_record))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&tx_record))
         .await
         .unwrap();
 
@@ -306,7 +308,7 @@ async fn stub_account_is_filled_in_by_a_later_real_account_record() {
         None,
         "source",
     );
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&account_record))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&account_record))
         .await
         .unwrap();
 
@@ -347,10 +349,10 @@ async fn first_writer_owns_the_account_link() {
         "source",
     );
 
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&first))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&first))
         .await
         .unwrap();
-    process_batch(db.connection(), &registry, None, std::slice::from_ref(&second))
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&second))
         .await
         .unwrap();
 
@@ -386,8 +388,8 @@ async fn mid_batch_crash_leaves_no_duplicates_or_gaps() {
     let first_half = &fixtures[..midpoint];
     let second_half = &fixtures[midpoint..];
 
-    process_batch(db.connection(), &registry, None, first_half).await.unwrap();
-    process_batch(db.connection(), &registry, None, second_half).await.unwrap();
+    process_batch(db.connection(), GROUP, &registry, None, first_half).await.unwrap();
+    process_batch(db.connection(), GROUP, &registry, None, second_half).await.unwrap();
 
     let split_tx_count = transaction::Entity::find().all(db.connection()).await.unwrap().len();
     let split_account_count = account::Entity::find().all(db.connection()).await.unwrap().len();
@@ -400,7 +402,7 @@ async fn mid_batch_crash_leaves_no_duplicates_or_gaps() {
             .map(|r| r.offset + 1)
             .max();
         if let Some(expected) = expected_next_offset {
-            let stored = offset_for(db.connection(), topic, 0).await.unwrap();
+            let stored = offset_for(db.connection(), GROUP, topic, 0).await.unwrap();
             assert_eq!(
                 stored,
                 Some(expected),
@@ -412,7 +414,7 @@ async fn mid_batch_crash_leaves_no_duplicates_or_gaps() {
     // One unbroken run against a fresh DB must land on exactly the same
     // counts — no dups from the split, no gaps either.
     let unbroken = support::TestPostgres::start().await;
-    process_batch(unbroken.connection(), &registry, None, &fixtures).await.unwrap();
+    process_batch(unbroken.connection(), GROUP, &registry, None, &fixtures).await.unwrap();
     let unbroken_tx_count = transaction::Entity::find().all(unbroken.connection()).await.unwrap().len();
     let unbroken_account_count = account::Entity::find().all(unbroken.connection()).await.unwrap().len();
     let unbroken_balance_count = account_balance::Entity::find()
@@ -457,7 +459,7 @@ async fn default_owner_is_linked_when_configured() {
         None,
         "source",
     );
-    process_batch(db.connection(), &registry, Some(owner_id), std::slice::from_ref(&account_record))
+    process_batch(db.connection(), GROUP, &registry, Some(owner_id), std::slice::from_ref(&account_record))
         .await
         .unwrap();
 
@@ -504,7 +506,7 @@ async fn unlinking_the_default_owner_is_not_undone_by_a_later_record() {
     // First record creates the account row and links the default owner.
     let account_record =
         record(ACCOUNT_TOPIC, 0, "ACC-OWNER-2", account_payload("ACC-OWNER-2"), None, "source");
-    process_batch(db.connection(), &registry, Some(owner_id), std::slice::from_ref(&account_record))
+    process_batch(db.connection(), GROUP, &registry, Some(owner_id), std::slice::from_ref(&account_record))
         .await
         .unwrap();
 
@@ -535,7 +537,7 @@ async fn unlinking_the_default_owner_is_not_undone_by_a_later_record() {
         Some("ACC-OWNER-2"),
         "source",
     );
-    process_batch(db.connection(), &registry, Some(owner_id), std::slice::from_ref(&balance_record))
+    process_batch(db.connection(), GROUP, &registry, Some(owner_id), std::slice::from_ref(&balance_record))
         .await
         .unwrap();
 
@@ -547,4 +549,48 @@ async fn unlinking_the_default_owner_is_not_undone_by_a_later_record() {
         relinked.is_none(),
         "a manual unlink must not be undone by a later record for the same account"
     );
+}
+
+/// Offsets are scoped by group id: what group A committed is invisible to
+/// group B, so B starts from nothing (== `Offset::Beginning`) and replaying
+/// the same records under B rebuilds its offsets without disturbing A's.
+#[tokio::test]
+async fn offsets_are_scoped_by_group_so_a_new_group_replays_from_the_beginning() {
+    let db = support::TestPostgres::start().await;
+    let registry = MapperRegistry::with_default_mappers();
+    let fixtures = support::load_fixture_records();
+
+    process_batch(db.connection(), "group-a", &registry, None, &fixtures).await.unwrap();
+
+    let a = load_offsets(db.connection(), "group-a").await.unwrap();
+    assert!(!a.is_empty(), "group A committed offsets");
+    assert!(
+        load_offsets(db.connection(), "group-b").await.unwrap().is_empty(),
+        "group B must see none of group A's offsets"
+    );
+
+    // Group B replays the whole log (idempotent upserts) and lands on the
+    // same positions, while A's rows are untouched.
+    process_batch(db.connection(), "group-b", &registry, None, &fixtures).await.unwrap();
+    assert_eq!(load_offsets(db.connection(), "group-b").await.unwrap(), a);
+    assert_eq!(load_offsets(db.connection(), "group-a").await.unwrap(), a);
+}
+
+/// The labeler's `@labeler`-suffixed keys and the group id are orthogonal:
+/// the same topic key can hold independent positions in different groups.
+#[tokio::test]
+async fn labeler_suffixed_keys_are_scoped_by_group_too() {
+    use webapp::projection::offsets::commit_offset;
+
+    let db = support::TestPostgres::start().await;
+    let key = "finreport.transaction@labeler";
+
+    commit_offset(db.connection(), "group-a", key, 0, 10, Utc::now()).await.unwrap();
+    commit_offset(db.connection(), "group-b", key, 0, 3, Utc::now()).await.unwrap();
+    commit_offset(db.connection(), "group-a", key, 0, 12, Utc::now()).await.unwrap();
+
+    let a = load_offsets(db.connection(), "group-a").await.unwrap();
+    let b = load_offsets(db.connection(), "group-b").await.unwrap();
+    assert_eq!(a.get(&(key.to_string(), 0)), Some(&12));
+    assert_eq!(b.get(&(key.to_string(), 0)), Some(&3));
 }

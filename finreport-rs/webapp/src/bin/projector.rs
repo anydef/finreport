@@ -1,7 +1,7 @@
 //! Consumes the ingest topics and projects them into the read model (§2.3).
 //!
 //! No consumer group: `assign()` resumes from the `next_offset`s stored in
-//! `projection_offset`, which `process_batch` commits alongside each batch's
+//! `projection_offset` (scoped by `APP_projection_group`), which `process_batch` commits alongside each batch's
 //! rows in the same transaction. `--until-caught-up` exits once every ingest
 //! topic's high watermark has been reached, instead of polling forever —
 //! mainly useful for CI/replay-and-verify runs.
@@ -47,6 +47,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })?;
 
     let settings = Settings::from_env()?;
+    info!(group_id = %settings.projection_group, "[startup] projection group (offsets are scoped to it; change APP_projection_group to replay from the beginning)");
     let brokers = settings.require_kafka_brokers()?.to_string();
 
     info!("[startup] Connecting to database");
@@ -81,7 +82,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
-    let mut config = ProjectorConfig::new(brokers);
+    let mut config = ProjectorConfig::new(brokers, settings.projection_group.clone());
     config.default_owner = default_owner;
     config.until_caught_up = until_caught_up;
 

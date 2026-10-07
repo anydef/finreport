@@ -262,7 +262,7 @@ pub async fn link_default_owner(
     Ok(())
 }
 
-/// Finds the stored `next_offset` for the account/account-balance/transaction
+/// Finds the stored `next_offset` under `group_id` for the account/account-balance/transaction
 /// topics the projector tracks, keyed by `(topic, partition)` — exposed here
 /// too (alongside `offsets::load_offsets`) so `upsert.rs`'s integration tests
 /// can assert on committed offsets without importing the whole `offsets`
@@ -273,6 +273,7 @@ pub async fn link_default_owner(
 #[cfg(any(test, feature = "integration"))]
 pub async fn offset_for(
     db: &impl ConnectionTrait,
+    group_id: &str,
     topic: &str,
     partition: i32,
 ) -> Result<Option<i64>, DbErr> {
@@ -280,6 +281,7 @@ pub async fn offset_for(
     use sea_orm::QueryFilter;
 
     let row = projection_offset::Entity::find()
+        .filter(projection_offset::Column::GroupId.eq(group_id))
         .filter(projection_offset::Column::Topic.eq(topic))
         .filter(projection_offset::Column::Partition.eq(partition))
         .one(db)
