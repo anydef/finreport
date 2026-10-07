@@ -4,7 +4,6 @@
 	let { children }: { children: import('svelte').Snippet } = $props();
 
 	const subTabs = [
-		{ label: 'Review', href: '/admin/review' },
 		{ label: 'Rules', href: '/admin/rules' },
 		{ label: 'Categories', href: '/admin/categories' }
 	];

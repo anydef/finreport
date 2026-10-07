@@ -11,7 +11,7 @@
 	 * - `label`/`id`: for an associated `<label>`.
 	 */
 	import Tree from './Tree.svelte';
-	import { activeCategories, buildCategoryTree } from '$lib/categoryTree';
+	import { activeCategories, buildCategoryTree, filterCategoryTree } from '$lib/categoryTree';
 	import type { Category } from '$lib/graphql/types';
 
 	interface Props {
@@ -25,6 +25,8 @@
 	let { categories, value, onchange, label, id }: Props = $props();
 
 	const tree = $derived(buildCategoryTree(activeCategories(categories)));
+	let query = $state('');
+	const visibleTree = $derived(filterCategoryTree(tree, query));
 	const selected = $derived(value ? [value] : []);
 </script>
 
@@ -35,6 +37,17 @@
 	{#if tree.length === 0}
 		<p class="text-sm text-slate-400">No categories available.</p>
 	{:else}
-		<Tree nodes={tree} {selected} mode="single" onToggle={onchange} />
+		<input
+			type="search"
+			bind:value={query}
+			placeholder="Search categories"
+			aria-label={label ? `Search ${label}` : 'Search categories'}
+			class="focus-visible:outline-brand mb-2 w-full rounded-md border border-slate-300 px-2 py-1 text-sm focus-visible:outline focus-visible:outline-2"
+		/>
+		{#if visibleTree.length === 0}
+			<p class="text-sm text-slate-400">No categories match your search.</p>
+		{:else}
+			<Tree nodes={visibleTree} {selected} mode="single" onToggle={onchange} />
+		{/if}
 	{/if}
 </div>

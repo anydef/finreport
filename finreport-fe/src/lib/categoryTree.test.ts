@@ -4,6 +4,7 @@ import {
 	buildCategoryTree,
 	descendantSlugs,
 	expandSelectedSlugs,
+	filterCategoryTree,
 	flattenCategoryTree
 } from './categoryTree';
 import type { Category } from './graphql/types';
@@ -96,5 +97,42 @@ describe('expandSelectedSlugs', () => {
 describe('activeCategories', () => {
 	it('excludes archived categories', () => {
 		expect(activeCategories(categories).map((c) => c.slug)).not.toContain('old');
+	});
+});
+
+describe('filterCategoryTree', () => {
+	const forest = buildCategoryTree(activeCategories(categories));
+	const slugs = (f: ReturnType<typeof buildCategoryTree>) =>
+		flattenCategoryTree(f).map((n) => n.slug);
+
+	it('returns everything for an empty or blank query', () => {
+		expect(filterCategoryTree(forest, '')).toBe(forest);
+		expect(filterCategoryTree(forest, '   ')).toBe(forest);
+	});
+
+	it('matches directly on name', () => {
+		expect(slugs(filterCategoryTree(forest, 'transport'))).toEqual(['transportation']);
+	});
+
+	it('matches on slug', () => {
+		expect(slugs(filterCategoryTree(forest, 'groceries.bakery'))).toEqual([
+			'food',
+			'food.groceries',
+			'food.groceries.bakery'
+		]);
+	});
+
+	it('keeps ancestors of a matching descendant and drops unrelated branches', () => {
+		const result = filterCategoryTree(forest, 'bakery');
+		expect(slugs(result)).toEqual(['food', 'food.groceries', 'food.groceries.bakery']);
+		expect(slugs(result)).not.toContain('transportation');
+	});
+
+	it('is case-insensitive', () => {
+		expect(slugs(filterCategoryTree(forest, 'BAKERY'))).toContain('food.groceries.bakery');
+	});
+
+	it('returns an empty forest when nothing matches', () => {
+		expect(filterCategoryTree(forest, 'zzz')).toEqual([]);
 	});
 });

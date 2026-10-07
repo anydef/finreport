@@ -93,3 +93,23 @@ export function expandSelectedSlugs(selected: string[], categories: Category[]):
 export function activeCategories(categories: Category[]): Category[] {
 	return categories.filter((c) => !c.archived);
 }
+
+/**
+ * Filter a forest by a free-text query, case-insensitively against each
+ * node's `name` and `slug`. A node is kept if it matches directly or has a
+ * matching descendant, so every match keeps its ancestors; a directly
+ * matching node keeps its full subtree. Blank query returns the forest as-is.
+ */
+export function filterCategoryTree(forest: CategoryTreeNode[], query: string): CategoryTreeNode[] {
+	const needle = query.trim().toLowerCase();
+	if (!needle) return forest;
+	const walk = (list: CategoryTreeNode[]): CategoryTreeNode[] =>
+		list.flatMap((node) => {
+			const direct =
+				node.name.toLowerCase().includes(needle) || node.slug.toLowerCase().includes(needle);
+			if (direct) return [node];
+			const children = walk(node.children);
+			return children.length > 0 ? [{ ...node, children }] : [];
+		});
+	return walk(forest);
+}

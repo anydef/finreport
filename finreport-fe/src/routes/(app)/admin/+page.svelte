@@ -1,1 +1,1 @@
-<!-- Redirects to /admin/review via +page.server.ts's load(); this never renders. -->
+<!-- Redirects to /admin/rules via +page.server.ts's load(); this never renders. -->

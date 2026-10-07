@@ -2,7 +2,7 @@
  * Admin-review-owned barrel over the frozen `queries.ts` (WP0-owned; §10
  * shared-file protocol). The review queue and split editor only need a
  * subset of the iteration-2 operations — re-exporting here keeps
- * `routes/(app)/admin/review/**` and the review-queue components importing
+ * `routes/(app)/review/**` and the review-queue components importing
  * from a file this package owns, without duplicating (and risking drift
  * from) the operation strings themselves.
  */

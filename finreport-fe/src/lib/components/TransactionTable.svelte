@@ -50,7 +50,7 @@
 								{/if}
 								{#if needsReviewBadge(tx.label)}
 									{@const pill = needsReviewBadge(tx.label)!}
-									<a href="/admin/review" class="inline-block">
+									<a href="/review" class="inline-block">
 										<Badge text={pill.text} variant={pill.variant} />
 									</a>
 								{/if}
