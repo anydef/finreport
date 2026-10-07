@@ -21,11 +21,16 @@ use testcontainers_modules::kafka::apache::{Kafka, KAFKA_PORT};
 use webapp::kafka::envelope::{
     TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_IMPORT_WATERMARK, TOPIC_TRANSACTION,
 };
+use webapp::kafka::labeling::{
+    TOPIC_CATEGORY, TOPIC_LABEL_REQUEST, TOPIC_LLM_CACHE, TOPIC_RULE, TOPIC_TRANSACTION_LABEL,
+    TOPIC_USER_LABEL,
+};
 
-/// A running Kafka broker with the four finreport topics already created
-/// (same names as `terraform/kafka/main.tf` and the local Redpanda
-/// topic-init, §7 — partitions/cleanup policy don't matter for a test broker
-/// that is thrown away afterwards).
+/// A running Kafka broker with the four original finreport topics plus
+/// WP3's six §2.2 labeling topics already created (same names as
+/// `terraform/kafka/main.tf` and the local Redpanda topic-init, §7 —
+/// partitions/cleanup policy don't matter for a test broker that is thrown
+/// away afterwards).
 pub struct TestKafka {
     _container: ContainerAsync<Kafka>,
     bootstrap_servers: String,
@@ -70,6 +75,12 @@ impl TestKafka {
             TOPIC_ACCOUNT_BALANCE,
             TOPIC_TRANSACTION,
             TOPIC_IMPORT_WATERMARK,
+            TOPIC_CATEGORY,
+            TOPIC_TRANSACTION_LABEL,
+            TOPIC_LLM_CACHE,
+            TOPIC_USER_LABEL,
+            TOPIC_RULE,
+            TOPIC_LABEL_REQUEST,
         ]
         .map(|name| NewTopic::new(name, 1, TopicReplication::Fixed(1)));
 

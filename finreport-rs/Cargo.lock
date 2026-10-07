@@ -5221,6 +5221,7 @@ dependencies = [
  "argon2",
  "async-graphql",
  "async-graphql-actix-web",
+ "async-trait",
  "base64 0.22.1",
  "categorizer",
  "chrono",
