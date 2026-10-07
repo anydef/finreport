@@ -67,9 +67,55 @@ resource "opnsense_unbound_host_override" "finreport_be" {
   server   = "192.168.1.1"
 }
 
+resource "opnsense_haproxy_server" "finreport_fe" {
+  name        = "FINREPORT_FE_server"
+  description = "${local.tag} Server for finreport-fe at ${var.app_fe_host}:${var.app_fe_port}"
+  address     = var.app_fe_host
+  port        = tostring(var.app_fe_port)
+}
+
+resource "opnsense_haproxy_backend" "finreport_fe" {
+  name           = "FINREPORT_FE_backend"
+  description    = "${local.tag} Backend pool for finreport-fe (finreport.lab.anydef.de)"
+  linked_servers = opnsense_haproxy_server.finreport_fe.id
+}
+
+resource "opnsense_haproxy_acl" "finreport_fe" {
+  name        = "FINREPORT_FE_host_acl"
+  description = "${local.tag} Match requests for finreport.lab.anydef.de"
+  expression  = "hdr"
+  value       = "finreport.lab.anydef.de"
+}
+
+resource "opnsense_haproxy_action" "finreport_fe" {
+  name        = "FINREPORT_FE_rule"
+  description = "${local.tag} Route finreport.lab.anydef.de to FINREPORT_FE_backend"
+  type        = "use_backend"
+  test_type   = "if"
+  linked_acls = opnsense_haproxy_acl.finreport_fe.id
+  operator    = "and"
+  use_backend = opnsense_haproxy_backend.finreport_fe.id
+}
+
+resource "opnsense_haproxy_frontend_action" "finreport_fe" {
+  frontend_id = data.opnsense_haproxy_frontend.https.id
+  action_id   = opnsense_haproxy_action.finreport_fe.id
+  prepend     = true
+}
+
+resource "opnsense_unbound_host_override" "finreport_fe" {
+  # `finreport` (bare, no `-fe` suffix) is the user-facing name at
+  # finreport.lab.anydef.de — finreport-be keeps its own `-be` host for the
+  # API, distinct origins the CORS allow-list already depends on.
+  hostname = "finreport"
+  domain   = "lab.anydef.de"
+  server   = "192.168.1.1"
+}
+
 resource "opnsense_haproxy_reconfigure" "apply" {
   depends_on = [
     opnsense_haproxy_frontend_action.finreport_be,
+    opnsense_haproxy_frontend_action.finreport_fe,
   ]
 }
 

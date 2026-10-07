@@ -258,6 +258,19 @@ The frontend can point at either backend, selected by Vite `--mode`:
 
 Add more profiles by dropping a new `finreport-fe/.env.<mode>` file (setting `PUBLIC_GRAPHQL_URL`), a matching `dev:<mode>` script in `finreport-fe/package.json`, and a `dev-fe-<mode>` justfile wrapper.
 
+## Deployed frontend
+
+`finreport-fe` (adapter-node) is deployed alongside the backend by the same
+`docker-compose.yml` / `terraform/main.tf`, served at
+**https://finreport.lab.anydef.de** (`192.168.100.50:3000` on `services-lan`,
+OPNsense/HAProxy + unbound, same convention as `finreport-be.lab.anydef.de`).
+`finreport-fe/Dockerfile` builds it; `GRAPHQL_URL` is read via
+`$env/dynamic/private` (`graphqlBackend.ts`) so the compose service points it
+at `http://192.168.100.45:8080/graphql` **at runtime**, not at build time —
+dev profiles above are unaffected. CI builds/pushes it with `just build-fe`
+(`.gitea/workflows/build-deploy.yaml`), a sibling to the backend's `just
+build`.
+
 ## Multi-agent development
 
 This repo is being prepped to support multiple Claude Code agents working in parallel. See `docs/multi-agent-setup.md` for the running log of what's been set up and why.

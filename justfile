@@ -35,6 +35,16 @@ local_env := 'APP_database_url="${APP_database_url:-postgresql://finreport:${POS
 
 import? '.build/build-tools/common.just'
 
+# Build and push the frontend image, same script as the backend's `build`
+# recipe (from common.just) but pointed at finreport-fe/Dockerfile instead —
+# a second recipe rather than reusing `build` because that recipe's
+# `docker_image_name`/`build_context` are fixed to the backend image at
+# import time.
+build-fe:
+    DOCKER_IMAGE_NAME=finreport-fe \
+    BUILD_CONTEXT={{justfile_directory()}}/finreport-fe \
+    {{build_tools_dir}}/build-and-push.sh
+
 [private]
 default: _bootstrap
     @just --list
