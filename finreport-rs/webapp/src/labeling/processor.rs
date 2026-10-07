@@ -154,6 +154,13 @@ impl LabelingOps {
 /// The consume loop owns two guards, deliberately: one for sweeps (backlog
 /// drain) and one for live records, so a backlog drain can never starve
 /// newly arriving transactions of LLM calls, nor the reverse.
+/// How many candidates one sweep pulls when `APP_llm_max_requests_per_run`
+/// is 0 (unlimited). The budget doubles as the sweep's candidate limit, so an
+/// uncapped budget still needs a batch size — large enough to drain a real
+/// backlog in one sweep, bounded so a sweep cannot load an unbounded result
+/// set into memory.
+const UNLIMITED_SWEEP_CANDIDATES: u64 = 10_000;
+
 pub struct CostGuard {
     max: u32,
     remaining: AtomicU32,
@@ -162,13 +169,24 @@ pub struct CostGuard {
 }
 
 impl CostGuard {
+    /// `max_requests == 0` means **unlimited**: no cap on LLM calls. That is
+    /// the default, so categorising a backlog is not throttled; set
+    /// `APP_llm_max_requests_per_run` to a positive number to cap spend.
     pub fn new(max_requests: u32) -> Self {
         Self { max: max_requests, remaining: AtomicU32::new(max_requests), denied: AtomicU32::new(0) }
+    }
+
+    /// True when this guard imposes no cap at all.
+    fn unlimited(&self) -> bool {
+        self.max == 0
     }
 
     /// Reserves one LLM call, returning `false` (without consuming anything)
     /// once the budget is gone.
     pub fn try_consume(&self) -> bool {
+        if self.unlimited() {
+            return true;
+        }
         self.remaining
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| {
                 if n == 0 {
@@ -181,7 +199,7 @@ impl CostGuard {
     }
 
     pub fn is_exhausted(&self) -> bool {
-        self.remaining.load(Ordering::SeqCst) == 0
+        !self.unlimited() && self.remaining.load(Ordering::SeqCst) == 0
     }
 
     /// Starts a fresh budget window: full allowance, refusal count cleared.
@@ -984,6 +1002,17 @@ pub struct LabelerConfig {
     pub sweep_interval: Option<Duration>,
 }
 
+/// How many unlabelled transactions one sweep considers. The LLM budget
+/// doubles as this limit, but 0 means *unlimited budget*, not "no candidates"
+/// — so an uncapped budget falls back to a bounded batch size.
+fn sweep_candidate_limit(llm_max_requests_per_run: u32) -> u64 {
+    if llm_max_requests_per_run == 0 {
+        UNLIMITED_SWEEP_CANDIDATES
+    } else {
+        u64::from(llm_max_requests_per_run)
+    }
+}
+
 /// `APP_labeler_sweep_interval_secs` -> the loop's interval: `0` disables, and
 /// `--until-caught-up` never sweeps on a timer (it exits instead).
 pub fn effective_sweep_interval(secs: u64, until_caught_up: bool) -> Option<Duration> {
@@ -1090,7 +1119,7 @@ pub async fn run(
         &config.prompt_version,
         config.llm_min_confidence,
         &sweep_guard,
-        u64::from(config.llm_max_requests_per_run),
+        sweep_candidate_limit(config.llm_max_requests_per_run),
     )
     .await?;
     // Detection (iteration 3 §3): a post-batch pass "invoked after the rule
@@ -1132,7 +1161,7 @@ pub async fn run(
                 &config.prompt_version,
                 config.llm_min_confidence,
                 &sweep_guard,
-                u64::from(config.llm_max_requests_per_run),
+                sweep_candidate_limit(config.llm_max_requests_per_run),
             )
             .await?;
             crate::detect::processor::run_detection_pass(&db, &publisher).await?;
@@ -1154,7 +1183,7 @@ pub async fn run(
                     &config.prompt_version,
                     config.llm_min_confidence,
                     &sweep_guard,
-                    u64::from(config.llm_max_requests_per_run),
+                    sweep_candidate_limit(config.llm_max_requests_per_run),
                 )
                 .await?;
                 crate::detect::processor::run_detection_pass(&db, &publisher).await?;
@@ -1591,6 +1620,25 @@ mod tests {
         new.rule_id = Some(rule_id);
 
         assert!(!should_publish(Some(&stored), &new));
+    }
+
+    #[test]
+    fn a_zero_budget_means_unlimited_not_zero() {
+        let guard = CostGuard::new(0);
+        for _ in 0..10_000 {
+            assert!(guard.try_consume(), "an unlimited guard must never refuse a call");
+        }
+        assert!(!guard.is_exhausted(), "an unlimited guard is never exhausted");
+        assert_eq!(guard.denied(), 0);
+    }
+
+    #[test]
+    fn an_unlimited_budget_still_bounds_the_sweep_batch() {
+        // The budget doubles as the sweep's candidate limit, so 0 must not
+        // mean "fetch no candidates" — that would stop the sweep entirely.
+        assert_eq!(sweep_candidate_limit(0), UNLIMITED_SWEEP_CANDIDATES);
+        assert_eq!(sweep_candidate_limit(200), 200);
+        assert_eq!(sweep_candidate_limit(1), 1);
     }
 
     #[test]

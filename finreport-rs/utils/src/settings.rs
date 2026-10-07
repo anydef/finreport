@@ -584,15 +584,18 @@ fn default_llm_min_confidence() -> f32 {
 
 /// `APP_llm_max_requests_per_run` default (§2.3, §4).
 fn default_llm_max_requests_per_run() -> u32 {
-    200
+    // 0 = unlimited. A cap exists to bound spend on a paid provider, but it
+    // also throttles categorising an existing backlog, which is the common
+    // case here — so the default is no cap and a cap is opted into.
+    0
 }
 
 /// `APP_labeler_sweep_interval_secs` default: hourly. New transactions are
 /// labelled live as they arrive; the sweep only mops up what a spent budget
 /// or a provider error left behind, so it can be slow. With the default
-/// 200-call budget an hour caps paid LLM traffic at ~200 calls/hour for the
-/// sweep (plus the same again for live records) while still draining even a
-/// multi-thousand backlog in a day or two.
+/// uncapped budget nothing is throttled; an opted-in cap applies per
+/// sweep. With the default uncapped budget one sweep drains the whole backlog
+/// it can see, so the interval only governs how soon leftovers are retried.
 fn default_labeler_sweep_interval_secs() -> u64 {
     3600
 }
