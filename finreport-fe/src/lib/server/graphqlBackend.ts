@@ -333,8 +333,6 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 				},
 				setCookies: []
 			};
-		case 'Categories':
-			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
 		case 'SetTransactionCategory':
 			return {
 				status: 200,
