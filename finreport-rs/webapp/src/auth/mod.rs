@@ -13,6 +13,7 @@
 //! - [`user`] — [`AuthenticatedUser`] loading + `user-admin`'s
 //!   create/link/unlink operations.
 
+pub mod bootstrap;
 pub mod error;
 pub mod password;
 pub mod session;
@@ -21,6 +22,7 @@ mod session_integration_tests;
 pub mod token;
 pub mod user;
 
+pub use bootstrap::bootstrap_admin;
 pub use error::AuthError;
 pub use password::{hash_password, verify_password};
 pub use session::{create_session, prune_expired_sessions, revoke_session, verify_session};

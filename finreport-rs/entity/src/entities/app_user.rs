@@ -15,6 +15,7 @@ pub struct Model {
     pub display_name: Option<String>,
     pub disabled: bool,
     pub created_at: DateTimeWithTimeZone,
+    pub is_admin: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

@@ -242,6 +242,7 @@ type Me {
 	id: UUID!
 	username: String!
 	displayName: String
+	isAdmin: Boolean!
 }
 
 type Mutation {
@@ -253,62 +254,16 @@ type Mutation {
 	"""
 	login(input: LoginInput!): Me!
 	logout: Boolean!
-	"""
-	TODO(WP4): publish a `user-label` record setting the category,
-	publish-then-upsert (§2.1), return the fresh row.
-	"""
 	setTransactionCategory(transactionId: UUID!, categorySlug: String!): Transaction!
-	"""
-	TODO(WP4): publish a `user-label` tombstone/clear for this
-	transaction (§2.6).
-	"""
 	clearTransactionCategory(transactionId: UUID!): Transaction!
-	"""
-	TODO(WP4): publish a `user-label` split record; validate the sum
-	against the transaction's amount (`extensions.code =
-	"SPLIT_SUM_MISMATCH"` on mismatch, §5).
-	"""
 	splitTransaction(transactionId: UUID!, parts: [SplitPartInput!]!): Transaction!
-	"""
-	TODO(WP4): publish a `user-label` record clearing the split (§2.6).
-	"""
 	unsplitTransaction(transactionId: UUID!): Transaction!
-	"""
-	TODO(WP4): validate depth/slug-shape/parent-kind/parent-archived
-	(§5), publish a `category` record, return the fresh row.
-	"""
 	createCategory(input: CategoryInput!): Category!
-	"""
-	TODO(WP4): publish a renamed `category` record; `slug` is immutable
-	(§3), only `name` changes.
-	"""
 	renameCategory(id: UUID!, name: String!): Category!
-	"""
-	TODO(WP4): publish a `category` record with `archived = true`;
-	existing labels keep rendering it (§5).
-	"""
 	archiveCategory(id: UUID!): Category!
-	"""
-	TODO(WP4): publish a new user-origin `rule` record (§2.7).
-	"""
 	createRule(input: RuleInput!): Rule!
-	"""
-	TODO(WP4): publish an updated `rule` record; marks `userTouched`
-	(§2.8) so the learner never overwrites it.
-	"""
 	updateRule(id: UUID!, input: RuleInput!): Rule!
-	"""
-	TODO(WP4): publish a `rule` record with the new `state`; a revoke
-	makes the labeler re-resolve every transaction it had labelled
-	(§2.3/§2.7).
-	"""
 	setRuleState(id: UUID!, state: RuleState!): Rule!
-	"""
-	TODO(WP4): publish one `label-request` keyed `reapply:<rule-id>` and
-	return the number of transactions it will cover (§2.3/§5) —
-	re-resolution is asynchronous, this mutation never calls the
-	labeler directly.
-	"""
 	reapplyRule(id: UUID!): Int!
 }
 
@@ -333,28 +288,18 @@ type Query {
 	cashflowSummary(filter: TransactionFilter!, granularity: Granularity!): CashflowSummary!
 	cashflowGraph(filter: TransactionFilter!, grouping: CashflowGraphInput): CashflowGraph!
 	"""
-	TODO(WP4): list categories from the `category` projection (§3),
-	filtered to non-archived unless `includeArchived`.
+	`categories` (§5): the shared tree is not tenant-scoped (§3's
+	`owner_user_id` is reserved, always `NULL` this iteration) — any
+	authenticated user sees the same catalog.
 	"""
 	categories(includeArchived: Boolean! = false): [Category!]!
-	"""
-	TODO(WP4): roll up `transaction_label`/`transaction_split` by
-	category to `level`, honouring §5's split/transfer/share semantics.
-	"""
 	categoryBreakdown(filter: TransactionFilter!, level: Int! = 1, kind: CategoryKind): CategoryBreakdown!
 	"""
-	TODO(WP4): list rules from the `rule` projection (§2.7), optionally
-	filtered by `state`.
+	`rules` (§5): like `categories`, not tenant-scoped — rules apply to
+	every account the labeler sees.
 	"""
 	rules(state: RuleState): [Rule!]!
-	"""
-	TODO(WP4): rules auto-approved recently (§2.8), newest first.
-	"""
 	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
-	"""
-	TODO(WP4): `status = NEEDS_REVIEW` transactions + `state = IN_REVIEW`
-	rules (§5).
-	"""
 	reviewQueue(page: PageInput): ReviewQueue!
 }
 

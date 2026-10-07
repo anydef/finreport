@@ -123,3 +123,12 @@ A goal is a threshold that the user sets against a **scope** of transactions and
   - The current period is shown as "in progress", not as a failure.
   - Refunds within the scope reduce spending.
   - Transactions held for review are shown separately as "pending" until they're resolved.
+
+## Admin user management via UI (iteration 4+)
+Scheduled for a future iteration, after the admin bootstrap (`app_user.is_admin`, `webapp::auth::bootstrap`) lands the single automatically-managed `admin` account. Today, creating/disabling additional users and (re)linking accounts is `user-admin`-only (CLI, `webapp/src/bin/user_admin.rs`).
+
+- An `isAdmin` GraphQL session (`Me.isAdmin`) can see an admin-only area to:
+  - Create/disable additional users (not just the bootstrap-managed `admin`).
+  - Reset a user's password.
+  - Assign/unassign account ownership (`user_account` links) per user, equivalent to `user-admin link`/`unlink` but from the UI.
+- Out of scope until then: no GraphQL mutations for any of the above exist yet, and the frontend has no admin area — `user-admin` remains the only way to manage users beyond the bootstrap-managed `admin`.

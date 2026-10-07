@@ -69,4 +69,11 @@ jobs:
       - name: Deploy to Portainer
         env:
           _OP_LOADED: "1"
+          # The "Load secrets" step above only exports values resolved from
+          # .env.tpl, not its own OP_CONNECT_HOST/OP_CONNECT_TOKEN inputs —
+          # the onepassword Terraform provider (terraform/provider.tf) needs
+          # those directly to read/write the HomeLab vault, so they're
+          # re-exported here.
+          OP_CONNECT_HOST: ${{ vars.OP_CONNECT_HOST }}
+          OP_CONNECT_TOKEN: ${{ secrets.OP_CONNECT_TOKEN }}
         run: echo yes | just deploy

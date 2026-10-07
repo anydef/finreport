@@ -78,7 +78,8 @@ function mockMe(event: RequestEvent): unknown {
 				? {
 						id: '00000000-0000-0000-0000-000000000001',
 						username: MOCK_USERNAME,
-						displayName: 'Demo User'
+						displayName: 'Demo User',
+						isAdmin: false
 					}
 				: null
 		}
@@ -104,7 +105,8 @@ function mockLogin(
 				login: {
 					id: '00000000-0000-0000-0000-000000000001',
 					username: input.username,
-					displayName: 'Demo User'
+					displayName: 'Demo User',
+					isAdmin: false
 				}
 			}
 		},

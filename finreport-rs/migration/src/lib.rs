@@ -11,6 +11,7 @@ mod m20261101_000001_categories;
 mod m20261101_000002_labels;
 mod m20261101_000003_rules;
 mod m20261101_000004_counterparty_key;
+mod m20261101_000005_app_user_is_admin;
 
 pub struct Migrator;
 
@@ -36,6 +37,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20261101_000002_labels::Migration),
             Box::new(m20261101_000003_rules::Migration),
             Box::new(m20261101_000004_counterparty_key::Migration),
+            // Admin bootstrap (webapp::auth::bootstrap): marks the
+            // bootstrap-managed admin user so it's distinguishable from
+            // ordinary `user-admin create-user` accounts.
+            Box::new(m20261101_000005_app_user_is_admin::Migration),
         ]
     }
 }

@@ -249,6 +249,15 @@ The backend can run locally against either Postgres:
 
   **Be deliberate with this one.** `webapp`'s startup (`db/seaql.rs::init_db`) runs `Migrator::up()` unconditionally — pointing the local binary at tower means any migration that exists locally but isn't deployed yet gets applied to the live database the moment you run it. Don't run `dev-be-tower` with unreviewed/WIP migrations sitting in `finreport-rs/migration/`.
 
+## Admin bootstrap
+
+`webapp`'s startup (`webapp::auth::bootstrap`, called from `main.rs` right after the DB connection is made) creates/maintains a single admin `app_user` whenever `APP_admin_password` is set: creates it if missing, re-hashes the password if it no longer verifies (so a Terraform-driven rotation takes effect on the next restart), promotes an existing non-admin row with the same username, and links every account to it — same effect as `user-admin link --all`, but automatic and idempotent across restarts.
+
+- `APP_admin_username` (default `admin`) / `APP_admin_password` (`SecretString`, `Option` — unset disables the whole bootstrap) are read through `utils::settings::Settings` like everything else.
+- Local dev (`just dev-be`/`dev-demo`) never sets `APP_admin_password`, so no admin user is created there — `just seed-user` still seeds the `dev` demo user as before.
+- In production the password is generated once by Terraform (`random_password.admin`, `terraform/main.tf`) and written to the 1Password item **"finreport admin"** (HomeLab vault, via `onepassword_item.finreport_admin`); it reaches the container as `APP_admin_password` through the same `extra_env` mechanism as `POSTGRES_PASSWORD`. Rotating it is just `terraform apply` (regenerates the random password and the 1Password item) followed by a `finreport-be` restart.
+- The `onepassword` Terraform provider reads 1Password Connect credentials from the environment, not from a hardcoded value: `OP_CONNECT_HOST`/`OP_CONNECT_TOKEN` (or `OP_SERVICE_ACCOUNT_TOKEN`). CI's "Load secrets" step already receives these as action inputs (`.gitea/workflows/build-deploy.yaml`) and the "Deploy to Portainer" step re-exports them into its own `env:` block so `terraform` sees them too. A local `just deploy` gets them for free from `.build/build-tools/deploy-portainer.sh`/`deploy-terraform.sh`, which already `op read 'op://HomeLab/1password-connect/...'` whenever `OP_CONNECT_HOST` isn't already set and neither `GITHUB_ACTIONS` nor `GITEA_ACTIONS` is — no extra setup needed beyond having `op` signed in.
+
 ## Frontend backend-target profiles
 
 The frontend can point at either backend, selected by Vite `--mode`:

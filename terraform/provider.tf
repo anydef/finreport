@@ -18,6 +18,14 @@ terraform {
       source  = "Mongey/kafka"
       version = "~> 0.13"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
+    onepassword = {
+      source  = "1Password/onepassword"
+      version = "~> 2.1"
+    }
   }
 
   backend "s3" {
@@ -78,3 +86,11 @@ provider "kafka" {
   bootstrap_servers = var.kafka_bootstrap_servers
   tls_enabled       = false
 }
+
+# No credentials here on purpose: the 1Password provider reads
+# OP_CONNECT_HOST/OP_CONNECT_TOKEN (or OP_SERVICE_ACCOUNT_TOKEN) from the
+# environment itself. CI's "Load secrets" step (.gitea/workflows/build-deploy.yaml)
+# already exports these for the job; a local `just deploy` gets them the same
+# way `deploy-terraform.sh`/`deploy-portainer.sh` already do for every other
+# `op`-backed value (see CLAUDE.md).
+provider "onepassword" {}

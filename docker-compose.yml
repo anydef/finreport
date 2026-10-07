@@ -38,6 +38,12 @@ services:
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
+      # Admin bootstrap (webapp::auth::bootstrap): creates/rotates the
+      # `admin` user and links every account to it on every startup.
+      # Sourced from 1Password via terraform (random_password.admin +
+      # onepassword_item.finreport_admin) — never set locally, so `just
+      # dev-be`/`dev-demo` never bootstrap an admin user.
+      APP_admin_password: ${APP_admin_password:-}
       # CORS allow-list for the SvelteKit frontend's same-origin proxy
       # (`finreport-fe/src/lib/server/graphqlBackend.ts` forwards the
       # browser's own `Origin` header verbatim) — an empty list rejects every
@@ -167,6 +173,11 @@ services:
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
+      # `admin` is created by finreport-be's startup bootstrap
+      # (webapp::auth::bootstrap) before this projector ever runs, so every
+      # newly projected account links to it automatically (§4), no manual
+      # `user-admin link --all` needed.
+      APP_projector_default_owner: admin
       # Same reasoning as finreport-be above: migrations are an explicit
       # runbook step (`finreport-be-migrate`), not an implicit side effect of
       # a container restart.

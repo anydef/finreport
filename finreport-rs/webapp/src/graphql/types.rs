@@ -33,6 +33,7 @@ pub struct Me {
     pub id: Uuid,
     pub username: String,
     pub display_name: Option<String>,
+    pub is_admin: bool,
 }
 
 // ---------------------------------------------------------------------------
