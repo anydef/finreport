@@ -623,7 +623,7 @@
         "origin": "seed"
       },
       {
-        "id": "048061eb-f44e-59e8-99f3-86a7d16b79d8",
+        "id": "fe4503c6-d43a-54cc-88d9-264776f55a05",
         "slug": "entertainment.subscriptions",
         "name": "Subscriptions",
         "kind": "EXPENSE",
@@ -741,6 +741,36 @@
         "depth": 2,
         "archived": true,
         "origin": "user"
+      },
+      {
+        "id": "467a4fec-d8e2-5e38-b5fd-08f6877cd9cc",
+        "slug": "housing.rent",
+        "name": "Rent",
+        "kind": "EXPENSE",
+        "parentId": "ceb51bd3-ff89-519e-9ad8-61064e637f20",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "fbd2b7e5-7c09-5021-9a8c-0753e05bca98",
+        "slug": "other",
+        "name": "Other",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "2b38634e-c189-55e7-8d5e-2f4f002d1e0f",
+        "slug": "other.cash",
+        "name": "Cash withdrawal",
+        "kind": "EXPENSE",
+        "parentId": "fbd2b7e5-7c09-5021-9a8c-0753e05bca98",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
       }
     ]
   }

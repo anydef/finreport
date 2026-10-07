@@ -1,5 +1,5 @@
 {
-  "query": "query Transactions($filter: TransactionFilter, $page: PageInput) {\n  transactions(filter: $filter, page: $page) {\n    items {\n      id\n      accountId\n      source\n      externalId\n      bookingDate\n      valutaDate\n      bookingStatus\n      amount\n      currency\n      counterpartyName\n      counterpartyIban\n      description\n      transactionType\n    }\n    totalCount\n    limit\n    offset\n  }\n}",
+  "query": "query Transactions($filter: TransactionFilter, $page: PageInput) {\n  transactions(filter: $filter, page: $page) {\n    items {\n      id\n      accountId\n      source\n      externalId\n      bookingDate\n      valutaDate\n      bookingStatus\n      amount\n      currency\n      counterpartyName\n      counterpartyIban\n      description\n      transactionType\n      label {\n        category {\n          id\n          slug\n          name\n          kind\n        }\n        source\n        confidence\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n      }\n      splits {\n        index\n        amount\n        category {\n          id\n          slug\n          name\n          kind\n        }\n      }\n    }\n    totalCount\n    limit\n    offset\n  }\n}",
   "variables": {
     "filter": {
       "accountIds": [
@@ -29,7 +29,9 @@
           "counterpartyName": "ACME GmbH",
           "counterpartyIban": null,
           "description": "Gehalt",
-          "transactionType": "Überweisungsgutschrift"
+          "transactionType": "\u00dcberweisungsgutschrift",
+          "label": null,
+          "splits": []
         },
         {
           "id": "28c22a97-bb87-5656-bbfb-9e2137ac51e0",
@@ -44,7 +46,22 @@
           "counterpartyName": "Hausverwaltung Mustermann",
           "counterpartyIban": "DE02500105170123456789",
           "description": "Miete",
-          "transactionType": "Lastschrift"
+          "transactionType": "Lastschrift",
+          "label": {
+            "category": {
+              "id": "467a4fec-d8e2-5e38-b5fd-08f6877cd9cc",
+              "slug": "housing.rent",
+              "name": "Rent",
+              "kind": "EXPENSE"
+            },
+            "source": "USER",
+            "confidence": null,
+            "status": "RESOLVED",
+            "reviewReason": null,
+            "proposedCategoryPath": null,
+            "reasoning": null
+          },
+          "splits": []
         },
         {
           "id": "936fcf84-237d-5ed6-96e9-8c0bf7458a64",
@@ -59,10 +76,80 @@
           "counterpartyName": null,
           "counterpartyIban": null,
           "description": "Bargeldauszahlung",
-          "transactionType": "Barauszahlung"
+          "transactionType": "Barauszahlung",
+          "label": {
+            "category": {
+              "id": "2b38634e-c189-55e7-8d5e-2f4f002d1e0f",
+              "slug": "other.cash",
+              "name": "Cash withdrawal",
+              "kind": "EXPENSE"
+            },
+            "source": "RULE",
+            "confidence": 0.95,
+            "status": "RESOLVED",
+            "reviewReason": null,
+            "proposedCategoryPath": null,
+            "reasoning": null
+          },
+          "splits": []
+        },
+        {
+          "id": "6a9c1d2e-4b3f-5a6d-8c7e-9f0a1b2c3d41",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-02-SPOTIFY",
+          "bookingDate": "2024-02-05",
+          "valutaDate": "2024-02-05",
+          "bookingStatus": "BOOKED",
+          "amount": "-9.99",
+          "currency": "EUR",
+          "counterpartyName": "Spotify",
+          "counterpartyIban": null,
+          "description": "Spotify Premium",
+          "transactionType": "Lastschrift",
+          "label": {
+            "category": {
+              "id": "fe4503c6-d43a-54cc-88d9-264776f55a05",
+              "slug": "entertainment.subscriptions",
+              "name": "Subscriptions",
+              "kind": "EXPENSE"
+            },
+            "source": "LLM_CACHE",
+            "confidence": 0.88,
+            "status": "RESOLVED",
+            "reviewReason": null,
+            "proposedCategoryPath": null,
+            "reasoning": null
+          },
+          "splits": []
+        },
+        {
+          "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-02-AMAZON",
+          "bookingDate": "2024-02-10",
+          "valutaDate": "2024-02-10",
+          "bookingStatus": "BOOKED",
+          "amount": "-49.99",
+          "currency": "EUR",
+          "counterpartyName": "Amazon",
+          "counterpartyIban": null,
+          "description": "Online purchase",
+          "transactionType": "Kartenzahlung",
+          "label": {
+            "category": null,
+            "source": "LLM",
+            "confidence": 0.6,
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories"
+          },
+          "splits": []
         }
       ],
-      "totalCount": 3,
+      "totalCount": 5,
       "limit": 50,
       "offset": 0
     }

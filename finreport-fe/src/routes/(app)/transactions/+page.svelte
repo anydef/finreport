@@ -5,6 +5,7 @@
 	import Field from '$lib/components/Field.svelte';
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import CategoryFilter from '$lib/components/CategoryFilter.svelte';
 	import { PERIOD_PRESETS, type PeriodPresetId } from '$lib/period';
 	import type { PageData } from './$types';
 
@@ -13,11 +14,17 @@
 	let preset = $state(data.preset);
 	let accountId = $state(data.accountId ?? '');
 	let search = $state(data.search ?? '');
+	let categorySlugs = $state(data.categorySlugs);
+	let uncategorized = $state(data.uncategorized);
+	let needsReview = $state(data.needsReview);
 
 	$effect(() => {
 		preset = data.preset;
 		accountId = data.accountId ?? '';
 		search = data.search ?? '';
+		categorySlugs = data.categorySlugs;
+		uncategorized = data.uncategorized;
+		needsReview = data.needsReview;
 	});
 
 	function applyFilters() {
@@ -25,6 +32,9 @@
 		if (preset !== 'this-month') params.set('preset', preset as PeriodPresetId);
 		if (accountId) params.set('accountId', accountId);
 		if (search) params.set('search', search);
+		if (categorySlugs.length) params.set('categorySlugs', categorySlugs.join(','));
+		if (uncategorized) params.set('uncategorized', 'true');
+		if (needsReview) params.set('needsReview', 'true');
 		goto(`${page.url.pathname}?${params.toString()}`, { keepFocus: true, noScroll: true });
 	}
 
@@ -84,6 +94,16 @@
 				/>
 			</Field>
 		</form>
+	</Card>
+
+	<Card title="Filter by category">
+		<CategoryFilter
+			categories={data.categories}
+			bind:selectedSlugs={categorySlugs}
+			bind:uncategorized
+			bind:needsReview
+			onchange={applyFilters}
+		/>
 	</Card>
 
 	{#if data.error}

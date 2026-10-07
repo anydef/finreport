@@ -20,6 +20,7 @@ import cashflowGraphTruncatedMock from '$lib/graphql/mocks/cashflow-graph-trunca
 import transactionsMock from '$lib/graphql/mocks/transactions.json';
 import categoriesMock from '$lib/graphql/mocks/categories.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
+import cashflowGraphCategoryMock from '$lib/graphql/mocks/cashflow-graph-category.json';
 import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
 import clearTransactionCategoryMock from '$lib/graphql/mocks/clear-transaction-category.json';
@@ -116,8 +117,16 @@ function mockLogout(): GraphqlBackendResult {
 	return { status: 200, body: { data: { logout: true } }, setCookies: [setCookie] };
 }
 
-/** Pick the richer net/deficit cashflow-graph fixture unless the request is scoped to exactly one account. */
+/**
+ * Pick a cashflow-graph fixture: the `CATEGORY` dimension (§5/§6 WP5) gets
+ * its own fixture regardless of account scoping, otherwise the richer
+ * net/deficit fixture unless the request is scoped to exactly one account.
+ */
 function mockCashflowGraph(variables: Record<string, unknown> | undefined): unknown {
+	const dimensions = (variables?.grouping as { dimensions?: unknown[] } | undefined)?.dimensions;
+	if (Array.isArray(dimensions) && dimensions.includes('CATEGORY')) {
+		return cashflowGraphCategoryMock.data;
+	}
 	const accountIds = (variables?.filter as { accountIds?: unknown[] } | undefined)?.accountIds;
 	if (Array.isArray(accountIds) && accountIds.length === 1) {
 		return cashflowGraphTruncatedMock.data;
@@ -304,6 +313,8 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		// return NOT_IMPLEMENTED until their owning WP lands.
 		case 'CategoryBreakdown':
 			return { status: 200, body: { data: categoryBreakdownMock.data }, setCookies: [] };
+		case 'Categories':
+			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
 		case 'ReviewQueue':
 			return { status: 200, body: { data: reviewQueueMock.data }, setCookies: [] };
 		case 'Rules':

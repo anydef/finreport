@@ -145,6 +145,14 @@ export function drilldownFilterForNode(node: ShapedSankeyNode): Partial<Transact
 	if (node.refType === 'account' && node.refId) {
 		return { accountIds: [node.refId] };
 	}
+	// `CATEGORY`-dimension nodes drill down through `categorySlugs` (§5); an
+	// `Uncategorized` synthetic node (no `refId`) narrows via `uncategorized`
+	// instead so it doesn't silently fall through to the generic branches
+	// below.
+	if (node.kind === 'CATEGORY') {
+		if (node.refType === 'category' && node.refId) return { categorySlugs: [node.refId] };
+		return { uncategorized: true };
+	}
 	if (node.kind === 'OTHER' || node.kind === 'NET' || node.kind === 'DEFICIT') {
 		return null;
 	}
