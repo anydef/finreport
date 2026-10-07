@@ -9,7 +9,7 @@
 #![allow(dead_code)]
 
 use chrono::Utc;
-use entity::entities::{account, app_user, transaction, user_account};
+use entity::entities::{account, app_user, category, transaction, transaction_label, user_account};
 use rust_decimal::Decimal;
 use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
 use secrecy::SecretString;
@@ -178,4 +178,69 @@ pub async fn seed_transaction(
     .await
     .expect("insert transaction");
     tx_id
+}
+
+/// Inserts one root-level (no `parent_id`) `category` row with
+/// `depth = 1`, `origin = "seed"`, un-archived. `slug_prefix` is suffixed
+/// with a fresh random id (like [`seed_user`]'s username) so reruns against
+/// a not-yet-cleaned-up database don't collide on `category.slug`'s unique
+/// index; returns the actual stored slug alongside the id.
+pub async fn seed_category(
+    db: &DatabaseConnection,
+    slug_prefix: &str,
+    name: &str,
+    kind: &str,
+) -> (Uuid, String) {
+    let id = Uuid::new_v4();
+    let slug = format!("{slug_prefix}_{}", id.simple());
+    category::ActiveModel {
+        id: Set(id),
+        slug: Set(slug.clone()),
+        parent_id: Set(None),
+        name: Set(name.to_string()),
+        kind: Set(kind.to_string()),
+        depth: Set(1),
+        sort_order: Set(0),
+        archived: Set(false),
+        origin: Set("seed".to_string()),
+        owner_user_id: Set(None),
+        revision: Set(Utc::now().into()),
+    }
+    .insert(db)
+    .await
+    .expect("insert category");
+    (id, slug)
+}
+
+/// Inserts a `transaction_label` row directly, as if WP3's projector had
+/// already applied a `transaction-label` event for it (§3) — the WP3
+/// projections this module reads from aren't implemented on this branch,
+/// so tests seed them directly per the task's instructions.
+pub async fn seed_transaction_label(
+    db: &DatabaseConnection,
+    transaction_id: Uuid,
+    category_id: Option<Uuid>,
+    label_source: &str,
+    status: &str,
+) -> Uuid {
+    transaction_label::ActiveModel {
+        transaction_id: Set(transaction_id),
+        category_id: Set(category_id),
+        label_source: Set(label_source.to_string()),
+        rule_id: Set(None),
+        confidence: Set(None),
+        status: Set(status.to_string()),
+        review_reason: Set(None),
+        proposed_category_path: Set(None),
+        provider: Set(None),
+        model: Set(None),
+        prompt_version: Set(None),
+        fingerprint: Set(None),
+        reasoning: Set(None),
+        labeled_at: Set(Utc::now().into()),
+    }
+    .insert(db)
+    .await
+    .expect("insert transaction_label");
+    transaction_id
 }

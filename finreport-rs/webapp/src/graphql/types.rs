@@ -10,6 +10,7 @@ use crate::graphql::scalars::{Date, Decimal, Json, Uuid};
 /// that isn't implemented yet. `extensions.code = "NOT_IMPLEMENTED"` so a
 /// client (or an integration test) can tell this apart from a real failure;
 /// `wp` names the work package that owns the real implementation.
+#[allow(dead_code)]
 pub(crate) fn not_implemented(field: &str, wp: u8) -> async_graphql::Error {
     async_graphql::Error::new(format!(
         "{field} is not implemented yet (WP{wp}, see docs/specs/iteration-2.md)"
@@ -88,16 +89,24 @@ pub struct Transaction {
 /// loaded with the rest of `Transaction`'s fields, since they live in
 /// separate projections (§3) that may not exist for every transaction (a
 /// `null` label means "not labelled yet", distinct from `needsReview`).
-///
-/// TODO(WP4): implement both against `transaction_label`/`transaction_split`.
 #[ComplexObject]
 impl Transaction {
-    async fn label(&self) -> async_graphql::Result<Option<TransactionLabel>> {
-        Err(not_implemented("Transaction.label", 4))
+    async fn label(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<Option<TransactionLabel>> {
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        let cache = ctx.data::<crate::graphql::labels::LabelSplitCache>().ok();
+        crate::graphql::labels::label_for(db.as_ref(), cache, self.id.0).await
     }
 
-    async fn splits(&self) -> async_graphql::Result<Vec<TransactionSplit>> {
-        Err(not_implemented("Transaction.splits", 4))
+    async fn splits(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<Vec<TransactionSplit>> {
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        let cache = ctx.data::<crate::graphql::labels::LabelSplitCache>().ok();
+        crate::graphql::labels::splits_for(db.as_ref(), cache, self.id.0).await
     }
 }
 
@@ -298,7 +307,7 @@ pub struct CashflowGraph {
 // Categories, labels, rules (iteration 2, §5)
 // ---------------------------------------------------------------------------
 
-#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Hash, Debug)]
 pub enum CategoryKind {
     Income,
     Expense,
@@ -340,7 +349,7 @@ pub enum RuleOrigin {
     Learned,
 }
 
-#[derive(SimpleObject)]
+#[derive(SimpleObject, Clone)]
 pub struct Category {
     pub id: Uuid,
     pub slug: String,
@@ -373,7 +382,7 @@ pub struct TransactionSplit {
     pub category: Category,
 }
 
-#[derive(SimpleObject)]
+#[derive(SimpleObject, Clone)]
 pub struct Rule {
     pub id: Uuid,
     pub name: String,

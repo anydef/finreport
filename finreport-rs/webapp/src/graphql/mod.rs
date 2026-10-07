@@ -1,18 +1,26 @@
 mod accounts;
+mod breakdown;
 mod cashflow;
+mod categories;
 pub mod cookies;
 pub mod current_user;
+mod events;
 pub mod http;
+mod labels;
 mod loaders;
 mod mutations;
 mod queries;
+mod review_queue;
+mod rules;
 pub mod scalars;
 pub mod transactions;
 pub mod types;
 
 use crate::auth::AuthenticatedUser;
+use crate::graphql::labels::LabelSplitCache;
 use crate::graphql::mutations::MutationRoot;
 use crate::graphql::queries::QueryRoot;
+use crate::kafka::producer::EventPublisher;
 use async_graphql::{EmptySubscription, Schema};
 use sea_orm::DatabaseConnection;
 use std::sync::Arc;
@@ -32,24 +40,46 @@ pub struct RawSessionToken {
 }
 
 pub fn create_schema(conn: Arc<DatabaseConnection>, settings: Arc<Settings>) -> AppSchema {
-    Schema::build(QueryRoot, MutationRoot, EmptySubscription)
+    // Best-effort (§2.6/WP4 TODO note): an unreachable broker at startup
+    // must not stop `dev-be` from serving read-only queries, only the
+    // mutations that publish events — those fail per-request instead with
+    // `KAFKA_UNAVAILABLE` (`events::kafka_unavailable_error`).
+    let publisher: Option<Arc<EventPublisher>> = settings
+        .kafka_brokers
+        .as_deref()
+        .and_then(|brokers| match EventPublisher::connect(brokers) {
+            Ok(publisher) => Some(Arc::new(publisher)),
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to connect to Kafka; mutations will fail with KAFKA_UNAVAILABLE");
+                None
+            }
+        });
+
+    let mut builder = Schema::build(QueryRoot, MutationRoot, EmptySubscription)
         // `DateTime` (§5) isn't reachable from any field yet — nothing in
         // this iteration's resolvers returns a raw timestamp — so it needs
         // an explicit registration or the exporter would silently drop it
         // from the SDL.
         .register_output_type::<scalars::DateTime>()
         .data(conn)
-        .data(settings)
-        .finish()
+        .data(settings);
+    if let Some(publisher) = publisher {
+        builder = builder.data(publisher);
+    }
+    builder.finish()
 }
 
-/// Per-request context data: the already-resolved auth user (or `None`) and
-/// the raw session token, both computed once per request from the `Cookie`
-/// header by the actix handler before `schema.execute()` (§4).
+/// Per-request context data: the already-resolved auth user (or `None`), the
+/// raw session token (both computed once per request from the `Cookie`
+/// header by the actix handler before `schema.execute()`, §4), and a fresh
+/// `LabelSplitCache` for `Transaction.label`/`.splits` prefetching (§9).
 pub fn request_with_auth(
     request: async_graphql::Request,
     user: Option<AuthenticatedUser>,
     raw_token: RawSessionToken,
 ) -> async_graphql::Request {
-    request.data(user).data(raw_token)
+    request
+        .data(user)
+        .data(raw_token)
+        .data(LabelSplitCache::default())
 }

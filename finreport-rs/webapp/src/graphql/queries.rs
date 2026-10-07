@@ -9,12 +9,13 @@ use std::sync::Arc;
 
 use crate::graphql::cashflow;
 use crate::graphql::current_user::{current_user, scoped_account_ids, AuthenticatedUser};
+use crate::graphql::labels::LabelSplitCache;
 use crate::graphql::types::{
-    not_implemented, Account, CashflowGraph, CashflowGraphInput, CashflowSummary, Category,
+    Account, CashflowGraph, CashflowGraphInput, CashflowSummary, Category,
     CategoryBreakdown, CategoryKind, Granularity, Me, PageInput, ReviewQueue, Rule, RuleState,
     TransactionFilter, TransactionPage,
 };
-use crate::graphql::{accounts, transactions};
+use crate::graphql::{accounts, breakdown, categories, review_queue, rules, transactions};
 
 pub struct QueryRoot;
 
@@ -63,7 +64,16 @@ impl QueryRoot {
             .as_ref()
             .map(|ids| ids.iter().map(|id| id.0).collect());
         let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
-        transactions::fetch_transactions(db, &scoped_ids, &filter, page.limit, page.offset).await
+        let page = transactions::fetch_transactions(db, &scoped_ids, &filter, page.limit, page.offset).await?;
+
+        // Prime the per-request label/split cache for this page's rows
+        // (§9 N+1 avoidance) — `Transaction.label`/`.splits` then read from
+        // memory instead of issuing one query per row.
+        if let Ok(cache) = ctx.data::<LabelSplitCache>() {
+            let ids: Vec<uuid::Uuid> = page.items.iter().map(|t| t.id.0).collect();
+            crate::graphql::labels::prefetch(db, cache, &ids).await?;
+        }
+        Ok(page)
     }
 
     async fn cashflow_summary(
@@ -98,55 +108,60 @@ impl QueryRoot {
         cashflow::fetch_graph(db, &scoped_ids, &filter, grouping).await
     }
 
-    /// TODO(WP4): list categories from the `category` projection (§3),
-    /// filtered to non-archived unless `includeArchived`.
+    /// `categories` (§5): the shared tree is not tenant-scoped (§3's
+    /// `owner_user_id` is reserved, always `NULL` this iteration) — any
+    /// authenticated user sees the same catalog.
     async fn categories(
         &self,
-        _ctx: &Context<'_>,
+        ctx: &Context<'_>,
         #[graphql(default = false)] include_archived: bool,
     ) -> GqlResult<Vec<Category>> {
-        let _ = include_archived;
-        Err(not_implemented("Query.categories", 4))
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        categories::fetch_categories(db, include_archived).await
     }
 
-    /// TODO(WP4): roll up `transaction_label`/`transaction_split` by
-    /// category to `level`, honouring §5's split/transfer/share semantics.
     async fn category_breakdown(
         &self,
-        _ctx: &Context<'_>,
+        ctx: &Context<'_>,
         filter: TransactionFilter,
         #[graphql(default = 1)] level: i32,
         kind: Option<CategoryKind>,
     ) -> GqlResult<CategoryBreakdown> {
-        let _ = (filter, level, kind);
-        Err(not_implemented("Query.categoryBreakdown", 4))
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let requested_ids: Option<Vec<uuid::Uuid>> = filter
+            .account_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0).collect());
+        let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
+        breakdown::fetch_breakdown(db, &scoped_ids, &filter, level, kind).await
     }
 
-    /// TODO(WP4): list rules from the `rule` projection (§2.7), optionally
-    /// filtered by `state`.
-    async fn rules(&self, _ctx: &Context<'_>, state: Option<RuleState>) -> GqlResult<Vec<Rule>> {
-        let _ = state;
-        Err(not_implemented("Query.rules", 4))
+    /// `rules` (§5): like `categories`, not tenant-scoped — rules apply to
+    /// every account the labeler sees.
+    async fn rules(&self, ctx: &Context<'_>, state: Option<RuleState>) -> GqlResult<Vec<Rule>> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        rules::fetch_rules(db, state).await
     }
 
-    /// TODO(WP4): rules auto-approved recently (§2.8), newest first.
     async fn recently_auto_approved_rules(
         &self,
-        _ctx: &Context<'_>,
+        ctx: &Context<'_>,
         #[graphql(default = 20)] limit: i32,
     ) -> GqlResult<Vec<Rule>> {
-        let _ = limit;
-        Err(not_implemented("Query.recentlyAutoApprovedRules", 4))
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        rules::fetch_recently_auto_approved(db, limit).await
     }
 
-    /// TODO(WP4): `status = NEEDS_REVIEW` transactions + `state = IN_REVIEW`
-    /// rules (§5).
-    async fn review_queue(
-        &self,
-        _ctx: &Context<'_>,
-        page: Option<PageInput>,
-    ) -> GqlResult<ReviewQueue> {
-        let _ = page;
-        Err(not_implemented("Query.reviewQueue", 4))
+    async fn review_queue(&self, ctx: &Context<'_>, page: Option<PageInput>) -> GqlResult<ReviewQueue> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let page = page.unwrap_or_default();
+        let scoped_ids = scoped_account_ids(user, None)?;
+        let cache = ctx.data::<LabelSplitCache>()?;
+        review_queue::fetch_review_queue(db, cache, &scoped_ids, page.limit, page.offset).await
     }
 }
