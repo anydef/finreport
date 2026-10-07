@@ -90,66 +90,113 @@ second source of truth one iteration after removing the first, and it makes
 | Topic | Key | Cleanup | Payload |
 |---|---|---|---|
 | `finreport.transaction-label` | `<source>:<external_id>` | compact | labeler output (§2.4) |
+| `finreport.llm-cache` | `fingerprint` | compact | one LLM answer (§2.4) |
 | `finreport.user-label` | `<source>:<external_id>` | compact | override + splits (§2.6) |
 | `finreport.rule` | rule UUID | compact | rule state (§2.7) |
 | `finreport.category` | category UUID | compact | category node (§3) |
+| `finreport.label-request` | `<source>:<external_id>` or `reapply:<rule-id>` | delete, 7 d | a re-resolution request (§2.3) |
 
-All four are **ours**, not a bank's — so unlike the ingest topics they carry our
+These are **ours**, not a bank's — so unlike the ingest topics they carry our
 own JSON, versioned by a `schema_version` field in the payload as well as the
 header. The iteration-1 envelope headers still apply; `origin` is `labeler` for
-label records and `user` for the three human-edited topics. A tombstone (null
-value) means "this entity no longer exists" and projects to a delete.
-Partitions 1, RF 1, `prevent_destroy`, as the ingest topics. Keys are the
-transaction's `(source, external_id)` identity, not the projected UUID, so the
-topics are readable with `rpk` without a Postgres lookup and survive a rebuild
-that has not run yet.
+label and cache records and `user` for the human-edited topics. A tombstone
+(null value) means "this entity no longer exists" and projects to a delete.
+Partitions 1, RF 1, `prevent_destroy`, as the ingest topics (except
+`label-request`, which is a work queue, not state: time-retained and
+replaceable). Keys are the transaction's `(source, external_id)` identity, not
+the projected UUID, so the topics are readable with `rpk` without a Postgres
+lookup and survive a rebuild that has not run yet.
+
+**`finreport.llm-cache` is a separate topic on purpose.** The obvious saving —
+derive the cache from `transaction-label` records whose source is `llm` — does
+not survive compaction: `transaction-label` is compacted *per transaction*, so
+the moment a rule or a user override replaces an LLM label the only copy of that
+LLM answer is deleted and a rebuild would have to pay for it again. Keyed by
+`fingerprint` and compacted, the cache topic keeps exactly one record per
+distinct question, independent of what later happened to any transaction.
 
 ### 2.3 The labeler
 
 New binary `webapp/src/bin/labeler.rs` (`[[bin]] name = "labeler"`), modelled
 on `projector.rs`:
 
-- Consumes `finreport.transaction` only. No consumer group; offsets in
-  `projection_offset` under topic key `finreport.transaction@labeler` (a
-  distinct row from the projector's, same table, same transactional commit).
-- Each record is normalized through the **existing**
+- Consumes **four** topics: `finreport.transaction` (new/changed transactions),
+  `finreport.user-label` and `finreport.rule` (an override, a clear, a rule
+  edit, an approval or a revocation all change what some transactions should
+  resolve to) and `finreport.label-request` (explicit re-resolution requests).
+  No consumer group; offsets in `projection_offset` under topic keys suffixed
+  `@labeler`, distinct rows from the projector's, same table, same transactional
+  commit.
+- A `transaction` record resolves that transaction. A `user-label` record
+  resolves the transaction it names. A `rule` record resolves every transaction
+  the rule matches now **or** matched before the edit (`transaction_label.rule_id
+  = <id>`) — which is how a revoke makes labels fall back and how an edit
+  applies retroactively, idempotently, skipping anything with a user override or
+  a split. A `label-request` record resolves the transaction, or the rule's
+  affected set, that it names.
+- Each ingest record is normalized through the **existing**
   `projection::mapper::MapperRegistry` into a `TransactionRecord`. The labeler
   contains no per-source code and never touches `raw_payload`.
 - Resolution (§2.5) reads rules, overrides, the LLM cache and the category tree
-  from the **projection** (they are projections of Kafka; see the lag note
-  below), then publishes a label record — **only if it differs from the label
-  already on record for that key**. That compare-before-publish is what makes a
-  replay from offset 0 produce zero new records and zero LLM calls.
+  from the **projection**, then publishes a label record under the
+  compare-before-publish rule below.
 - Batch: same 500-record / 500 ms window, same retry/exit policy and the same
   poison-record skip as the projector.
 - `--until-caught-up` exits at the end of the log (used by `dev-demo` and the
   integration tests), otherwise it tails.
-- `--reapply <rule-id|--all>` re-resolves the transactions a rule affects
-  without consuming new records: the retroactive rule application of
-  `docs/requirements.md`. Idempotent, and it skips any transaction with a user
-  override or a split.
 
-**Projection lag is accepted.** The labeler may briefly see a rule before it is
-active in the projection; the label then resolves to the next source down and is
-corrected on the next `--reapply` or the next time the transaction is seen. No
-data is lost, and compare-before-publish keeps the correction to one record.
+**Compare-before-publish, stated precisely.** The labeler publishes a new label
+only when the **inputs** changed, not when the recomputed record differs
+textually from the stored one. Concretely: if a stored label has
+`label_source ∈ {llm, llm-cache}` and its `fingerprint` still matches the
+recomputed fingerprint, and no override, split or higher-precedence rule now
+applies, the stored label is **kept as-is and nothing is published**. Without
+that rule a replay would recompute every LLM label as `llm-cache`, see a
+difference in `label_source`, and rewrite the whole topic. Only a genuine change
+— a new override, a rule that now wins or no longer applies, a changed
+fingerprint (new provider/model/prompt version), a category that moved — causes
+a publish.
+
+**Precondition: the projector is caught up.** The labeler resolves against the
+projection, so running it ahead of the projector means resolving against a label
+table that does not yet contain the labels just published — which would re-call
+the LLM for transactions that already have an answer. The labeler therefore
+**refuses to start** (exit non-zero, clear message) while
+`projection_offset` for the three ingest topics plus `transaction-label` and
+`llm-cache` trails the broker's high watermark by more than
+`APP_labeler_max_projection_lag` (default 0) records. Deployed, projector and
+labeler are separate always-on services and this is a startup check; locally,
+`dev-demo` alternates them (§7).
+
+**The sweep, not "retried next run".** Offsets advance past records whose
+transaction could not be labelled (provider error, timeout, cost guard), so
+"the next run picks them up" is not true of a log-driven loop. Instead, at the
+start of every run and after every caught-up pass, the labeler **sweeps**:
+`SELECT` transactions with no `transaction_label` row (and those whose label is
+`needs_review` with `review_reason = provider_error`), newest first, and resolves
+them. The sweep is bounded by the same cost guard and is the only mechanism that
+makes a failed label eventually succeed.
 
 **Cost guard.** `APP_llm_max_requests_per_run` (default 200) bounds LLM calls
 per process run. On exhaustion the labeler warns and leaves the rest
-**unlabelled** (not held, not failed); the next run picks them up. An unbounded
-first run over years of history is the one way this iteration costs real money
-by accident.
+**unlabelled** (not held, not failed); the next sweep picks them up. An
+unbounded first run over years of history is the one way this iteration costs
+real money by accident.
 
-### 2.4 Label record
+### 2.4 Label and cache records
 
-The payload mirrors the `transaction_label` columns of §3, plus the transaction
-identity (`source`, `external_id`) and `schema_version`, with one difference:
-categories are referenced by **slug**, not UUID, so the log stays readable and a
-rebuild resolves slugs through the category tree it has just built.
-`category_slug` is null unless `status = resolved`; `confidence`, `provider`,
-`model`, `prompt_version`, `fingerprint` and `reasoning` are null unless the
-label came from the LLM or its cache; `proposed_category_path` carries an LLM
-suggestion that is **never** auto-created.
+A **label record** mirrors the `transaction_label` columns of §3, plus the
+transaction identity (`source`, `external_id`) and `schema_version`, with one
+difference: categories are referenced by **slug**, not UUID, so the log stays
+readable and a rebuild resolves slugs through the category tree it has just
+built. `category_slug` is null unless `status = resolved`; `confidence`,
+`provider`, `model`, `prompt_version`, `fingerprint` and `reasoning` are null
+unless the label came from the LLM or its cache; `proposed_category_path`
+carries an LLM suggestion that is **never** auto-created.
+
+A **cache record** (`finreport.llm-cache`, keyed by the fingerprint) mirrors
+`llm_label_cache` (§3): the provider's answer and nothing about which
+transaction provoked it. Every LLM call publishes one, before the label record.
 
 ### 2.5 Resolution chain
 
@@ -163,8 +210,9 @@ Exactly `docs/architecture.md` §2:
    (§2.7) → `label_source=rule`, `rule_id` set.
 4. **LLM cache** — exact `fingerprint` hit → `label_source=llm-cache`, with the
    cached confidence, provider, model and prompt version copied through.
-5. **LLM** — one provider call (§2.8). An answer naming a known category slug
-   resolves; an answer naming an unknown one becomes
+5. **LLM** — one provider call (§2.9), published to `finreport.llm-cache`
+   before the label. An answer naming a known category slug resolves; an answer
+   naming an unknown one becomes
    `status=needs_review, review_reason=new_category`; an answer the provider
    flags as ambiguous, or below `APP_llm_min_confidence` (default 0.5), becomes
    `review_reason=ambiguous`.
@@ -187,14 +235,19 @@ index on it.
 **Edge cases**
 
 - A provider error or timeout publishes **nothing**: the transaction stays
-  unlabelled and is retried next run. Held and unlabelled are different states
-  and must not be conflated.
+  unlabelled and is picked up by the next sweep (§2.3). Held and unlabelled are
+  different states and must not be conflated.
 - A transaction whose category was archived keeps its label; the category just
   stops being offered.
 - A zero-amount transaction is labelled like any other; `kind` decides where it
   counts, and zero counts nowhere.
 - `NOTBOOKED` transactions are labelled and re-resolved when the booked version
-  arrives (same `external_id` ⇒ same key ⇒ compare-before-publish decides).
+  arrives (same `external_id` ⇒ same key). If the booked amount **differs** and
+  the transaction was split, the parts no longer sum: the projector marks the
+  split `invalid = true` (it does not silently rescale someone's decision), the
+  transaction goes to the review queue with `review_reason = split_mismatch`,
+  and until the user fixes it the breakdown falls back to the **whole**
+  transaction with its pre-split label source, so totals stay correct.
 
 ### 2.6 User label record (overrides + splits)
 
@@ -219,8 +272,9 @@ Split validation (mutation-side, and re-checked by the projector):
 - Clearing an override (`category_slug: null, parts: []`) is a real event, not
   a tombstone: it means "fall back to the next source", and the labeler
   re-resolves. A tombstone means the transaction is gone.
-- Totals use parts instead of the whole transaction whenever parts exist
-  (§5 `categoryBreakdown`, `cashflowSummary` is unaffected — it is amount-only).
+- Totals use parts instead of the whole transaction whenever parts exist and
+  are valid (§5 `categoryBreakdown`; `cashflowSummary` is unaffected — it is
+  amount-only). An `invalid` split is ignored by totals until resolved.
 
 ### 2.7 Rules
 
@@ -253,8 +307,11 @@ logged and the rule skipped, never a panic.
 Per `counterparty_key`, over labels whose source is `user`, `llm` or
 `llm-cache` (not `rule` — a rule's own output must not justify itself):
 
-- **N consecutive consistent labels** (`APP_rule_learn_min_observations`,
-  default 3) for the same category ⇒ candidate.
+- **N labels in total** (`APP_rule_learn_min_observations`, default 3) for the
+  same category ⇒ candidate. Not "consecutive": `docs/requirements.md` counts
+  occurrences, and any conflicting label disqualifies outright (next bullet), so
+  a consecutive-run rule would both contradict the requirement and be
+  unreachable.
 - **Confidence** = min of the underlying confidences; a user-confirmed label
   counts as `1.0`. Three user confirmations therefore give `1.0`.
 - **Any conflicting category** for that key disqualifies the candidate
@@ -263,10 +320,18 @@ Per `counterparty_key`, over labels whose source is `user`, `llm` or
 - `confidence >= APP_rule_auto_approve_threshold` (default `0.9`, **inclusive**
   at the boundary) ⇒ published as `state=active, origin=learned,
   auto_approved=true`. Below ⇒ `state=in_review`, surfaced in the review queue.
-- **Revoking** a rule publishes `state=revoked` and triggers
-  `labeler --reapply <id>`; every label it set falls to the next source. A
-  revoked rule is never re-learned from the same evidence — the learner skips a
-  `counterparty_key` that has a revoked rule for the same category.
+- **The learner never overwrites a human.** Learned-rule ids are deterministic
+  (§3), so a naive republish with a freshly computed confidence would reopen a
+  rule the user had rejected, or downgrade one they had approved and edited.
+  The learner therefore publishes **only** when no rule exists for that id, or
+  when the stored rule is `origin=learned`, `state=in_review` and
+  `user_touched = false`. Any rule the user approved, edited, rejected or
+  revoked is left exactly as it is; new evidence for it changes nothing.
+  `user_touched` is set by every rule mutation and never cleared.
+- **Revoking** a rule publishes `state=revoked`; consuming that record makes the
+  labeler re-resolve every transaction the rule had labelled (§2.3), so its
+  labels fall to the next source. A revoked rule is never re-learned: the
+  learner skips a `counterparty_key` with a revoked rule for the same category.
 - The learner runs inside the labeler process, after each batch, over the
   projection. It is idempotent: a candidate already published with the same
   category and confidence is not republished.
@@ -336,12 +401,12 @@ sea-orm migrations in `finreport-rs/migration/src/`, then
 ```
 category(id UUID PK,                      -- UUIDv5(FINREPORT_NS, "category\0"+slug)
          slug TEXT NOT NULL UNIQUE,       -- dotted path, e.g. "food.groceries"
-         parent_id UUID NULL -> category.id, name TEXT NOT NULL,
+         parent_id UUID NULL, name TEXT NOT NULL,
          kind TEXT NOT NULL,              -- income|expense|transfer|saving
          depth SMALLINT NOT NULL CHECK (depth BETWEEN 1 AND 3),
          sort_order INT NOT NULL DEFAULT 0, archived BOOL NOT NULL DEFAULT false,
          origin TEXT NOT NULL,            -- 'seed'|'user'
-         owner_user_id UUID NULL -> app_user.id,   -- reserved; always NULL here
+         owner_user_id UUID NULL,          -- reserved; always NULL here
          revision TIMESTAMPTZ NOT NULL)
 ```
 `slug` is the identity the event log uses and the LLM cache is keyed against, so
@@ -353,46 +418,61 @@ projection later means a rebuild. A child's `kind` must equal its parent's
 **`m2026…_labels`**
 
 ```
-transaction_label(transaction_id UUID PK -> transaction.id ON DELETE CASCADE,
-                  category_id UUID NULL -> category.id,
+transaction_label(transaction_id UUID PK,           -- UUIDv5 of (source, external_id)
+                  category_id UUID NULL,
                   label_source TEXT NOT NULL,       -- user|rule|llm-cache|llm
-                  rule_id UUID NULL -> rule.id, confidence NUMERIC(4,3) NULL,
+                  rule_id UUID NULL, confidence NUMERIC(4,3) NULL,
                   status TEXT NOT NULL,             -- resolved|needs_review
-                  review_reason TEXT NULL, proposed_category_path TEXT NULL,
+                  review_reason TEXT NULL,          -- ambiguous|new_category
+                                                    -- |provider_error|split_mismatch
+                  proposed_category_path TEXT NULL,
                   provider TEXT NULL, model TEXT NULL, prompt_version TEXT NULL,
                   fingerprint TEXT NULL, reasoning TEXT NULL,
                   labeled_at TIMESTAMPTZ NOT NULL)
--- indexes: (status) for the review queue, (category_id) for the breakdown
+-- indexes: (status) for the review queue, (category_id) for the breakdown,
+-- (rule_id) for "which transactions did this rule label"
 
-transaction_user_label(transaction_id UUID PK -> transaction.id ON DELETE CASCADE,
-                       category_id UUID NULL -> category.id,
+transaction_user_label(transaction_id UUID PK, category_id UUID NULL,
                        note TEXT NULL, revision TIMESTAMPTZ NOT NULL)
 
 transaction_split(id UUID PK,                       -- UUIDv5(txn_id, part_index)
-                  transaction_id UUID NOT NULL -> transaction.id ON DELETE CASCADE,
-                  part_index INT NOT NULL, amount NUMERIC(20,4) NOT NULL,
-                  category_id UUID NOT NULL -> category.id,
+                  transaction_id UUID NOT NULL, part_index INT NOT NULL,
+                  amount NUMERIC(20,4) NOT NULL, category_id UUID NOT NULL,
+                  invalid BOOL NOT NULL DEFAULT false,   -- §2.5 split_mismatch
                   UNIQUE (transaction_id, part_index))
 
-llm_label_cache(fingerprint TEXT PK, category_id UUID NULL -> category.id,
+llm_label_cache(fingerprint TEXT PK, category_id UUID NULL,
                 proposed_path TEXT NULL, confidence NUMERIC(4,3) NOT NULL,
                 provider TEXT NOT NULL, model TEXT NOT NULL,
                 prompt_version TEXT NOT NULL, reasoning TEXT NULL,
                 created_at TIMESTAMPTZ NOT NULL)
 ```
-`llm_label_cache` is **derived from `finreport.transaction-label`** (every
-record with `label_source = llm`), not its own topic — the answers are already
-in the log, and a second copy would be a second truth. A rebuild replays them
-and the cache comes back without a single provider call.
+`llm_label_cache` is the projection of **`finreport.llm-cache`** (§2.2), which
+is why a rebuild recovers every answer without a provider call even for
+transactions that have since been overridden.
+
+**No foreign keys on these five tables.** They are projections of *different*
+topics, and one projector batch interleaves records from all of them: on a
+rebuild a label can legitimately arrive before its transaction, or a rule before
+its category. An FK would abort that batch, and five aborted batches exit the
+process (iteration 1 §2.3) — a self-inflicted outage on every replay. Ids are
+deterministic (UUIDv5), so the reference resolves the moment the other record
+lands; resolvers `LEFT JOIN` and treat a missing row as "not projected yet".
+Ordering records by dependency inside a batch was rejected: it only works when
+every dependency is already *somewhere* in the same batch, which replay does not
+guarantee. The `ON DELETE CASCADE` cleanup the FKs provided is replaced by the
+projector deleting a transaction's label, override and splits in the same
+transaction as the transaction row itself.
 
 **`m2026…_rules`**
 
 ```
-rule(id UUID PK, name TEXT NOT NULL, category_id UUID NOT NULL -> category.id,
+rule(id UUID PK, name TEXT NOT NULL, category_id UUID NOT NULL,
      conditions JSONB NOT NULL, priority INT NOT NULL DEFAULT 0,
      state TEXT NOT NULL,                   -- active|in_review|revoked|rejected
      origin TEXT NOT NULL,                  -- user|learned
      auto_approved BOOL NOT NULL DEFAULT false,
+     user_touched BOOL NOT NULL DEFAULT false,  -- §2.8: learner must not overwrite
      confidence NUMERIC(4,3) NULL, evidence JSONB NULL,
      created_at TIMESTAMPTZ NOT NULL, revision TIMESTAMPTZ NOT NULL)
 ```
@@ -438,6 +518,7 @@ New `utils::settings` keys, all optional with the defaults shown:
 | `APP_prompt_version` | `2` | part of the cache fingerprint |
 | `APP_rule_learn_min_observations` | `3` | |
 | `APP_rule_auto_approve_threshold` | `0.9` | inclusive |
+| `APP_labeler_max_projection_lag` | `0` | startup guard (§2.3) |
 
 Validation is **lazy, at the provider factory**: `webapp` and the projector
 never build a provider, so a missing key must not break their startup.
@@ -456,8 +537,14 @@ never build a provider, so a missing key must not break their startup.
 
 Additive only — no iteration-1 field changes, so the frontend packages can land
 independently. Frozen by WP0 in `finreport-rs/webapp/schema.graphql` and
-mirrored to `finreport-fe/src/lib/graphql/schema.graphql`; the existing
-normalized-AST drift test covers it.
+mirrored to `finreport-fe/src/lib/graphql/schema.graphql`.
+
+**Written as merged definitions, not `extend`.** `async-graphql`'s exporter
+prints one merged `type Query`/`type Mutation`/`input TransactionFilter`, and
+`sdl_drift.rs` compares the committed file with that output, so an `extend`
+block fails the drift test on day one. The `extend` keyword below is **spec
+shorthand for "these fields are added to the existing type"**; WP0 commits the
+merged definitions, with the new fields in the exporter's own print order.
 
 ```graphql
 enum CategoryKind { INCOME, EXPENSE, TRANSFER, SAVING }
@@ -523,7 +610,8 @@ extend type Mutation {
   createRule(input: RuleInput!): Rule!
   updateRule(id: UUID!, input: RuleInput!): Rule!
   setRuleState(id: UUID!, state: RuleState!): Rule!
-  reapplyRule(id: UUID!): Int!        # transactions re-queued
+  reapplyRule(id: UUID!): Int!        # publishes a label-request; returns the
+                                      # number of transactions it covers
 }
 input SplitPartInput { amount: Decimal!, categorySlug: String! }
 input CategoryInput { slug: String!, name: String!, kind: CategoryKind!, parentSlug: String }
@@ -538,8 +626,9 @@ extend input TransactionFilter {
 
 Semantics and edge cases:
 
-- `categoryBreakdown` **uses split parts when a transaction is split**, and the
-  whole transaction otherwise. Each transaction is counted once.
+- `categoryBreakdown` **uses split parts when a transaction has a valid split**,
+  and the whole transaction otherwise (including when the split is `invalid`,
+  §2.5). Each transaction is counted once.
 - `level` rolls descendants up to that depth (`level: 1` = top-level). `kind`
   null returns every kind, each row's `share` relative to its own kind total —
   so transfers never dilute a spending percentage.
@@ -556,6 +645,13 @@ Semantics and edge cases:
   vanishing (which would silently break reconciliation with `cashflowSummary`).
 - Every mutation is scoped: a transaction the caller cannot see is an error, not
   a silent no-op. Mutations publish-then-upsert (§2.1) and return the fresh row.
+- **Mutations never invoke the labeler.** They publish to `user-label`, `rule`
+  or `label-request`; the labeler consumes those and re-resolves (§2.3). So
+  `reapplyRule` publishes one `label-request` record keyed `reapply:<rule-id>`
+  and returns the count it will cover — re-resolution is asynchronous and
+  idempotent, and a UI that wants the result polls. A mutation process that
+  called a labeler loop inline would have to own a provider, a cost budget and a
+  request timeout, none of which belong in an HTTP handler.
 - `createCategory` rejects depth > 3, a duplicate slug, a slug that does not
   match `^[a-z0-9_]+(\.[a-z0-9_]+){0,2}$`, a parent whose `kind` differs, and a
   parent that is archived.
@@ -611,20 +707,40 @@ setup.
 The demo must still run with no API key, no GPU and no network beyond
 localhost. That is what `APP_llm_provider=fake` (the default) buys.
 
-- `docker-compose.local.yml` gains the four topics in
+- `docker-compose.local.yml` gains the six new topics in
   `finreport-redpanda-init` (kept in step with `terraform/kafka` by hand) plus
   an **optional** `ollama` profile, off by default.
 - `just` recipes: `dev-labeler` (`cargo run -p webapp --bin labeler --
   --until-caught-up`), `seed-categories` (the `category-seed` bin, idempotent),
-  and `dev-demo` extended to `… → projector → seed-categories → labeler
-  --until-caught-up →` print next steps. `dev-reset` also truncates the new
-  projections.
+  and `dev-reset`, which also truncates the new projections.
+- **`dev-demo` alternates the two processes until quiescent.** A single
+  `projector → seed-categories → labeler` pass cannot work: the seeded
+  categories are only *published* at step 2, so the labeler would start against
+  an empty catalog, and the labels it publishes would never be projected, so the
+  learner — which reads the projection — would see nothing and the learned-rule
+  fixture would never fire. The recipe is:
+
+  ```
+  dev-up → migrate → seed-user → seed-events → seed-categories
+  → repeat { projector --until-caught-up ; labeler --until-caught-up }
+    until a round produces no new records (max 5 rounds, else fail loudly)
+  → link accounts → assert → print next steps
+  ```
+
+  Each round is cheap (both exit at the high watermark) and the loop converges:
+  round 1 projects categories and transactions, round 2 labels them and projects
+  the labels, round 3 lets the learner see enough history to emit the learned
+  rule, round 4 projects it. The recipe **asserts** afterwards that at least one
+  `rule` row with `origin = 'learned'` and at least one `transaction_label` with
+  `status = 'needs_review'` exist, and fails otherwise — a silently empty demo
+  is worse than a broken one.
 - Fixtures grow counterparties that exercise the whole chain under the fake
   provider: a repeated merchant that reaches the learning threshold, one
   ambiguous case, one new-category proposal, one already overridden, one split.
 - Deploy: a new `finreport-be-labeler` service in `docker-compose.yml`
-  (prebuilt image, no new port, no new address), plus the four topics in
-  `terraform/kafka` with `prevent_destroy`.
+  (prebuilt image, no new port, no new address), plus the new topics in
+  `terraform/kafka`, each with `prevent_destroy` except the `label-request`
+  work queue.
 
 ---
 
@@ -640,8 +756,11 @@ localhost. That is what `APP_llm_provider=fake` (the default) buys.
 | Splits | unit | exact sum, sign mismatch, single part, zero-amount transaction, 4-decimal remainder |
 | Providers | unit | fake determinism; each real provider's response parsing + error mapping against recorded JSON (no network) |
 | Breakdown | unit | roll-up by level, splits counted once, transfers excluded from spending, share per kind |
-| Labeler | integration | fixture replay → labels; replay again → **zero new records, zero provider calls**; rule revoke → re-apply falls back; cost guard stops at the limit |
-| Projection | integration | all four topics project; tombstones delete; out-of-order `revision` does not clobber a newer row; rebuild reproduces identical tables incl. the LLM cache |
+| Labeler | integration | fixture replay → labels; replay again → **zero new records, zero provider calls** (inputs unchanged ⇒ no republish); a `user-label` record re-resolves its transaction; a `rule` record re-resolves what the rule matched; `label-request` reapply works; the sweep picks up a transaction left unlabelled by a provider error; cost guard stops at the limit; startup refuses while the projector lags |
+| Learner guard | integration | republishing after a user approved / rejected / edited a rule leaves it untouched; an untouched `in_review` rule is updated |
+| Demo | integration | `dev-demo`'s loop reaches quiescence and the learned-rule + needs-review assertions hold |
+| Projection | integration | every new topic projects; tombstones delete; out-of-order `revision` does not clobber a newer row; rebuild from offset 0 reproduces identical tables **including the LLM cache**; a label projected before its transaction does not abort the batch |
+| Split mismatch | integration | a `NOTBOOKED` tx re-published booked with a different amount marks its split invalid, queues `split_mismatch`, and the breakdown falls back to the whole tx |
 | GraphQL | integration | breakdown totals reconcile with `cashflowSummary`; split sum rejection; cross-user mutation denied; `CATEGORY` Sankey conserves flow |
 | FE logic | vitest | breakdown shaping, split remainder arithmetic, category-tree selection incl. descendants |
 | FE smoke | Playwright | dashboard shows a breakdown; review queue resolves one held transaction and it disappears from the queue |
@@ -677,14 +796,28 @@ package writes only files it owns. Each is developed in its own worktree
 
 ### Shared-file protocol
 
-Pre-populated by WP0, edited by nobody else afterwards:
-`finreport-rs/webapp/src/lib.rs` (declares `pub mod labeling;`),
-`finreport-rs/webapp/Cargo.toml` (all deps + the `labeler`/`category-seed` bin
-entries), `finreport-rs/migration/src/lib.rs`,
-`finreport-rs/utils/src/settings.rs`,
-`finreport-rs/webapp/src/projection/mod.rs` (topic → handler dispatch for the
-four new topics, pointing at WP3's module), `finreport-rs/webapp/schema.graphql`
-+ its frontend mirror.
+Pre-populated by WP0, edited by nobody else afterwards. Every file below is
+touched by two or more packages, so WP0 writes its final iteration-2 shape once
+and the others treat it as read-only:
+
+| File | What WP0 puts there |
+|---|---|
+| `webapp/src/lib.rs` | `pub mod labeling;` |
+| `webapp/Cargo.toml` | all new deps + the `labeler` / `category-seed` bin entries |
+| `migration/src/lib.rs` | the §3 migrations registered |
+| `utils/src/settings.rs` | every §4 key |
+| `webapp/src/projection/mod.rs` | topic → handler dispatch for the new topics, pointing at WP3's module |
+| `webapp/src/projection/{upsert.rs,records.rs}` | the `counterparty_key` derived column on the transaction upsert + its record struct (§2.5) — WP3 reads it, WP4 queries it |
+| `webapp/src/db/mod.rs` | nothing new; frozen so WP1's `categorizer` rewrite cannot drift it |
+| `categorizer/{Cargo.toml,src/lib.rs}` | crate wiring for `pub mod provider;` and the trait's deps — WP1 owns everything else in the crate |
+| `webapp/schema.graphql` + `finreport-fe/src/lib/graphql/schema.graphql` | the merged §5 SDL in printer order |
+| `finreport-fe/src/lib/graphql/{types.ts,queries.ts}` | every iteration-2 type and document both WP5 and WP6 need, generated from the SDL in one pass |
+| `finreport-fe/src/routes/(app)/+layout.svelte` | the `/admin` nav entry, added once so WP5 and WP6 never both edit the layout |
+
+`webapp/src/bin/categorize.rs` is **deleted by WP1** in the same change that
+rewrites `categorizer` — it is the last caller of the old ad-hoc settings path
+and keeping a second, divergent categorization entry point would be worse than
+removing it. WP1 owns that deletion; nobody else touches the file.
 
 ### WP0 — Contracts, schema, taxonomy, fixtures, mocks — **S**
 **Owns:** `finreport-rs/migration/**`, `finreport-rs/entity/**`,
@@ -730,21 +863,24 @@ matching and learning pass, including the exactly-0.9 boundary.
 `finreport-rs/webapp/src/bin/{labeler.rs,category_seed.rs}`,
 `finreport-rs/webapp/src/projection/labeling.rs`,
 `finreport-rs/webapp/tests/labeler_*.rs`.
-The consume → normalize → resolve → compare → publish loop with its own offset
-rows, `--until-caught-up` and `--reapply`; the cost guard; the projections for
-all four new topics including tombstones, the `revision` guard and the
-cache-from-labels derivation; the idempotent category seeder.
+The four-topic consume → normalize → resolve → compare → publish loop with its
+own offset rows, `--until-caught-up`, the projector-lag startup guard and the
+unlabelled sweep; the cost guard; the projections for every new topic including
+tombstones, the `revision` guard, the `llm-cache` topic and the split-mismatch
+invalidation; the idempotent category seeder.
 *Depends on:* WP0, WP2 (signatures fixed in §2.5/§2.8 — stub locally if needed).
 *Done when:* a fixture replay labels every transaction, a second replay
-publishes nothing and calls no provider, a revoke+reapply falls back, and a
-rebuild reproduces identical tables including `llm_label_cache`.
+publishes nothing and calls no provider, a user override and a rule revoke each
+re-resolve on their own, the sweep recovers a provider-error transaction, and a
+rebuild from offset 0 reproduces identical tables including `llm_label_cache`.
 
 ### WP4 — GraphQL — **M**
 **Owns:** `finreport-rs/webapp/src/graphql/**`.
 Category/label/rule/split types, `categoryBreakdown`, `reviewQueue`, the new
 filters, the `CATEGORY` Sankey dimension, every §5 mutation with its
 publish-then-upsert and its validation (split sum, slug shape, depth, kind
-inheritance, regex compile).
+inheritance, regex compile). Mutations publish events only — `reapplyRule`
+publishes a `label-request`, it never drives the labeler.
 *Depends on:* WP0 (SDL, entities), WP2 (validation helpers).
 *Done when:* the SDL drift test passes, breakdown reconciles with
 `cashflowSummary`, splits are counted once, and cross-user mutations are denied.
@@ -754,7 +890,8 @@ inheritance, regex compile).
 `finreport-fe/src/routes/(app)/transactions/**`,
 `finreport-fe/src/lib/components/{CategoryBreakdown,CategoryFilter,CategoryPicker,
 Badge,Tree}.svelte`, `finreport-fe/src/lib/categoryTree.ts` +
-`breakdownShaping.ts` and their tests.
+`breakdownShaping.ts` and their tests. Reads `lib/graphql/{types,queries}.ts`
+and `(app)/+layout.svelte` — both frozen by WP0 — without editing them.
 Breakdown card, Sankey dimension toggle, category/uncategorized/needs-review
 filters, label-source badges in the table.
 *Depends on:* WP0's SDL + mocks only; never blocked on a backend
@@ -768,7 +905,8 @@ pages render fully from mocks.
 **Owns:** `finreport-fe/src/routes/(app)/admin/**`,
 `finreport-fe/src/lib/components/{Modal,SplitEditor,RuleForm,ReviewCard}.svelte`,
 `finreport-fe/src/lib/splitMath.ts` + its tests,
-`finreport-fe/src/lib/graphql/adminQueries.ts`.
+`finreport-fe/src/lib/graphql/adminQueries.ts` (admin-only documents; the
+shared `queries.ts` stays WP0's).
 Review queue, rules list (auto-approved badge, recently-auto-approved section,
 revoke, re-apply), category tree admin, split editor with its exact-decimal
 remainder.
@@ -781,7 +919,8 @@ smoke passes.
 **Owns:** `docker-compose.local.yml`, `docker-compose.yml`, `justfile`,
 `terraform/kafka/**`, `terraform/variables.tf`, `.env.tpl`, `.gitea/**`,
 root `CLAUDE.md`, `docs/architecture.md`.
-The four topics (local init + Terraform, `prevent_destroy`), the optional
+The new topics (local init + Terraform, `prevent_destroy` except
+`label-request`), the optional
 `ollama` compose profile, `dev-labeler`/`seed-categories`/extended
 `dev-demo`/`dev-reset`, the shared `CARGO_TARGET_DIR` export (§9.1), the
 `finreport-be-labeler` service, the `TF_VAR_anthropic_api_key` wiring (§4), and
@@ -811,7 +950,11 @@ WP0  ████ (short, blocking)
    dual-written to their projection for read-your-write (§2.1). The alternative
    — Postgres-only human state — was rejected because it breaks the rebuild
    guarantee one iteration after it was won.
-2. The LLM cache is **derived from the label topic**, not its own topic.
+2. The LLM cache has **its own compacted topic** keyed by fingerprint. Deriving
+   it from `transaction-label` is impossible: that topic compacts *per
+   transaction*, so the moment a rule or user label replaces an LLM label, the
+   only copy of the LLM answer becomes eligible for deletion and the cache can
+   no longer be rebuilt.
 3. Default provider is `fake`. Nothing in the repo calls a paid API unless
    `APP_llm_provider` says so.
 4. One category tree, `owner_user_id` reserved but always NULL; per-tenant trees
@@ -825,3 +968,7 @@ WP0  ████ (short, blocking)
    themselves.
 9. `counterparty_key` is a derived projector column; existing rows acquire it
    through the normal read-model rebuild, not a bespoke backfill.
+10. The new projections carry **no foreign keys** (§3); referential integrity is
+    an invariant of the event log, not of the read model.
+11. Re-resolution is **event-driven**: GraphQL publishes, the labeler consumes.
+    No HTTP handler ever runs a labeling pass inline.
