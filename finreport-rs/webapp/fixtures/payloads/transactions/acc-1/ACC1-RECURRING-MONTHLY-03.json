@@ -1,0 +1,26 @@
+{
+  "reference": "ACC1-RECURRING-MONTHLY-03",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-05-05",
+  "amount": {
+    "value": "-39.90",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "Fitnessstudio PowerGym",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-05-05",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Mitgliedsbeitrag Mai",
+  "transactionType": {
+    "key": "DIRECT_DEBIT",
+    "text": "Lastschrift"
+  }
+}

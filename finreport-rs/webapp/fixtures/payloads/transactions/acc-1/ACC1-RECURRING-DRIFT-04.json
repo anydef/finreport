@@ -1,0 +1,26 @@
+{
+  "reference": "ACC1-RECURRING-DRIFT-04",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-06-20",
+  "amount": {
+    "value": "-70.00",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "Stromanbieter E.ON",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-06-20",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Abschlag Strom Juni",
+  "transactionType": {
+    "key": "DIRECT_DEBIT",
+    "text": "Lastschrift"
+  }
+}
