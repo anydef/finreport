@@ -16,20 +16,57 @@ See `docs/runbooks/iteration-1-deploy.md`.
 
 ## Next, in order
 
-Agreed work, in priority order. Feature requests land in the Backlog below
-first; they move up here only once their priority is settled.
+Agreed work, in priority order. Reprioritised 2026-10-08 around getting the
+user's own data categorised, tagged and browsable; the goals backend is paused
+behind it.
 
-1. Review iteration 3 against real data — **done** (see `docs/specs/iteration-3.md`;
-   the live-data pass found the missing `source_account_id` envelope header and
-   the repair tool that recovers it).
-2. Iteration 4: savings and spending goals (`docs/specs/iteration-4.md`).
-   WP0 contracts merged; WP-C (UI on mocks) next, for review before WP-A/WP-B.
-3. Admin user management in the UI.
-4. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+1. **Spending by category must exclude income.** The dashboard card asks
+   `categoryBreakdown` for `level: 1` with no `kind`, so the resolver returns
+   every kind — only `transfer` is dropped by default — and income categories
+   appear under a card titled "Spending by category". Savings should be out
+   too, since requirements count them as saving rather than spending. XS: pass
+   `kind: EXPENSE` from the dashboard query.
+2. **Month-to-date period.** Already exists, mislabelled: the "This month"
+   preset runs from the 1st to *today*, so it is month-to-date, not the whole
+   month. XS: either rename the label to "Month to date", or keep the name and
+   add a separate full-month preset. Decide which the user meant.
+3. **Get the existing transactions categorised** — the reason "a lot of
+   transactions don't get categorized". Two parts:
+   (a) deploy `finreport-be-category-seed`, since the deployed `category` table
+   is empty and the labeler cannot assign from an empty taxonomy;
+   (b) confirm the labeler re-labels the *existing* backlog and not only newly
+   arriving transactions — check what `run_sweep` selects as candidates, and if
+   it skips already-labelled or already-swept rows, provide a way to re-run
+   over everything (changing `APP_projection_group` replays the labeler, which
+   may already be enough).
+   Note: the "-" the user sees is not a category. `TransactionTable` renders a
+   missing category as an em dash, so "-" means uncategorised.
+4. **Transaction detail modal** — M, frontend only. Clicking a transaction
+   anywhere opens a modal that edits its category and tags (and splits and the
+   recurring flag, which the same mutations already cover). Promoted from the
+   backlog; also extracts the shared `TransactionItem` that items 5 and 6 both
+   need, so it comes first.
+5. **Filters on every transaction table** — M. Account, category, tag, amount
+   and flags beside every list, not just `/transactions`. Needs
+   `amountMin`/`amountMax` on `TransactionFilter`; the rest exists. This is
+   half of the "centralized place where I can browse, filter, select and assign"
+   the user asked for.
+6. **Multi-select and bulk edit** — L, needs backend work. Select one, several
+   or all filtered transactions; action buttons then appear in the table header
+   for "edit categories" and "edit tags", each **overriding** the existing
+   values (confirmed 2026-10-08). Override semantics mean bulk tagging can
+   reuse `setTransactionTags`' whole-set replace after all, so the add/remove
+   operations noted earlier are not needed — simpler than previously planned.
+   Together with item 5 this is the centralized categorisation workspace.
+7. Iteration 4: savings and spending goals — **paused**. WP0 contracts and the
+   UI (on mocks, approved) are merged; WP-A (evaluation) and WP-B (GraphQL)
+   resume after the items above.
+8. Admin user management in the UI.
+9. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
    decision about credential storage** (security-critical).
-5. C24, PayPal and Scalable Capital integrations. First research the access
-   method for each (API vs. CSV fallback).
-6. Sankey cash-flow views.
+10. C24, PayPal and Scalable Capital integrations. First research the access
+    method for each (API vs. CSV fallback).
+11. Sankey cash-flow views.
 
 ## Backlog
 
@@ -51,14 +88,12 @@ by agreeing where it goes.
   one-offs. The inverse matters too: `CategoryBreakdown`'s `uncategorized` and
   `needs-review` rows currently *look* like buttons and do nothing, so
   affordance and behaviour must be fixed together (see the drill-down item).
-
 - **Split transactions are invisible in the tables** — S, frontend-only.
   `TransactionTable` never renders a transaction's `splits`, so a split row is
   indistinguishable from a plain one — on the goal pages this is misleading,
   since goal totals count splits *by their parts* (iteration 4 §3.1) while the
   table shows the whole amount under one category. Needs at least a split
   badge and the parts on expand. Found while building goal fixtures.
-
 - **Server-calculated running total for fixed-range goals** — S backend, S
   frontend. The Holiday-fund chart currently adds the transactions up in the
   browser, and it only fetches the first 200 of them, so a goal with more
@@ -84,21 +119,6 @@ by agreeing where it goes.
   makes it queryable and replayable, rather than a separate Kafka topic. Should
   carry the topic, partition, offset, key, headers, the raw value and the
   mapper's error, and a way to mark one resolved once it has been dealt with.
-
-- **Transaction detail modal** — M, frontend-only. Edit category, splits, tags
-  and the recurring flag from any list. Every mutation it needs already exists.
-  Also extracts a shared `TransactionItem`, which the two items below both
-  build on — doing it first makes them cheaper.
-- **Dashboard transaction filters** — M. Mostly surfacing controls
-  `/transactions` already has; the only backend work is `amountMin`/`amountMax`
-  on `TransactionFilter`. Two open decisions (signed vs magnitude; whether the
-  panel narrows the charts too).
-- **Table search, multi-select and bulk tag/category edit** — L, needs backend
-  work. The largest of these: bulk mutations, tag add/remove rather than
-  whole-set replace, a selection model that means "all matching" not "this
-  page", and non-atomic partial-failure handling. Highest leverage once the
-  taxonomy is in use and many transactions need re-filing; least worth doing
-  before then.
 
 ## Open debt
 
