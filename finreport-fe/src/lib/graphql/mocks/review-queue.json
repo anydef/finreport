@@ -1,0 +1,64 @@
+{
+  "query": "query ReviewQueue($page: PageInput) {\n  reviewQueue(page: $page) {\n    transactions {\n      id\n      accountId\n      bookingDate\n      amount\n      currency\n      counterpartyName\n      description\n      label {\n        source\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n        confidence\n      }\n    }\n    pendingRules {\n      id\n      name\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      conditions\n      priority\n      state\n      origin\n      autoApproved\n      confidence\n      evidenceCount\n      createdAt\n    }\n    totalCount\n  }\n}",
+  "data": {
+    "reviewQueue": {
+      "transactions": [
+        {
+          "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-28",
+          "amount": "-49.99",
+          "currency": "EUR",
+          "counterpartyName": "Amazon",
+          "description": "Online purchase",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.6
+          }
+        },
+        {
+          "id": "3c2d1e0f-8a7b-4c6d-9e5f-1a2b3c4d5e6f",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-25",
+          "amount": "-120.00",
+          "currency": "EUR",
+          "counterpartyName": "Acme Co-Working",
+          "description": "Monthly desk rental",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "housing.coworking",
+            "reasoning": "fake provider: proposing new category housing.coworking",
+            "confidence": 0.8
+          }
+        }
+      ],
+      "pendingRules": [
+        {
+          "id": "4d3e2f10-9b8c-4a7d-ae6f-2b3c4d5e6f71",
+          "name": "Fitness First → personal.gym",
+          "category": {
+            "id": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+            "slug": "personal.gym",
+            "name": "Gym",
+            "kind": "EXPENSE"
+          },
+          "conditions": { "counterpartyKey": "fitness first" },
+          "priority": 0,
+          "state": "IN_REVIEW",
+          "origin": "LEARNED",
+          "autoApproved": false,
+          "confidence": 0.88,
+          "evidenceCount": 3,
+          "createdAt": "2024-06-20T08:00:00Z"
+        }
+      ],
+      "totalCount": 3
+    }
+  }
+}

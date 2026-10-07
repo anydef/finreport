@@ -1,0 +1,35 @@
+{
+  "query": "mutation SplitTransaction($transactionId: UUID!, $parts: [SplitPartInput!]!) {\n  splitTransaction(transactionId: $transactionId, parts: $parts) {\n    id\n    splits {\n      index\n      amount\n      category {\n        id\n        slug\n        name\n      }\n    }\n  }\n}",
+  "variables": {
+    "transactionId": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+    "parts": [
+      { "amount": "30.00", "categorySlug": "food.groceries" },
+      { "amount": "19.99", "categorySlug": "personal.gym" }
+    ]
+  },
+  "data": {
+    "splitTransaction": {
+      "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+      "splits": [
+        {
+          "index": 0,
+          "amount": "30.00",
+          "category": {
+            "id": "7f5a7e2e-7d0a-5f3d-9c8a-2f1b6a0c4d11",
+            "slug": "food.groceries",
+            "name": "Groceries"
+          }
+        },
+        {
+          "index": 1,
+          "amount": "19.99",
+          "category": {
+            "id": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+            "slug": "personal.gym",
+            "name": "Gym"
+          }
+        }
+      ]
+    }
+  }
+}

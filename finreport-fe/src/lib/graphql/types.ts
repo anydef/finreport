@@ -28,6 +28,15 @@ export type CashflowNodeKind =
 
 export type CashflowDimension = 'INCOME_SOURCE' | 'ACCOUNT' | 'OUTCOME' | 'CATEGORY' | 'TAG';
 
+export type CategoryKind = 'INCOME' | 'EXPENSE' | 'TRANSFER' | 'SAVING';
+export type LabelSource = 'USER' | 'RULE' | 'LLM_CACHE' | 'LLM';
+export type LabelStatus = 'RESOLVED' | 'NEEDS_REVIEW';
+export type ReviewReason = 'AMBIGUOUS' | 'NEW_CATEGORY';
+export type RuleState = 'ACTIVE' | 'IN_REVIEW' | 'REVOKED' | 'REJECTED';
+export type RuleOrigin = 'USER' | 'LEARNED';
+/** Arbitrary JSON, e.g. `rule.conditions` — travels as a plain JS value. */
+export type Json = unknown;
+
 export interface Me {
 	id: UUID;
 	username: string;
@@ -68,6 +77,10 @@ export interface Transaction {
 	counterpartyIban: string | null;
 	description: string | null;
 	transactionType: string | null;
+	/** `null` = not labelled yet (distinct from `needsReview`). */
+	label: TransactionLabel | null;
+	/** Empty when not split. */
+	splits: TransactionSplit[];
 }
 
 export interface TransactionFilter {
@@ -78,6 +91,12 @@ export interface TransactionFilter {
 	direction?: Direction | null;
 	counterpartyNames?: string[] | null;
 	hasCounterparty?: boolean | null;
+	/** OR-ed; includes descendants. */
+	categorySlugs?: string[] | null;
+	/** `true` = no label at all. */
+	uncategorized?: boolean | null;
+	needsReview?: boolean | null;
+	labelSources?: LabelSource[] | null;
 }
 
 export interface PageInput {
@@ -141,4 +160,99 @@ export interface CashflowGraph {
 	currency: string;
 	dimensions: CashflowDimension[];
 	truncated: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Categories, labels, rules (iteration 2, §5)
+// ---------------------------------------------------------------------------
+
+export interface Category {
+	id: UUID;
+	slug: string;
+	name: string;
+	kind: CategoryKind;
+	parentId: UUID | null;
+	depth: number;
+	archived: boolean;
+	/** `"seed"` | `"user"`. */
+	origin: string;
+}
+
+export interface Rule {
+	id: UUID;
+	name: string;
+	category: Category;
+	conditions: Json;
+	priority: number;
+	state: RuleState;
+	origin: RuleOrigin;
+	autoApproved: boolean;
+	confidence: number | null;
+	evidenceCount: number;
+	/** RFC 3339 instant. */
+	createdAt: string;
+}
+
+export interface TransactionLabel {
+	/** `null` while `status = NEEDS_REVIEW`. */
+	category: Category | null;
+	source: LabelSource;
+	rule: Rule | null;
+	confidence: number | null;
+	status: LabelStatus;
+	reviewReason: ReviewReason | null;
+	proposedCategoryPath: string | null;
+	reasoning: string | null;
+}
+
+export interface TransactionSplit {
+	index: number;
+	amount: Decimal;
+	category: Category;
+}
+
+export interface CategoryBreakdownRow {
+	/** The roll-up level that was requested. */
+	category: Category;
+	/** Positive magnitude. */
+	amount: Decimal;
+	transactionCount: number;
+	/** Of the row's `kind` total, `0..1`. */
+	share: number;
+}
+
+export interface CategoryBreakdown {
+	rows: CategoryBreakdownRow[];
+	/** Label missing entirely. */
+	uncategorized: CategoryBreakdownRow | null;
+	/** Held; counted separately, never as spend. */
+	needsReview: CategoryBreakdownRow | null;
+	currency: string;
+}
+
+export interface ReviewQueue {
+	/** `status = NEEDS_REVIEW`. */
+	transactions: Transaction[];
+	/** `state = IN_REVIEW`. */
+	pendingRules: Rule[];
+	totalCount: number;
+}
+
+export interface SplitPartInput {
+	amount: Decimal;
+	categorySlug: string;
+}
+
+export interface CategoryInput {
+	slug: string;
+	name: string;
+	kind: CategoryKind;
+	parentSlug?: string | null;
+}
+
+export interface RuleInput {
+	name: string;
+	categorySlug: string;
+	conditions: Json;
+	priority?: number;
 }

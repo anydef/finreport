@@ -1,0 +1,43 @@
+{
+  "query": "query Rules($state: RuleState) {\n  rules(state: $state) {\n    id\n    name\n    category {\n      id\n      slug\n      name\n      kind\n    }\n    conditions\n    priority\n    state\n    origin\n    autoApproved\n    confidence\n    evidenceCount\n    createdAt\n  }\n}",
+  "data": {
+    "rules": [
+      {
+        "id": "4d3e2f10-9b8c-4a7d-ae6f-2b3c4d5e6f71",
+        "name": "Fitness First → personal.gym",
+        "category": {
+          "id": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+          "slug": "personal.gym",
+          "name": "Gym",
+          "kind": "EXPENSE"
+        },
+        "conditions": { "counterpartyKey": "fitness first" },
+        "priority": 0,
+        "state": "ACTIVE",
+        "origin": "LEARNED",
+        "autoApproved": true,
+        "confidence": 0.95,
+        "evidenceCount": 5,
+        "createdAt": "2024-06-01T08:00:00Z"
+      },
+      {
+        "id": "6f5041b2-bd0e-4c9f-c081-4d5e6f718293",
+        "name": "Rewe → food.groceries",
+        "category": {
+          "id": "7f5a7e2e-7d0a-5f3d-9c8a-2f1b6a0c4d11",
+          "slug": "food.groceries",
+          "name": "Groceries",
+          "kind": "EXPENSE"
+        },
+        "conditions": { "counterpartyKey": "rewe" },
+        "priority": 0,
+        "state": "ACTIVE",
+        "origin": "USER",
+        "autoApproved": false,
+        "confidence": null,
+        "evidenceCount": 0,
+        "createdAt": "2024-05-15T12:30:00Z"
+      }
+    ]
+  }
+}
