@@ -46,6 +46,18 @@ pub fn dummy_settings() -> Arc<utils::settings::Settings> {
         allowed_origins: "http://localhost:5173".to_string(),
         session_ttl_days: 30,
         projector_default_owner: None,
+        llm_provider: "fake".to_string(),
+        anthropic_api_key: None,
+        llm_api_key: None,
+        llm_base_url: None,
+        llm_model: None,
+        llm_timeout_ms: 20_000,
+        llm_min_confidence: 0.5,
+        llm_max_requests_per_run: 200,
+        prompt_version: "2".to_string(),
+        rule_learn_min_observations: 3,
+        rule_auto_approve_threshold: 0.9,
+        labeler_max_projection_lag: 0,
         accounts: BTreeMap::new(),
         account_name: None,
         client_id: None,
@@ -149,6 +161,7 @@ pub async fn seed_transaction(
         origin: Set("test".to_string()),
         imported_at: Set(Utc::now().into()),
         updated_at: Set(Utc::now().into()),
+        counterparty_key: Set(None),
     }
     .insert(db)
     .await
