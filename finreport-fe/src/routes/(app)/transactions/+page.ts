@@ -6,7 +6,6 @@ import {
 	TRANSACTIONS_QUERY
 } from '$lib/graphql/queries';
 import type { Account, Category, TagCount, TransactionPage } from '$lib/graphql/types';
-import { expandSelectedSlugs } from '$lib/categoryTree';
 import {
 	defaultGranularity,
 	presetRange,
@@ -14,6 +13,7 @@ import {
 	type DateRange,
 	type PeriodPresetId
 } from '$lib/period';
+import { parsePanelFilters, toTransactionFilter } from '$lib/transactionFilters';
 import type { PageLoad } from './$types';
 
 const PAGE_LIMIT = 50;
@@ -34,18 +34,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const preset = (url.searchParams.get('preset') as PeriodPresetId | null) ?? 'this-month';
 	const range = readRange(url, preset, today);
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
-	const accountId = url.searchParams.get('accountId') ?? undefined;
-	const search = url.searchParams.get('search') ?? undefined;
-	const categorySlugs = url.searchParams.get('categorySlugs')?.split(',').filter(Boolean) ?? [];
-	const uncategorized = url.searchParams.get('uncategorized') === 'true';
-	const needsReview = url.searchParams.get('needsReview') === 'true';
-	// Tri-state filters (§5): param absent = either, 'true'/'false' = that value.
-	const tags = url.searchParams.get('tags')?.split(',').filter(Boolean) ?? [];
-	const recurringParam = url.searchParams.get('recurring');
-	const recurring =
-		recurringParam === 'true' ? true : recurringParam === 'false' ? false : undefined;
-	const transferParam = url.searchParams.get('transfer');
-	const transfer = transferParam === 'true' ? true : transferParam === 'false' ? false : undefined;
+	const panel = parsePanelFilters(url.searchParams);
 
 	const client = createGraphqlClient(fetch);
 
@@ -59,16 +48,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const filter = {
 		startDate: range.start,
 		endDate: range.end,
-		accountIds: accountId ? [accountId] : undefined,
-		search: search || undefined,
-		categorySlugs: categorySlugs.length
-			? expandSelectedSlugs(categorySlugs, categories)
-			: undefined,
-		uncategorized: uncategorized || undefined,
-		needsReview: needsReview || undefined,
-		tags: tags.length ? tags : undefined,
-		recurring,
-		transfer
+		...toTransactionFilter(panel, categories)
 	};
 
 	const transactionsResult = await client
@@ -80,14 +60,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		start: range.start,
 		end: range.end,
 		granularity: defaultGranularity(range),
-		accountId,
-		search,
-		categorySlugs,
-		uncategorized,
-		needsReview,
-		tags,
-		recurring,
-		transfer,
+		panel,
 		offset,
 		error: Boolean(
 			accountsResult.error || categoriesResult.error || tagsResult.error || transactionsResult.error

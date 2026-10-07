@@ -12,6 +12,7 @@
 import { env as privateEnv } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import type { RequestEvent } from '@sveltejs/kit';
+import { amountWithinRange } from '$lib/transactionFilters';
 
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
@@ -127,35 +128,61 @@ function mockLogout(): GraphqlBackendResult {
 
 interface MockTransaction {
 	id: string;
+	accountId: string;
+	amount: string;
+	counterpartyName: string | null;
+	description: string | null;
+	label: { status: string; category: { slug: string } | null } | null;
 	splits: unknown[];
 	tags: string[];
 	transfer: unknown;
 	recurring: { isRecurring: boolean };
 }
 
+function isSet(v: boolean | null | undefined): v is boolean {
+	return v !== undefined && v !== null;
+}
+
 /**
- * Applies the iteration-3 `tags`/`recurring`/`transfer` filter fields (§4)
- * over the static fixture in mock mode, so `/transactions`'s new filters are
- * visibly functional without a real backend. `tags` is AND-ed; `recurring`
- * matches the *effective* flag; `transfer` selects only transfers (`true`)
- * or only non-transfers (`false`).
+ * Applies the `TransactionFilter` fields the filter panel sends over the
+ * static fixture in mock mode, so every control is visibly functional
+ * without a real backend: `accountIds`, `search` (case-insensitive substring
+ * over counterparty + description), `categorySlugs` (OR-ed), `tags` (AND-ed),
+ * `amountMin`/`amountMax` (inclusive bounds on the absolute amount) and the
+ * flags `recurring` (the *effective* flag), `transfer`, `needsReview` and
+ * `uncategorized` (`true` = no label at all). Dates are not applied: the
+ * fixture is one fixed set of rows whatever the period.
  */
 function applyInsightFilters(
 	items: MockTransaction[],
 	filter: Record<string, unknown> | undefined
 ): MockTransaction[] {
 	if (!filter) return items;
+	const accountIds = filter.accountIds as string[] | undefined;
+	const search = (filter.search as string | undefined)?.toLowerCase();
+	const categorySlugs = filter.categorySlugs as string[] | undefined;
 	const tags = filter.tags as string[] | undefined;
+	const amountMin = filter.amountMin as string | undefined;
+	const amountMax = filter.amountMax as string | undefined;
 	const recurring = filter.recurring as boolean | undefined;
 	const transfer = filter.transfer as boolean | undefined;
+	const needsReview = filter.needsReview as boolean | undefined;
+	const uncategorized = filter.uncategorized as boolean | undefined;
 	return items.filter((item) => {
+		if (accountIds?.length && !accountIds.includes(item.accountId)) return false;
+		if (search) {
+			const haystack = `${item.counterpartyName ?? ''} ${item.description ?? ''}`.toLowerCase();
+			if (!haystack.includes(search)) return false;
+		}
+		if (categorySlugs?.length && !categorySlugs.includes(item.label?.category?.slug ?? '')) {
+			return false;
+		}
 		if (tags && tags.length > 0 && !tags.every((t) => item.tags.includes(t))) return false;
-		if (recurring !== undefined && recurring !== null && item.recurring.isRecurring !== recurring) {
-			return false;
-		}
-		if (transfer !== undefined && transfer !== null && Boolean(item.transfer) !== transfer) {
-			return false;
-		}
+		if (!amountWithinRange(item.amount, amountMin, amountMax)) return false;
+		if (isSet(recurring) && item.recurring.isRecurring !== recurring) return false;
+		if (isSet(transfer) && Boolean(item.transfer) !== transfer) return false;
+		if (isSet(needsReview) && (item.label?.status === 'NEEDS_REVIEW') !== needsReview) return false;
+		if (isSet(uncategorized) && (item.label === null) !== uncategorized) return false;
 		return true;
 	});
 }

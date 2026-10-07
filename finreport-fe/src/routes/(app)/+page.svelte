@@ -11,6 +11,8 @@
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import TransactionFilters from '$lib/components/TransactionFilters.svelte';
+	import NoMatchingTransactions from '$lib/components/NoMatchingTransactions.svelte';
 	import type { BreakdownBar } from '$lib/breakdownShaping';
 	import {
 		drilldownFilterForLink,
@@ -21,6 +23,12 @@
 		type ShapedSankeyNode
 	} from '$lib/chartShaping';
 	import { defaultGranularity } from '$lib/period';
+	import {
+		clearedFilters,
+		hasActiveFilters,
+		writePanelFilters,
+		type PanelFilters
+	} from '$lib/transactionFilters';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -46,6 +54,8 @@
 		categorySlugs?: string[];
 		uncategorized?: boolean;
 		offset?: number;
+		/** The filter panel; omitted = keep the current one. */
+		panel?: PanelFilters;
 		resetDrilldown?: boolean;
 		sankeyDimension?: 'counterparty' | 'category';
 	}
@@ -76,15 +86,19 @@
 		if (sankeyDimension !== 'counterparty') params.set('sankey', sankeyDimension);
 		if (merged.txStart && merged.txStart !== start) params.set('txStart', merged.txStart);
 		if (merged.txEnd && merged.txEnd !== end) params.set('txEnd', merged.txEnd);
-		if (merged.accountIds?.length) params.set('accountIds', merged.accountIds.join(','));
+		// The chart selection has its own `sel*` params; `accountIds`,
+		// `categorySlugs`, `uncategorized`... belong to the filter panel.
+		if (merged.accountIds?.length) params.set('selAccountIds', merged.accountIds.join(','));
 		if (merged.counterpartyNames?.length)
-			params.set('counterpartyNames', merged.counterpartyNames.join(','));
-		if (merged.hasCounterparty === false) params.set('hasCounterparty', 'false');
-		if (merged.categorySlugs?.length) params.set('categorySlugs', merged.categorySlugs.join(','));
-		if (merged.uncategorized) params.set('uncategorized', 'true');
+			params.set('selCounterparties', merged.counterpartyNames.join(','));
+		if (merged.hasCounterparty === false) params.set('selHasCounterparty', 'false');
+		if (merged.categorySlugs?.length)
+			params.set('selCategorySlugs', merged.categorySlugs.join(','));
+		if (merged.uncategorized) params.set('selUncategorized', 'true');
 		if (merged.offset) params.set('offset', String(merged.offset));
 
-		goto(`${page.url.pathname}?${params.toString()}`, { keepFocus: true, noScroll: true });
+		const withPanel = writePanelFilters(opts.panel ?? data.panel, params);
+		goto(`${page.url.pathname}?${withPanel.toString()}`, { keepFocus: true, noScroll: true });
 	}
 
 	function applyPeriod() {
@@ -130,6 +144,11 @@
 		navigate({ resetDrilldown: true });
 	}
 
+	/** A panel edit changes the scope, so the chart selection and paging start over. */
+	function onFiltersChange(next: PanelFilters) {
+		navigate({ panel: next, offset: 0, resetDrilldown: true });
+	}
+
 	function onPageChange(offset: number) {
 		navigate({ offset });
 	}
@@ -146,6 +165,7 @@
 	const bars = $derived(data.summary ? shapeCashflowBars(data.summary, data.granularity) : []);
 	const graph = $derived(data.graph ? shapeCashflowGraph(data.graph) : undefined);
 	const periodLabel = $derived(`${data.start} to ${data.end}`);
+	const filtered = $derived(hasActiveFilters(data.panel));
 	const hasDrilldown = $derived(
 		Boolean(
 			data.drilldown.accountIds?.length ||
@@ -173,6 +193,16 @@
 			onchange={applyPeriod}
 		/>
 	</Card>
+
+	<TransactionFilters
+		value={data.panel}
+		accounts={data.accounts}
+		categories={data.categories}
+		tags={data.allTags}
+		matchCount={data.transactions?.totalCount}
+		scopeNote="Filters narrow the totals, charts, category breakdown and the transaction list together. Clicking a chart only narrows the list."
+		onchange={onFiltersChange}
+	/>
 
 	{#if data.error}
 		<p role="alert" class="text-sm text-[var(--color-spending)]">
@@ -222,11 +252,18 @@
 		<Card title="Transactions">
 			{#if hasDrilldown}
 				<div class="mb-3 flex items-center justify-between">
-					<p class="text-sm text-slate-500">Filtered by your chart selection.</p>
-					<Button variant="ghost" onclick={clearDrilldown}>Clear filter</Button>
+					<p class="text-sm text-slate-500">
+						List narrowed by your chart selection (the charts above are not).
+					</p>
+					<Button variant="ghost" onclick={clearDrilldown}>Clear chart selection</Button>
 				</div>
 			{/if}
-			{#if data.transactions}
+			{#if data.transactions && data.transactions.totalCount === 0}
+				<NoMatchingTransactions
+					filtered={filtered || hasDrilldown}
+					onclear={() => navigate({ panel: clearedFilters(), resetDrilldown: true })}
+				/>
+			{:else if data.transactions}
 				<TransactionTable
 					transactions={data.transactions.items}
 					currency={data.summary.currency}

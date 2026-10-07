@@ -38,8 +38,8 @@ npm run storybook          # component dev server
 ## Routes
 
 - `(app)` route group — auth-guarded, shares a nav layout (Dashboard / Transactions tabs + logout).
-  - `/` — the dashboard: period selector (month/week/custom + granularity), totals, a `CashflowBarChart` (income/spending bars) and a `CashflowSankey` (income → account → spending, with `Other`/`NET`/`DEFICIT` nodes), and a paged transaction list. Clicking a bar narrows the list to that bucket's date range (`txStart`/`txEnd` search params); clicking a Sankey node/link narrows it by `accountIds`/`counterpartyNames`/`hasCounterparty` (via `chartShaping.ts`'s `drilldownFilterForNode`/`drilldownFilterForLink`) — charts stay scoped to the whole period, only the list narrows.
-  - `/transactions` — a plain, filterable (period/account/search) paged transaction list, no charts.
+  - `/` — the dashboard: period selector (month/week/custom + granularity), totals, a `CashflowBarChart` (income/spending bars) and a `CashflowSankey` (income → account → spending, with `Other`/`NET`/`DEFICIT` nodes), and a paged transaction list. Clicking a bar narrows the list to that bucket's date range (`txStart`/`txEnd` search params); clicking a Sankey node/link narrows it by the `sel*` params (`selAccountIds`/`selCounterparties`/`selHasCounterparty`/`selCategorySlugs`/`selUncategorized`, via `chartShaping.ts`'s `drilldownFilterForNode`/`drilldownFilterForLink`) — a chart click narrows only the list. The shared `TransactionFilters` panel (search params `accountIds`, `categorySlugs`, `tags`, `search`, `amountMin`/`amountMax`, tri-state `recurring`/`transfer`/`needsReview`/`uncategorized`) is separate and narrows the totals, charts, breakdown *and* list; a panel edit resets the chart selection.
+  - `/transactions` — a paged transaction list with the same `TransactionFilters` panel (plus a period select), no charts.
 - `/login` — public.
 - `/api/graphql` — the proxy (see above).
 
@@ -53,6 +53,7 @@ LayerChart's `Chart` component has a server-rendering bug on this Svelte/Node co
   - `src/lib/period.ts` — date range presets, default granularity, bucket labeling.
   - `src/lib/chartShaping.ts` — shaping `CashflowSummary`/`CashflowGraph` GraphQL responses into chart-ready datasets, plus the drilldown-filter builders (covers the `DEFICIT`/`NET`/`Other`/unknown-`kind` edge cases using the actual WP0 mock fixtures).
   - `src/lib/format.ts` — amount/date display formatting.
+  - `src/lib/transactionFilters.ts` — the filter panel's logic: search params <-> filter, active-filter chips, tri-state flags, amount bounds, layering a chart selection over the panel.
 
   There's no component-rendering test setup (no `@testing-library/svelte`/jsdom) — component-level coverage comes from Playwright (e2e) and Storybook. Vitest is configured via a `test` block in `vite.config.ts` (not a separate `vitest.config.ts`) so it shares the real `sveltekit()`/`tailwindcss()` plugin setup — including `$lib`/`$app`/`$env` alias resolution — instead of a hand-rolled duplicate that would drift from it.
 

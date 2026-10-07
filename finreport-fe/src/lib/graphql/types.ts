@@ -110,6 +110,10 @@ export interface TransactionFilter {
 	recurring?: boolean | null;
 	/** `true` = only transfers, `false` = only non-transfers (iteration 3 §4). */
 	transfer?: boolean | null;
+	/** Inclusive lower bound on the amount magnitude (absolute value). */
+	amountMin?: Decimal | null;
+	/** Inclusive upper bound on the amount magnitude (absolute value). */
+	amountMax?: Decimal | null;
 	/** Exact ids, OR-ed among themselves and AND-ed with the other conditions. */
 	transactionIds?: UUID[] | null;
 }

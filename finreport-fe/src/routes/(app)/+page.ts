@@ -3,7 +3,9 @@ import {
 	ACCOUNTS_QUERY,
 	CASHFLOW_GRAPH_QUERY,
 	CASHFLOW_SUMMARY_QUERY,
+	CATEGORIES_QUERY,
 	CATEGORY_BREAKDOWN_QUERY,
+	TAGS_QUERY,
 	TRANSACTIONS_QUERY
 } from '$lib/graphql/queries';
 import type {
@@ -11,7 +13,10 @@ import type {
 	CashflowDimension,
 	CashflowGraph,
 	CashflowSummary,
+	Category,
 	CategoryBreakdown,
+	TagCount,
+	TransactionFilter,
 	TransactionPage
 } from '$lib/graphql/types';
 import {
@@ -22,6 +27,7 @@ import {
 	type Granularity,
 	type PeriodPresetId
 } from '$lib/period';
+import { layerSelection, parsePanelFilters, toTransactionFilter } from '$lib/transactionFilters';
 import type { PageLoad } from './$types';
 
 const PAGE_LIMIT = 50;
@@ -37,13 +43,17 @@ function readRange(url: URL, preset: PeriodPresetId, today: Date): DateRange {
 	return presetRange(preset, today);
 }
 
-/** Drill-down narrowing applied only to the transaction list (§6), not the charts. */
+/**
+ * The chart selection (§6): a Sankey/breakdown click narrows only the
+ * transaction list, on top of the filter panel. It has its own `sel*` params
+ * so it never fights the panel, which owns `accountIds`, `categorySlugs`, ...
+ */
 function readDrilldown(url: URL) {
-	const accountIds = url.searchParams.get('accountIds')?.split(',').filter(Boolean);
-	const counterpartyNames = url.searchParams.get('counterpartyNames')?.split(',').filter(Boolean);
-	const hasCounterpartyParam = url.searchParams.get('hasCounterparty');
-	const categorySlugs = url.searchParams.get('categorySlugs')?.split(',').filter(Boolean);
-	const uncategorizedParam = url.searchParams.get('uncategorized');
+	const accountIds = url.searchParams.get('selAccountIds')?.split(',').filter(Boolean);
+	const counterpartyNames = url.searchParams.get('selCounterparties')?.split(',').filter(Boolean);
+	const hasCounterpartyParam = url.searchParams.get('selHasCounterparty');
+	const categorySlugs = url.searchParams.get('selCategorySlugs')?.split(',').filter(Boolean);
+	const uncategorizedParam = url.searchParams.get('selUncategorized');
 	return {
 		accountIds: accountIds?.length ? accountIds : undefined,
 		counterpartyNames: counterpartyNames?.length ? counterpartyNames : undefined,
@@ -80,38 +90,56 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const txEnd = url.searchParams.get('txEnd') ?? range.end;
 
 	const client = createGraphqlClient(fetch);
-	const periodFilter = { startDate: range.start, endDate: range.end };
-	const transactionFilter = { startDate: txStart, endDate: txEnd, ...drilldown };
+	const panel = parsePanelFilters(url.searchParams);
 
-	const [accountsResult, summaryResult, graphResult, transactionsResult, breakdownResult] =
-		await Promise.all([
-			client.query(ACCOUNTS_QUERY, {}).toPromise(),
-			client.query(CASHFLOW_SUMMARY_QUERY, { filter: periodFilter, granularity }).toPromise(),
-			client
-				.query(CASHFLOW_GRAPH_QUERY, {
-					filter: periodFilter,
-					grouping: groupingForDimension(sankeyDimension)
-				})
-				.toPromise(),
-			client
-				.query(TRANSACTIONS_QUERY, {
-					filter: transactionFilter,
-					page: { limit: PAGE_LIMIT, offset }
-				})
-				.toPromise(),
-			client
-				.query(CATEGORY_BREAKDOWN_QUERY, {
-					filter: periodFilter,
-					level: 1,
-					// "Spending by category" means spending. Without a kind the
-					// resolver returns every kind but transfer, so income
-					// categories were showing up under a spending card, and
-					// savings count as saving rather than spending (requirements,
-					// "Categories (iteration 2)").
-					kind: 'EXPENSE'
-				})
-				.toPromise()
-		]);
+	const [accountsResult, categoriesResult, tagsResult] = await Promise.all([
+		client.query(ACCOUNTS_QUERY, {}).toPromise(),
+		client.query(CATEGORIES_QUERY, {}).toPromise(),
+		client.query(TAGS_QUERY, {}).toPromise()
+	]);
+	const categories = (categoriesResult.data?.categories ?? []) as Category[];
+
+	// The panel narrows the charts and the list alike, so the totals agree with
+	// the list. The chart selection and the bucket's own date range then narrow
+	// the list further, and only the list.
+	const panelFilter = toTransactionFilter(panel, categories);
+	const periodFilter = { startDate: range.start, endDate: range.end, ...panelFilter };
+	const transactionFilter: TransactionFilter = {
+		...layerSelection(
+			{ ...panelFilter },
+			Object.fromEntries(Object.entries(drilldown).filter(([, v]) => v !== undefined))
+		),
+		startDate: txStart,
+		endDate: txEnd
+	};
+
+	const [summaryResult, graphResult, transactionsResult, breakdownResult] = await Promise.all([
+		client.query(CASHFLOW_SUMMARY_QUERY, { filter: periodFilter, granularity }).toPromise(),
+		client
+			.query(CASHFLOW_GRAPH_QUERY, {
+				filter: periodFilter,
+				grouping: groupingForDimension(sankeyDimension)
+			})
+			.toPromise(),
+		client
+			.query(TRANSACTIONS_QUERY, {
+				filter: transactionFilter,
+				page: { limit: PAGE_LIMIT, offset }
+			})
+			.toPromise(),
+		client
+			.query(CATEGORY_BREAKDOWN_QUERY, {
+				filter: periodFilter,
+				level: 1,
+				// "Spending by category" means spending. Without a kind the
+				// resolver returns every kind but transfer, so income
+				// categories were showing up under a spending card, and
+				// savings count as saving rather than spending (requirements,
+				// "Categories (iteration 2)").
+				kind: 'EXPENSE'
+			})
+			.toPromise()
+	]);
 
 	const error = [accountsResult, summaryResult, graphResult, transactionsResult].some(
 		(r) => r.error
@@ -125,10 +153,13 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		txEnd,
 		granularity,
 		drilldown,
+		panel,
 		sankeyDimension,
 		offset,
 		error,
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
+		categories,
+		allTags: (tagsResult.data?.tags ?? []) as TagCount[],
 		summary: summaryResult.data?.cashflowSummary as CashflowSummary | undefined,
 		graph: graphResult.data?.cashflowGraph as CashflowGraph | undefined,
 		transactionFilter,
