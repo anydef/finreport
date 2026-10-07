@@ -136,6 +136,12 @@ services:
     environment:
       RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
+      # Every human-decision mutation (setTransactionCategory, split, tags,
+      # recurring, rule and category admin) publishes its record to Kafka
+      # before projecting it — the read model is a projection, so a mutation
+      # with no broker configured fails outright rather than writing Postgres
+      # directly. The GraphQL server is a producer here, like the importer.
+      APP_kafka_brokers: kafka.lab.anydef.de:9092
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
