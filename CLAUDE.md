@@ -230,12 +230,9 @@ the label-resolution and learned-rule-lifecycle diagrams.
   sets `APP_llm_provider=anthropic`); the deployed `docker-compose.yml` passes
   it to the new `finreport-be-labeler` service as `APP_anthropic_api_key`.
   Non-secret knobs (provider, model) live in `docker-compose.yml`, never in
-  `.env.tpl`. **Gap**: `terraform/main.tf`'s `module "portainer_stack"`
-  `extra_env` still needs an `APP_anthropic_api_key = var.anthropic_api_key`
-  entry (the same mechanism `POSTGRES_PASSWORD` already uses there) before the
-  key actually reaches the stack — that file is outside this iteration's
-  dev-stack/docs work package, so it's a deliberate follow-up, not an
-  oversight.
+  `.env.tpl`. The key now reaches the stack via `terraform/main.tf`'s
+  `module "portainer_stack"` `extra_env` (`APP_anthropic_api_key = var.anthropic_api_key`),
+  the same mechanism `POSTGRES_PASSWORD` uses.
 - **Deployed**: a new `finreport-be-labeler` service alongside
   `finreport-be-projector` — same image, same Kafka broker, static LAN IP
   `192.168.100.49`, no new port.

@@ -4,7 +4,9 @@
 
 use async_graphql::ErrorExtensions;
 use chrono::Utc;
-use entity::entities::{transaction, transaction_label, transaction_split};
+use entity::entities::{
+    transaction, transaction_label, transaction_split, transaction_user_label,
+};
 use rust_decimal::Decimal as RustDecimal;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter,
@@ -90,6 +92,85 @@ async fn categories_by_id(
         .collect())
 }
 
+/// The category a user pinned on each of `transaction_ids`, from the
+/// override layer (`transaction_user_label`), skipping rows that carry no
+/// category (a tags-only or recurring-only record — §2.1).
+///
+/// The read path needs this because the two layers are written by different
+/// processes: a mutation writes the override synchronously, while the
+/// `transaction_label` projection it resolves into is rewritten by the
+/// labeler on its next pass. Between the two, the projection holds a label
+/// the precedence chain (§2.5) has already superseded, so reporting it
+/// would answer with a *lower*-precedence source than the one on record.
+async fn user_category_overrides(
+    db: &DatabaseConnection,
+    transaction_ids: &[Uuid],
+) -> async_graphql::Result<HashMap<Uuid, crate::graphql::types::Category>> {
+    if transaction_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = transaction_user_label::Entity::find()
+        .filter(
+            transaction_user_label::Column::TransactionId.is_in(transaction_ids.to_vec()),
+        )
+        .filter(transaction_user_label::Column::CategoryId.is_not_null())
+        .all(db)
+        .await?;
+    let category_ids: Vec<Uuid> = rows.iter().filter_map(|r| r.category_id).collect();
+    let categories = categories_by_id(db, &category_ids).await?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| {
+            let category = row.category_id.and_then(|id| categories.get(&id).cloned())?;
+            Some((row.transaction_id, category))
+        })
+        .collect())
+}
+
+/// Transactions among `transaction_ids` the user has split. A split
+/// outranks even a category override (§2.5 step 1, ahead of step 2), and
+/// carries no single category of its own — the parts do.
+///
+/// Mirrors `projection::labeling::find_valid_splits`' notion of a split
+/// that counts: parts flagged `invalid` (they no longer add up to the
+/// transaction amount) are ignored, exactly as the labeler ignores them.
+async fn split_transaction_ids(
+    db: &DatabaseConnection,
+    transaction_ids: &[Uuid],
+) -> async_graphql::Result<std::collections::HashSet<Uuid>> {
+    if transaction_ids.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    Ok(transaction_split::Entity::find()
+        .filter(transaction_split::Column::TransactionId.is_in(transaction_ids.to_vec()))
+        .filter(transaction_split::Column::Invalid.eq(false))
+        .all(db)
+        .await?
+        .into_iter()
+        .map(|row| row.transaction_id)
+        .collect())
+}
+
+/// The label a user decision resolves to, built to match exactly what the
+/// labeler's own top two branches (`labeling::processor`, §2.5 steps 1–2)
+/// will write once it catches up — so the value a caller reads does not
+/// change when it does. `category` is `None` for a split, which has no
+/// single category.
+fn user_override_label(
+    category: Option<crate::graphql::types::Category>,
+) -> TransactionLabel {
+    TransactionLabel {
+        category,
+        source: GqlLabelSource::User,
+        rule: None,
+        confidence: None,
+        status: GqlLabelStatus::Resolved,
+        review_reason: None,
+        proposed_category_path: None,
+        reasoning: None,
+    }
+}
+
 async fn categories_by_rule_id(
     db: &DatabaseConnection,
     rule_ids: &[Uuid],
@@ -123,6 +204,8 @@ pub async fn prefetch(
     let rule_ids: Vec<Uuid> = label_rows.iter().filter_map(|r| r.rule_id).collect();
     let categories = categories_by_id(db, &category_ids).await?;
     let rules = categories_by_rule_id(db, &rule_ids).await?;
+    let overrides = user_category_overrides(db, transaction_ids).await?;
+    let split_ids = split_transaction_ids(db, transaction_ids).await?;
 
     let mut labels = cache.labels.write().await;
     // Pre-seed every requested id with `None` so `label_for`'s cache-hit
@@ -154,6 +237,16 @@ pub async fn prefetch(
                 reasoning: row.reasoning,
             }),
         );
+    }
+    // Applied after the projected rows so a user decision beats them, and
+    // so a transaction the labeler has not labelled at all still reports
+    // what its owner chose. Splits go last of all, mirroring the chain's
+    // own order: a split outranks a category override.
+    for (transaction_id, category) in overrides {
+        labels.insert(transaction_id, Some(user_override_label(Some(category))));
+    }
+    for transaction_id in split_ids {
+        labels.insert(transaction_id, Some(user_override_label(None)));
     }
     drop(labels);
 
@@ -206,6 +299,21 @@ pub async fn label_for(
         && let Some(found) = cache.labels.write().await.remove(&transaction_id)
     {
         return Ok(found);
+    }
+    // A user decision outranks whatever the projection currently holds, and
+    // stands on its own when the labeler has not written a row yet. Split
+    // first, then a category override — the chain's own order (§2.5).
+    if split_transaction_ids(db, &[transaction_id])
+        .await?
+        .contains(&transaction_id)
+    {
+        return Ok(Some(user_override_label(None)));
+    }
+    if let Some(category) = user_category_overrides(db, &[transaction_id])
+        .await?
+        .remove(&transaction_id)
+    {
+        return Ok(Some(user_override_label(Some(category))));
     }
     let row = transaction_label::Entity::find_by_id(transaction_id)
         .one(db)
