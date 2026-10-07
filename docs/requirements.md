@@ -132,3 +132,18 @@ Scheduled for a future iteration, after the admin bootstrap (`app_user.is_admin`
   - Reset a user's password.
   - Assign/unassign account ownership (`user_account` links) per user, equivalent to `user-admin link`/`unlink` but from the UI.
 - Out of scope until then: no GraphQL mutations for any of the above exist yet, and the frontend has no admin area — `user-admin` remains the only way to manage users beyond the bootstrap-managed `admin`.
+
+## Bank connections via UI (future iteration)
+Replaces the preconfigured Comdirect logins (`APP_accounts__<n>__*` env vars, `.env.tpl`/terraform). Applies to Comdirect and any later bank.
+
+- **Credentials are user-managed in the UI:** each user adds, edits and removes their own bank connections (Comdirect: client id, client secret, Zugangsnummer, PIN). Nothing bank-specific is configured through env, terraform or 1Password any more.
+- **Sync (login) is started from the UI**, per connection, not by the importer on a schedule with baked-in creds.
+- **TAN state is visible in the UI:** a sync shows its live status (e.g. logging in → *TAN pending — approve the push-TAN in your app* → importing → done/failed). A pending TAN never blocks other connections or users; a TAN that expires or is rejected shows as failed with a retry action.
+- **Ownership:** a connection belongs to the user who created it; accounts it imports are linked to that user.
+- **Edge cases:**
+  - Session tokens are still persisted per connection, so re-syncs within the bank's session lifetime need no new TAN.
+  - Two users connecting logins that see the same account: same idempotent import rules as today (dedup by Comdirect `accountId`).
+  - Deleting a connection stops future syncs; already-imported data stays.
+  - Wrong credentials surface as a connection error in the UI, not a crash-looping importer.
+- **Security (must be decided with the user before implementation):** how credentials are stored (encrypted at rest, key management), whether the PIN is stored at all or asked per sync, and who can see/edit a connection (never returned to the browser after saving).
+- **Migration:** existing env-configured logins keep working until the UI flow ships; then they are removed from `.env.tpl`, terraform and `docker-compose.yml`.
