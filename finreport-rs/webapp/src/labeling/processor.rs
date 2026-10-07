@@ -69,12 +69,17 @@ fn offset_topic_key(topic: &str) -> String {
 /// pointers/closures, so the processor's own unit tests can fake them out
 /// instead of hitting WP2's still-`todo!()` bodies. [`LabelingOps::real`]
 /// wires the actual WP2 functions for production.
+type NormalizeFn = Box<dyn Fn(Option<&str>, Option<&str>) -> String + Send + Sync>;
+type FingerprintFn = Box<dyn Fn(&str, &str, &str, &str, &str, Direction) -> String + Send + Sync>;
+type MostSpecificMatchFn =
+    Box<dyn Fn(&[RuleRecord], &RuleMatchInput<'_>) -> Option<RuleRecord> + Send + Sync>;
+type ConsiderFn = Box<dyn for<'a> Fn(&[Observation<'a>]) -> Option<LearnedRule> + Send + Sync>;
+
 pub struct LabelingOps {
-    normalize: Box<dyn Fn(Option<&str>, Option<&str>) -> String + Send + Sync>,
-    fingerprint: Box<dyn Fn(&str, &str, &str, &str, &str, Direction) -> String + Send + Sync>,
-    most_specific_match:
-        Box<dyn Fn(&[RuleRecord], &RuleMatchInput<'_>) -> Option<RuleRecord> + Send + Sync>,
-    consider: Box<dyn for<'a> Fn(&[Observation<'a>]) -> Option<LearnedRule> + Send + Sync>,
+    normalize: NormalizeFn,
+    fingerprint: FingerprintFn,
+    most_specific_match: MostSpecificMatchFn,
+    consider: ConsiderFn,
 }
 
 impl LabelingOps {
@@ -106,11 +111,13 @@ impl LabelingOps {
         }
     }
 
-    /// Builds a fake set of ops for unit tests, from plain closures — so a
-    /// test can assert on `resolve_transaction`'s orchestration (which step
-    /// wins, when a cache hit short-circuits the provider call, ...) without
-    /// any of WP2's real (panicking) logic.
-    #[cfg(test)]
+    /// Builds a fake set of ops for tests, from plain closures — so a test
+    /// can assert on `resolve_transaction`'s orchestration (which step wins,
+    /// when a cache hit short-circuits the provider call, ...) without any
+    /// of WP2's real (panicking) logic. Not `#[cfg(test)]`-gated: WP3's own
+    /// `tests/labeler_postgres.rs` integration suite (a separate crate from
+    /// `webapp`'s perspective) needs it too, while WP2's real resolution
+    /// logic remains `todo!()`.
     pub fn fake(
         normalize: impl Fn(Option<&str>, Option<&str>) -> String + Send + Sync + 'static,
         fingerprint: impl Fn(&str, &str, &str, &str, &str, Direction) -> String
@@ -313,6 +320,7 @@ fn transaction_direction(amount: rust_decimal::Decimal) -> Direction {
 /// error, timeout, or the cost guard is exhausted — §2.5 edge cases: held
 /// and unlabelled are different states, so this is distinct from a
 /// `needs_review` resolution, which *is* `Some`).
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_transaction(
     db: &impl ConnectionTrait,
     ops: &LabelingOps,
@@ -402,7 +410,7 @@ pub async fn resolve_transaction(
     );
 
     if let Some(cached) = proj::find_cache(db, &fp).await? {
-        return Ok(Some(cache_hit_to_resolution(&cached)));
+        return Ok(Some(cache_hit_to_resolution(&cached, llm_min_confidence)));
     }
 
     if !cost_guard.try_consume() {
@@ -458,14 +466,17 @@ pub async fn resolve_transaction(
     )))
 }
 
-fn cache_hit_to_resolution(cached: &entity::entities::llm_label_cache::Model) -> ResolvedLabel {
+fn cache_hit_to_resolution(
+    cached: &entity::entities::llm_label_cache::Model,
+    llm_min_confidence: f32,
+) -> ResolvedLabel {
     let confidence: f32 = cached.confidence.to_string().parse().unwrap_or(0.0);
     let (status, review_reason) = classify_llm_answer(
         cached.category_id.is_some(),
         cached.proposed_path.is_some(),
         false,
         confidence,
-        1.0,
+        llm_min_confidence,
     );
     ResolvedLabel {
         status,
@@ -1083,6 +1094,7 @@ fn parse_source_external_id(key: &str) -> Option<(&str, &str)> {
     key.split_once(':')
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn resolve_and_publish_by_source_external_id(
     db: &DatabaseConnection,
     publisher: &EventPublisher,

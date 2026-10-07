@@ -160,7 +160,8 @@ pub async fn project_category(
             category::Column::Revision,
         ])
         .action_cond_where(
-            Expr::col(category::Column::Revision).lte(Expr::cust("excluded.revision")),
+            Expr::col((category::Entity, category::Column::Revision))
+                .lte(Expr::cust("excluded.revision")),
         );
 
     category::Entity::insert(model)
@@ -453,7 +454,7 @@ pub async fn project_rule(
             rule::Column::CreatedAt,
             rule::Column::Revision,
         ])
-        .action_cond_where(Expr::col(rule::Column::Revision).lte(Expr::cust("excluded.revision")));
+        .action_cond_where(Expr::col((rule::Entity, rule::Column::Revision)).lte(Expr::cust("excluded.revision")));
 
     rule::Entity::insert(model)
         .on_conflict(on_conflict.to_owned())
