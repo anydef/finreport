@@ -7,6 +7,7 @@
 //! `StreamConsumer` and feeds it batches.
 
 pub mod comdirect;
+pub mod labeling;
 pub mod legacy;
 pub mod mapper;
 pub mod offsets;
@@ -65,6 +66,48 @@ fn entity_kind_for_topic(topic: &str) -> Option<EntityKind> {
         TOPIC_ACCOUNT => Some(EntityKind::Account),
         TOPIC_ACCOUNT_BALANCE => Some(EntityKind::Balance),
         TOPIC_TRANSACTION => Some(EntityKind::Transaction),
+        _ => None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Labeling-topic dispatch (§2.2/§3, frozen by WP0 — see
+// `webapp/src/projection/labeling.rs`)
+// ---------------------------------------------------------------------------
+//
+// This is **not** wired into [`process_batch`]/[`run`] above: those two only
+// ever see [`INGEST_TOPICS`]. The forthcoming `labeler` binary (WP3) is the
+// intended caller, once it has its own consume loop over
+// `finreport.{transaction,user-label,rule,label-request}` (§2.3) and needs to
+// know which `projection::labeling` function projects each of the five
+// *output* topics it (and `category-seed`) write to.
+
+/// One of the five new topics this crate projects into a Postgres table —
+/// as distinct from [`EntityKind`], which is the three original ingest
+/// topics the `projector` binary consumes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelingTopic {
+    Category,
+    TransactionLabel,
+    LlmCache,
+    UserLabel,
+    Rule,
+}
+
+/// Maps a §2.2 topic name to the [`LabelingTopic`] WP3's projector dispatches
+/// it to. `finreport.label-request` is deliberately absent: it is a work
+/// queue the labeler consumes to decide what to re-resolve, not a topic any
+/// `projection::labeling` function projects.
+pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
+    use crate::kafka::labeling::{
+        TOPIC_CATEGORY, TOPIC_LLM_CACHE, TOPIC_RULE, TOPIC_TRANSACTION_LABEL, TOPIC_USER_LABEL,
+    };
+    match topic {
+        TOPIC_CATEGORY => Some(LabelingTopic::Category),
+        TOPIC_TRANSACTION_LABEL => Some(LabelingTopic::TransactionLabel),
+        TOPIC_LLM_CACHE => Some(LabelingTopic::LlmCache),
+        TOPIC_USER_LABEL => Some(LabelingTopic::UserLabel),
+        TOPIC_RULE => Some(LabelingTopic::Rule),
         _ => None,
     }
 }

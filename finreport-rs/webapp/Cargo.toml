@@ -73,3 +73,11 @@ path = "src/bin/fixture_replay.rs"
 name = "legacy-backfill"
 path = "src/bin/legacy_backfill.rs"
 
+[[bin]]
+name = "labeler"
+path = "src/bin/labeler.rs"
+
+[[bin]]
+name = "category-seed"
+path = "src/bin/category_seed.rs"
+
