@@ -11,11 +11,55 @@ mod common;
 use async_graphql::Request;
 use rust_decimal::Decimal;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::time::Duration;
 use webapp::graphql::current_user::AuthenticatedUser;
 use webapp::graphql::{create_schema, request_with_auth, RawSessionToken};
+use webapp::kafka::labeling::{TOPIC_CATEGORY, TOPIC_LABEL_REQUEST, TOPIC_RULE, TOPIC_USER_LABEL};
 
 fn authed(request: Request, user: Option<AuthenticatedUser>) -> Request {
     request_with_auth(request, user, RawSessionToken::default())
+}
+
+/// Starts a throwaway Kafka broker (own container, not the shared
+/// `support::kafka::TestKafka` — that helper only creates the four
+/// iteration-1 topics and isn't WP4's to extend) with the four iteration-2
+/// labeling topics the mutations under test publish to. Returns the
+/// `host:port` string for `Settings.kafka_brokers` / `create_schema`.
+async fn start_kafka_with_labeling_topics(
+) -> (testcontainers::ContainerAsync<testcontainers_modules::kafka::apache::Kafka>, String) {
+    use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+    use rdkafka::client::DefaultClientContext;
+    use rdkafka::ClientConfig;
+    use testcontainers::runners::AsyncRunner;
+    use testcontainers_modules::kafka::apache::{Kafka, KAFKA_PORT};
+
+    let container = Kafka::default().start().await.expect("start Kafka testcontainer");
+    let host = container.get_host().await.expect("Kafka testcontainer host");
+    let port = container
+        .get_host_port_ipv4(KAFKA_PORT)
+        .await
+        .expect("Kafka testcontainer mapped port");
+    let bootstrap_servers = format!("{host}:{port}");
+
+    let admin: AdminClient<DefaultClientContext> = ClientConfig::new()
+        .set("bootstrap.servers", &bootstrap_servers)
+        .create()
+        .expect("create Kafka admin client");
+    let topics = [TOPIC_USER_LABEL, TOPIC_RULE, TOPIC_CATEGORY, TOPIC_LABEL_REQUEST]
+        .map(|name| NewTopic::new(name, 1, TopicReplication::Fixed(1)));
+    admin
+        .create_topics(&topics, &AdminOptions::new().request_timeout(Some(Duration::from_secs(10))))
+        .await
+        .expect("create labeling topics on Kafka testcontainer");
+
+    (container, bootstrap_servers)
+}
+
+fn settings_with_kafka(bootstrap_servers: &str) -> Arc<utils::settings::Settings> {
+    let mut settings = (*common::dummy_settings()).clone();
+    settings.kafka_brokers = Some(bootstrap_servers.to_string());
+    Arc::new(settings)
 }
 
 #[tokio::test]
@@ -214,4 +258,315 @@ async fn cashflow_graph_conserves_flow_and_reconciles_with_summary() {
 
     assert_eq!(total_income_in, summary_income);
     assert_eq!(total_spending_out, summary_spending);
+}
+
+#[tokio::test]
+async fn set_transaction_category_without_kafka_fails_with_kafka_unavailable() {
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "erin-nokafka-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Erin's account").await;
+    common::link(&db, user, account).await;
+    let tx = common::seed_transaction(&db, account, "2024-04-01", "-10.00", Some("Shop")).await;
+    let (_, slug) = common::seed_category(&db, "expense.groceries", "Groceries", "EXPENSE").await;
+
+    // `common::dummy_settings()` leaves `kafka_brokers` unset (§8), so the
+    // schema is built with no publisher at all — the mutation must fail
+    // fast with `KAFKA_UNAVAILABLE` rather than panicking.
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "erin-nokafka-test".to_string(),
+        account_ids: vec![account],
+    };
+    let query = format!(
+        r#"mutation {{ setTransactionCategory(transactionId: "{tx}", categorySlug: "{slug}") {{ id }} }}"#
+    );
+    let response = schema.execute(authed(Request::new(query), Some(caller))).await;
+
+    assert!(!response.errors.is_empty(), "expected an error, got {response:?}");
+    assert_eq!(
+        response.errors[0].extensions.as_ref().and_then(|e| e.get("code")),
+        Some(&async_graphql::Value::String("KAFKA_UNAVAILABLE".to_string()))
+    );
+}
+
+#[tokio::test]
+async fn split_transaction_rejects_a_sum_mismatch_and_splits_round_trip_via_the_split_field() {
+    let (_kafka, bootstrap) = start_kafka_with_labeling_topics().await;
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "frank-split-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Frank's account").await;
+    common::link(&db, user, account).await;
+    let tx = common::seed_transaction(&db, account, "2024-04-02", "-100.00", Some("Supermarket")).await;
+    let (_, groceries_slug) = common::seed_category(&db, "expense.groceries2", "Groceries", "EXPENSE").await;
+    let (_, household_slug) = common::seed_category(&db, "expense.household2", "Household", "EXPENSE").await;
+
+    let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "frank-split-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    // Sum mismatch: parts sum to -90.00, not the transaction's -100.00.
+    let bad_query = format!(
+        r#"mutation {{ splitTransaction(transactionId: "{tx}", parts: [
+            {{ amount: "-60.00", categorySlug: "{groceries_slug}" }},
+            {{ amount: "-30.00", categorySlug: "{household_slug}" }}
+        ]) {{ id }} }}"#
+    );
+    let bad_response = schema
+        .execute(authed(Request::new(bad_query), Some(caller.clone())))
+        .await;
+    assert!(!bad_response.errors.is_empty(), "expected a sum-mismatch error");
+    assert_eq!(
+        bad_response.errors[0].extensions.as_ref().and_then(|e| e.get("code")),
+        Some(&async_graphql::Value::String("SPLIT_SUM_MISMATCH".to_string()))
+    );
+
+    // Exact sum: parts sum to exactly -100.00.
+    let good_query = format!(
+        r#"mutation {{ splitTransaction(transactionId: "{tx}", parts: [
+            {{ amount: "-70.00", categorySlug: "{groceries_slug}" }},
+            {{ amount: "-30.00", categorySlug: "{household_slug}" }}
+        ]) {{ splits {{ index amount category {{ slug }} }} }} }}"#
+    );
+    let good_response = schema
+        .execute(authed(Request::new(good_query), Some(caller.clone())))
+        .await;
+    assert!(good_response.errors.is_empty(), "{:?}", good_response.errors);
+    let data = good_response.data.into_json().unwrap();
+    let splits = data["splitTransaction"]["splits"].as_array().unwrap();
+    assert_eq!(splits.len(), 2);
+    let sum: Decimal = splits
+        .iter()
+        .map(|s| Decimal::from_str(s["amount"].as_str().unwrap()).unwrap())
+        .sum();
+    assert_eq!(sum, Decimal::from_str("-100.00").unwrap());
+
+    // unsplitTransaction clears the parts back out.
+    let unsplit_query =
+        format!(r#"mutation {{ unsplitTransaction(transactionId: "{tx}") {{ splits {{ index }} }} }}"#);
+    let unsplit_response = schema
+        .execute(authed(Request::new(unsplit_query), Some(caller)))
+        .await;
+    assert!(unsplit_response.errors.is_empty(), "{:?}", unsplit_response.errors);
+    let unsplit_data = unsplit_response.data.into_json().unwrap();
+    assert_eq!(
+        unsplit_data["unsplitTransaction"]["splits"].as_array().unwrap().len(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn rule_crud_and_reapply_scope_to_the_callers_accounts() {
+    let (_kafka, bootstrap) = start_kafka_with_labeling_topics().await;
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "grace-rule-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Grace's account").await;
+    common::link(&db, user, account).await;
+    let (_, subs_slug) = common::seed_category(&db, "expense.subscriptions", "Subscriptions", "EXPENSE").await;
+    common::seed_transaction(&db, account, "2024-04-03", "-9.99", Some("Streamflix")).await;
+
+    let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "grace-rule-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    let create_query = format!(
+        r#"mutation {{
+        createRule(input: {{
+            name: "Streamflix subscription"
+            categorySlug: "{subs_slug}"
+            conditions: {{ description_contains: "Streamflix" }}
+            priority: 10
+        }}) {{ id name state priority }}
+    }}"#
+    );
+    let create_response = schema
+        .execute(authed(Request::new(create_query), Some(caller.clone())))
+        .await;
+    assert!(create_response.errors.is_empty(), "{:?}", create_response.errors);
+    let create_data = create_response.data.into_json().unwrap();
+    let rule_id = create_data["createRule"]["id"].as_str().unwrap().to_string();
+    assert_eq!(create_data["createRule"]["state"], "ACTIVE");
+
+    // `rules` (unscoped, category tree / rules are tenant-agnostic this
+    // iteration) must see the rule right after publish-then-upsert.
+    let list_response = schema
+        .execute(authed(Request::new("{ rules { id name } }"), Some(caller.clone())))
+        .await;
+    assert!(list_response.errors.is_empty(), "{:?}", list_response.errors);
+    let list_data = list_response.data.into_json().unwrap();
+    assert!(list_data["rules"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["id"] == rule_id));
+
+    // `setRuleState` revokes it.
+    let revoke_query = format!(r#"mutation {{ setRuleState(id: "{rule_id}", state: REVOKED) {{ state }} }}"#);
+    let revoke_response = schema
+        .execute(authed(Request::new(revoke_query), Some(caller.clone())))
+        .await;
+    assert!(revoke_response.errors.is_empty(), "{:?}", revoke_response.errors);
+    assert_eq!(
+        revoke_response.data.into_json().unwrap()["setRuleState"]["state"],
+        "REVOKED"
+    );
+
+    // `reapplyRule` is scoped: it must not error for the owning caller and
+    // returns the (possibly zero) count of matching transactions in their
+    // accounts, publishing a `label-request` behind the scenes.
+    let reapply_query = format!(r#"mutation {{ reapplyRule(id: "{rule_id}") }}"#);
+    let reapply_response = schema
+        .execute(authed(Request::new(reapply_query), Some(caller)))
+        .await;
+    assert!(reapply_response.errors.is_empty(), "{:?}", reapply_response.errors);
+}
+
+#[tokio::test]
+async fn category_breakdown_reconciles_labelled_and_unlabelled_totals() {
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "heidi-breakdown-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Heidi's account").await;
+    common::link(&db, user, account).await;
+
+    let (groceries, groceries_slug) =
+        common::seed_category(&db, "expense.groceries3", "Groceries", "EXPENSE").await;
+    let tx_labelled = common::seed_transaction(&db, account, "2024-05-01", "-40.00", Some("Shop")).await;
+    common::seed_transaction_label(&db, tx_labelled, Some(groceries), "user", "resolved").await;
+    // No `transaction_label` row at all: falls into the `uncategorized` bucket.
+    common::seed_transaction(&db, account, "2024-05-02", "-15.00", Some("Unknown shop")).await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "heidi-breakdown-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    let query = r#"{
+        categoryBreakdown(filter: { startDate: "2024-05-01", endDate: "2024-05-02" }, level: 1) {
+            rows { category { slug } amount }
+            uncategorized { amount }
+            currency
+        }
+    }"#;
+    let response = schema.execute(authed(Request::new(query), Some(caller))).await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    let breakdown = &data["categoryBreakdown"];
+    let rows = breakdown["rows"].as_array().unwrap();
+
+    let rows_total: Decimal = rows
+        .iter()
+        .map(|r| Decimal::from_str(r["amount"].as_str().unwrap()).unwrap())
+        .sum();
+    assert_eq!(rows_total, Decimal::from_str("40.0000").unwrap());
+    assert!(rows.iter().any(|r| r["category"]["slug"] == groceries_slug));
+    assert_eq!(
+        Decimal::from_str(breakdown["uncategorized"]["amount"].as_str().unwrap()).unwrap(),
+        Decimal::from_str("15.0000").unwrap()
+    );
+}
+
+#[tokio::test]
+async fn review_queue_only_surfaces_the_callers_own_needs_review_transactions() {
+    let db = common::db().await;
+
+    let (user_a, _) = common::seed_user(&db, "ivan-review-test", "pw").await;
+    let account_a = common::seed_account(&db, "EUR", "Ivan's account").await;
+    common::link(&db, user_a, account_a).await;
+    let (_user_b, _) = common::seed_user(&db, "judy-review-test", "pw").await;
+    let account_b = common::seed_account(&db, "EUR", "Judy's account").await;
+
+    let tx_a = common::seed_transaction(&db, account_a, "2024-05-10", "-20.00", Some("Mystery")).await;
+    common::seed_transaction_label(&db, tx_a, None, "llm", "needs_review").await;
+    let tx_b = common::seed_transaction(&db, account_b, "2024-05-10", "-20.00", Some("Mystery")).await;
+    common::seed_transaction_label(&db, tx_b, None, "llm", "needs_review").await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user_a,
+        username: "ivan-review-test".to_string(),
+        account_ids: vec![account_a],
+    };
+
+    let query = "{ reviewQueue { totalCount transactions { id } } }";
+    let response = schema.execute(authed(Request::new(query), Some(caller))).await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    assert_eq!(data["reviewQueue"]["totalCount"], 1);
+    assert_eq!(data["reviewQueue"]["transactions"][0]["id"], tx_a.to_string());
+}
+
+#[tokio::test]
+async fn cashflow_graph_category_dimension_conserves_flow_and_links_to_labelled_categories() {
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "kyle-category-sankey-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Kyle's account").await;
+    common::link(&db, user, account).await;
+
+    let (rent_id, rent_slug) = common::seed_category(&db, "expense.rent", "Rent", "EXPENSE").await;
+    common::seed_transaction(&db, account, "2024-06-01", "1000.00", Some("Employer")).await;
+    let tx_rent = common::seed_transaction(&db, account, "2024-06-02", "-500.00", Some("Landlord")).await;
+    common::seed_transaction_label(&db, tx_rent, Some(rent_id), "user", "resolved").await;
+    // Unlabelled spending: falls into the category mode's "Uncategorized" bucket.
+    common::seed_transaction(&db, account, "2024-06-03", "-50.00", Some("Unknown shop")).await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "kyle-category-sankey-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    let query = r#"{ cashflowGraph(
+        filter: { startDate: "2024-06-01", endDate: "2024-06-03" }
+        grouping: { dimensions: [INCOME_SOURCE, ACCOUNT, CATEGORY] }
+    ) {
+        nodes { id kind value refType refId }
+        links { sourceId targetId value }
+    } }"#;
+    let response = schema.execute(authed(Request::new(query), Some(caller))).await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    let nodes = data["cashflowGraph"]["nodes"].as_array().unwrap();
+    let links = data["cashflowGraph"]["links"].as_array().unwrap();
+
+    // Flow conservation, same invariant as the OUTCOME-dimension test above.
+    for node in nodes {
+        let id = node["id"].as_str().unwrap();
+        let reported: Decimal = Decimal::from_str(node["value"].as_str().unwrap()).unwrap();
+        let inflow: Decimal = links
+            .iter()
+            .filter(|l| l["targetId"] == *id)
+            .map(|l| Decimal::from_str(l["value"].as_str().unwrap()).unwrap())
+            .sum();
+        let outflow: Decimal = links
+            .iter()
+            .filter(|l| l["sourceId"] == *id)
+            .map(|l| Decimal::from_str(l["value"].as_str().unwrap()).unwrap())
+            .sum();
+        let flow = if inflow > Decimal::ZERO { inflow } else { outflow };
+        assert_eq!(flow, reported, "node {id} does not conserve flow");
+    }
+
+    let rent_node = nodes
+        .iter()
+        .find(|n| n["refType"] == "category" && n["refId"] == rent_slug)
+        .unwrap_or_else(|| panic!("no category node for '{rent_slug}' among {nodes:?}"));
+    assert_eq!(
+        Decimal::from_str(rent_node["value"].as_str().unwrap()).unwrap(),
+        Decimal::from_str("500.0000").unwrap()
+    );
+    assert!(nodes.iter().any(|n| n["kind"] == "CATEGORY"));
 }
