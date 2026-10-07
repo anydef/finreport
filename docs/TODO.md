@@ -59,6 +59,32 @@ by agreeing where it goes.
   table shows the whole amount under one category. Needs at least a split
   badge and the parts on expand. Found while building goal fixtures.
 
+- **Server-calculated running total for fixed-range goals** — S backend, S
+  frontend. The Holiday-fund chart currently adds the transactions up in the
+  browser, and it only fetches the first 200 of them, so a goal with more
+  transactions than that draws a line that stops early. Moving the calculation
+  to the server means adding a series of running totals to `GoalProgress` and
+  having the goals resolver fill it. Accepted as good enough for now
+  (2026-10-07); do this before any goal accumulates more than ~200
+  transactions, which for a monthly goal is a few years.
+- **Dynamic filter conditions on a goal's scope** — M. A goal's scope today is
+  a fixed shape: a list of categories, a list of tags, and one choice of
+  whether both must match or either. When both are given, both must match
+  (confirmed 2026-10-07). The richer version lets the user build the condition
+  themselves — nested groups of and/or, negation, and conditions on fields
+  beyond category and tag. This replaces the `combine`/`tagCombine` flags with
+  a small expression tree, in the event, the projection and the query, so it is
+  worth doing deliberately rather than by growing the flags one at a time.
+- **Dead-letter record for projector records that cannot be applied** — M. When
+  the projector cannot map a record it logs the reason, skips it, and commits
+  its position anyway, so the record is never revisited and the only evidence
+  disappears with the container's logs. This is how 139 transactions and 832
+  balance observations stayed missing for two months. Agreed approach
+  (2026-10-07): write the skipped record into a table marked as failed, which
+  makes it queryable and replayable, rather than a separate Kafka topic. Should
+  carry the topic, partition, offset, key, headers, the raw value and the
+  mapper's error, and a way to mark one resolved once it has been dealt with.
+
 - **Transaction detail modal** — M, frontend-only. Edit category, splits, tags
   and the recurring flag from any list. Every mutation it needs already exists.
   Also extracts a shared `TransactionItem`, which the two items below both
