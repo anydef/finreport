@@ -1,9 +1,9 @@
 //! `labeler` (§2.3) — the four-topic (`transaction`/`user-label`/`rule`/
 //! `label-request`) consume → normalize → resolve → compare → publish loop.
 //!
-//! Hard-selects [`categorizer::provider::fake::FakeProvider`] regardless of
-//! `APP_llm_provider`: this binary never calls a paid API (per the task
-//! brief — a real-provider wiring is left to a later iteration/WP, not WP3).
+//! Builds its [`categorizer::provider::LabelProvider`] through WP1's
+//! `categorizer::factory::build_provider` (`APP_llm_provider`, defaulting to
+//! `fake` so local dev needs no API key).
 //! Refuses to start if the projector lags behind by more than
 //! `APP_labeler_max_projection_lag` records (§2.3) — the labeler's own reads
 //! of `account`/`transaction` rows must see a reasonably fresh read model.
@@ -89,11 +89,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("[startup] projection lag check passed");
 
     let publisher = EventPublisher::connect(&brokers)?;
-    // Hard-selected per the task brief: no API keys, deterministic,
-    // offline-friendly. A real provider is future work, not WP3's.
     let provider: Box<dyn categorizer::provider::LabelProvider> =
-        Box::new(categorizer::provider::fake::FakeProvider::new());
-    let ops = LabelingOps::real();
+        categorizer::factory::build_provider(&settings)?;
+    let ops = LabelingOps::real(
+        settings.rule_learn_min_observations,
+        settings.rule_auto_approve_threshold,
+    );
 
     let config = LabelerConfig {
         brokers,

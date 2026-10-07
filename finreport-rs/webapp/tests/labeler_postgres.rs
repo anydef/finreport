@@ -89,9 +89,11 @@ async fn seed_transaction(
         id: txn_id,
         source: "comdirect".to_string(),
         external_id: external_id.to_string(),
+        account_id,
         amount: Decimal::from_str("-42.00").unwrap(),
         currency: "EUR".to_string(),
         counterparty_name: Some(counterparty_name.to_string()),
+        counterparty_iban: None,
         description: None,
         transaction_type: None,
         counterparty_key: None,
@@ -291,30 +293,238 @@ async fn the_sweep_labels_every_unlabelled_transaction_it_finds() {
     assert_eq!(stored.label_source, "llm");
 }
 
-/// Needs WP2's real `rules::most_specific_match` (this test's fake always
-/// returns `None`) to assert a rule actually wins over the LLM tier — the
-/// *content* of the match, not just that WP3's own plumbing calls it.
+/// Seeds a `category_id`/`uncategorized` pair plus whatever extra slugs are
+/// given, mirroring the inline seeding every other test in this file does.
+async fn seed_categories(db: &sea_orm::DatabaseConnection, slugs: &[&str]) {
+    for slug in slugs {
+        proj::project_category(
+            db,
+            category_uuid(slug),
+            Some(webapp::kafka::labeling::CategoryRecord {
+                schema_version: webapp::kafka::labeling::CURRENT_SCHEMA_VERSION,
+                id: category_uuid(slug),
+                slug: slug.to_string(),
+                parent_slug: None,
+                name: slug.to_string(),
+                kind: webapp::kafka::labeling::CategoryKind::Expense,
+                depth: 1,
+                sort_order: 0,
+                archived: false,
+                origin: webapp::kafka::labeling::CategoryOrigin::Seed,
+                owner_user_id: None,
+                revision: Utc::now(),
+            }),
+        )
+        .await
+        .expect("seed category");
+    }
+}
+
+/// Uses WP2's real `rules::most_specific_match` (via `LabelingOps::real`) to
+/// assert a matching active rule wins over the LLM tier — the provider here
+/// panics if ever called, so a `rule`-sourced label is the only way this
+/// test passes.
 #[tokio::test]
-#[ignore = "needs WP2"]
 async fn a_matching_rule_wins_over_the_llm_tier() {
-    unimplemented!("requires WP2's real rules::most_specific_match")
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url())
+        .await
+        .expect("connect to test Postgres");
+    let publisher =
+        EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    let mut txn = seed_transaction(&db, "RULE-TEST-01", "Lidl Filiale 123").await;
+    let normalized_key = webapp::labeling::normalize::normalize(txn.counterparty_name.as_deref(), None);
+    proj::set_counterparty_key(&db, txn.id, &normalized_key)
+        .await
+        .expect("set counterparty key");
+    txn.counterparty_key = Some(normalized_key.clone());
+
+    seed_categories(&db, &["uncategorized", "food.groceries"]).await;
+
+    let rule_id = Uuid::new_v4();
+    proj::project_rule(
+        &db,
+        rule_id,
+        Some(webapp::kafka::labeling::RuleRecord {
+            schema_version: webapp::kafka::labeling::CURRENT_SCHEMA_VERSION,
+            id: rule_id,
+            name: "lidl-rule".to_string(),
+            category_slug: "food.groceries".to_string(),
+            conditions: webapp::kafka::labeling::RuleConditions {
+                counterparty_key: Some(normalized_key.clone()),
+                ..Default::default()
+            },
+            priority: 0,
+            state: webapp::kafka::labeling::RuleState::Active,
+            origin: webapp::kafka::labeling::RuleOrigin::User,
+            auto_approved: false,
+            user_touched: true,
+            confidence: None,
+            evidence: None,
+            created_at: Utc::now(),
+            revision: Utc::now(),
+        }),
+    )
+    .await
+    .expect("seed rule");
+
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let ops = LabelingOps::real(3, 0.9);
+    let cost_guard = CostGuard::new(10);
+
+    struct PanicProvider;
+    #[async_trait::async_trait]
+    impl categorizer::provider::LabelProvider for PanicProvider {
+        fn id(&self) -> &'static str {
+            "panic"
+        }
+        fn model(&self) -> &str {
+            "panic"
+        }
+        async fn suggest(
+            &self,
+            _req: &categorizer::provider::LabelRequest<'_>,
+        ) -> Result<categorizer::provider::LabelSuggestion, categorizer::provider::ProviderError> {
+            panic!("a matching rule must short-circuit before ever calling the provider");
+        }
+    }
+
+    label_one_transaction(
+        &db,
+        &publisher,
+        &ops,
+        &PanicProvider,
+        &catalog,
+        "test-prompt-v1",
+        0.0,
+        &cost_guard,
+        &txn,
+    )
+    .await
+    .expect("label_one_transaction should resolve via the rule and publish");
+
+    let stored = transaction_label::Entity::find_by_id(txn.id)
+        .one(&db)
+        .await
+        .expect("query transaction_label")
+        .expect("rule match must have published a label");
+    assert_eq!(stored.label_source, "rule");
+    assert_eq!(stored.rule_id, Some(rule_id));
 }
 
-/// Needs WP2's real `learn::consider` to assert a rule is actually proposed
-/// after enough repeated observations (§2.8) — this test's fake `consider`
-/// always returns `None`.
+/// Uses WP2's real `learn::consider` (via `LabelingOps::real`) to assert a
+/// rule is actually proposed after enough repeated, agreeing LLM
+/// observations for the same `counterparty_key` (§2.8).
 #[tokio::test]
-#[ignore = "needs WP2"]
 async fn repeated_llm_agreement_learns_a_rule() {
-    unimplemented!("requires WP2's real learn::consider")
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url())
+        .await
+        .expect("connect to test Postgres");
+    let publisher =
+        EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    // "Fitness First" deterministically maps to "personal.gym" under the
+    // FakeProvider's keyword table (§2.9), so three separate transactions
+    // for the same counterparty all agree on the same category.
+    seed_categories(&db, &["uncategorized", "personal.gym"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    // min_observations=3, auto_approve_threshold=0.9: FakeProvider's
+    // confidence for a keyword hit is high enough to clear the bar once
+    // three agreeing observations land (§2.8 "confidence = min of the
+    // underlying confidences").
+    let ops = LabelingOps::real(3, 0.9);
+    let cost_guard = CostGuard::new(10);
+
+    for i in 0..3 {
+        let txn = seed_transaction(&db, &format!("LEARN-TEST-{i:02}"), "Fitness First").await;
+        label_one_transaction(
+            &db,
+            &publisher,
+            &ops,
+            &provider,
+            &catalog,
+            "test-prompt-v1",
+            0.0,
+            &cost_guard,
+            &txn,
+        )
+        .await
+        .expect("label_one_transaction should resolve via the LLM tier and publish");
+    }
+
+    let normalized_key = webapp::labeling::normalize::normalize(Some("Fitness First"), None);
+    let rule_id = webapp::kafka::labeling::learned_rule_uuid(&normalized_key, "personal.gym");
+    let learned = proj::find_rule(&db, rule_id)
+        .await
+        .expect("query rule")
+        .expect("three agreeing LLM observations must learn a rule");
+    assert_eq!(learned.origin, webapp::kafka::labeling::RuleOrigin::Learned);
 }
 
-/// Needs WP2's real `normalize::normalize` to assert two differently-cased/
+/// Uses WP2's real `normalize::normalize` to assert two differently-cased/
 /// punctuated counterparty strings land on the same `counterparty_key` (so
-/// they share rule/cache/learning observations) — this test's fake
-/// normalization is a stand-in, not the real normalization rules.
+/// they share rule/cache/learning observations).
 #[tokio::test]
-#[ignore = "needs WP2"]
 async fn differently_formatted_counterparties_share_a_normalized_key() {
-    unimplemented!("requires WP2's real normalize::normalize")
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url())
+        .await
+        .expect("connect to test Postgres");
+    let publisher =
+        EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(3, 0.9);
+    let cost_guard = CostGuard::new(10);
+
+    let txn_a = seed_transaction(&db, "KEY-TEST-A", "FITNESS FIRST GMBH").await;
+    let txn_b = seed_transaction(&db, "KEY-TEST-B", "fitness first //kartenzahlung").await;
+
+    for txn in [&txn_a, &txn_b] {
+        label_one_transaction(
+            &db,
+            &publisher,
+            &ops,
+            &provider,
+            &catalog,
+            "test-prompt-v1",
+            0.0,
+            &cost_guard,
+            txn,
+        )
+        .await
+        .expect("label_one_transaction should resolve via the LLM tier and publish");
+    }
+
+    let reloaded_a = proj::find_transaction(&db, txn_a.id)
+        .await
+        .expect("reload transaction a")
+        .expect("transaction a still exists");
+    let reloaded_b = proj::find_transaction(&db, txn_b.id)
+        .await
+        .expect("reload transaction b")
+        .expect("transaction b still exists");
+
+    assert!(reloaded_a.counterparty_key.is_some());
+    assert_eq!(reloaded_a.counterparty_key, reloaded_b.counterparty_key);
 }

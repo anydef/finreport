@@ -83,11 +83,9 @@ pub struct LabelingOps {
 }
 
 impl LabelingOps {
-    /// Wires the real WP2 functions. Calling anything through this before
-    /// WP2 lands its implementation panics (WP2's stubs are `todo!()`) —
-    /// exactly what we want in production, where there is no sensible fake
-    /// answer; never used by this module's own unit tests.
-    pub fn real() -> Self {
+    /// Wires the real WP2 functions, capturing `APP_rule_learn_min_observations`/
+    /// `APP_rule_auto_approve_threshold` for `learn::consider`.
+    pub fn real(min_observations: u32, auto_approve_threshold: f32) -> Self {
         Self {
             normalize: Box::new(|counterparty, description| {
                 normalize::normalize(counterparty, description)
@@ -107,7 +105,9 @@ impl LabelingOps {
             most_specific_match: Box::new(|rules_slice, input| {
                 rules::most_specific_match(rules_slice, input).cloned()
             }),
-            consider: Box::new(learn::consider),
+            consider: Box::new(move |observations| {
+                learn::consider(observations, min_observations, auto_approve_threshold)
+            }),
         }
     }
 
@@ -313,6 +313,17 @@ fn transaction_direction(amount: rust_decimal::Decimal) -> Direction {
     }
 }
 
+/// The rules engine's own, coarser direction string (`"SPENDING"`/`"INCOME"`,
+/// mirroring the GraphQL `Direction` enum) — distinct from
+/// [`transaction_direction`]'s `fingerprint::Direction`.
+fn rule_direction_str(amount: rust_decimal::Decimal) -> &'static str {
+    if amount.is_sign_negative() {
+        "SPENDING"
+    } else {
+        "INCOME"
+    }
+}
+
 /// Runs the §2.5 chain for one transaction (split → override → rule →
 /// cache → LLM), reading rules/overrides/cache/splits from the projection
 /// (`db`) and calling `provider` only on an LLM-cache miss, bounded by
@@ -374,8 +385,12 @@ pub async fn resolve_transaction(
     let active_rules = proj::active_rules(db).await?;
     let match_input = RuleMatchInput {
         counterparty_key: txn.counterparty_key.as_deref(),
+        counterparty_iban: txn.counterparty_iban.as_deref(),
         description: txn.description.as_deref(),
         transaction_type: txn.transaction_type.as_deref(),
+        direction: Some(rule_direction_str(txn.amount)),
+        amount: txn.amount,
+        account_id: Some(txn.account_id),
     };
     if let Some(matched) = (ops.most_specific_match)(&active_rules, &match_input)
         && let Some(category_id) = proj::category_id_of(&matched)
@@ -1556,9 +1571,11 @@ mod tests {
             id: Uuid::new_v4(),
             source: "comdirect".to_string(),
             external_id: "ACC1-TEST".to_string(),
+            account_id: Uuid::new_v4(),
             amount: rust_decimal::Decimal::new(-1000, 2),
             currency: "EUR".to_string(),
             counterparty_name: Some("Some Merchant".to_string()),
+            counterparty_iban: None,
             description: None,
             transaction_type: None,
             counterparty_key: None,
