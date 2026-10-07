@@ -147,3 +147,13 @@ Replaces the preconfigured Comdirect logins (`APP_accounts__<n>__*` env vars, `.
   - Wrong credentials surface as a connection error in the UI, not a crash-looping importer.
 - **Security (must be decided with the user before implementation):** how credentials are stored (encrypted at rest, key management), whether the PIN is stored at all or asked per sync, and who can see/edit a connection (never returned to the browser after saving).
 - **Migration:** existing env-configured logins keep working until the UI flow ships; then they are removed from `.env.tpl`, terraform and `docker-compose.yml`.
+
+## More bank/broker integrations (next planned feature)
+New sources: **C24 Bank**, **PayPal**, **Scalable Capital**. They plug into the same pipeline as Comdirect: an importer per source publishes raw payloads to its own Kafka topics (payload byte-for-byte, our metadata in headers), the projector maps them into the shared read model, and connections are configured per user via the UI flow above.
+
+- **Per-source adapter:** one crate per source behind a common `Source` trait (login/session, list accounts, fetch balances, fetch transactions newer than a watermark). Comdirect is refactored behind the same trait.
+- **Access method is open per source and must be researched before speccing** (official API vs. PSD2/aggregator vs. file import). Fallback for any source without a usable API: CSV/statement upload in the UI, deduplicated like an API import.
+- **Scalable Capital is a broker:** besides cash movements it has securities positions and trades. Iteration scope: cash account transactions and portfolio value as a balance; per-security holdings/performance are a separate later feature.
+- **PayPal specifics:** a PayPal payment is usually also visible on the funding bank account. Detect and link these pairs (like internal transfers) so spending is not double-counted; the PayPal side carries the real merchant and is the one categorized.
+- **Edge cases:** multi-currency PayPal balances (convert or show per currency — decide in spec); pending vs. booked entries; refunds/chargebacks; sources whose transaction ids are not stable across exports (dedup key must be defined per source).
+- **Security:** same credential-storage decision as "Bank connections via UI" applies.
