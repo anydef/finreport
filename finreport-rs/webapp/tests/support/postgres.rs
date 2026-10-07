@@ -5,7 +5,7 @@ use testcontainers::runners::AsyncRunner;
 use testcontainers::ContainerAsync;
 use testcontainers_modules::postgres::Postgres;
 
-use super::migrate::run_migrations;
+use super::migrate::run_migrations_once;
 
 /// A running, already-migrated Postgres instance. Keep the container alive
 /// for as long as the test needs the database — dropping it tears the
@@ -49,7 +49,7 @@ impl TestPostgres {
         let connection = Database::connect(&database_url)
             .await
             .expect("connect to Postgres testcontainer");
-        run_migrations(&connection)
+        run_migrations_once(&database_url, &connection)
             .await
             .expect("run migrations against Postgres testcontainer");
 

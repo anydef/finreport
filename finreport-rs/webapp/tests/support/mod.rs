@@ -33,5 +33,5 @@ pub use fixtures::{
     load_fixture_publish_entries, load_fixture_records, publish_fixture_corpus, FixtureRecord,
 };
 pub use kafka::TestKafka;
-pub use migrate::run_migrations;
+pub use migrate::{run_migrations, run_migrations_once};
 pub use postgres::TestPostgres;

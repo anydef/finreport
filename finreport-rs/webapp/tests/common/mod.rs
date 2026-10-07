@@ -11,13 +11,15 @@
 use chrono::Utc;
 use entity::entities::{account, app_user, transaction, user_account};
 use rust_decimal::Decimal;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
 use secrecy::SecretString;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 use webapp::auth;
-use webapp::db::seaql;
+
+#[path = "../support/migrate.rs"]
+mod migrate;
 
 const TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/finreport_wp4";
 
@@ -25,14 +27,23 @@ const TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/fi
 /// `sqlx`'s pool ties its background tasks to the Tokio runtime it was
 /// created on, and each `#[tokio::test]` spins up its own runtime, so a
 /// shared pool intermittently hits `ConnectionAcquire(Timeout)` once an
-/// earlier test's runtime has shut down. `Migrator::up` is a fast no-op
-/// once the migrations table is current, so paying it per test is cheap.
+/// earlier test's runtime has shut down.
+///
+/// Migrations run through [`migrate::run_migrations_once`] (§9.2), not
+/// `webapp::db::seaql::init_db` — every test in this binary targets the
+/// same `finreport-wp4-pg` container, and `init_db` ran `Migrator::up`
+/// unconditionally on every call, which raced `sea-orm-migration`'s tracking
+/// table the moment two `#[tokio::test]`s ran concurrently. Memoizing by URL
+/// means only the first caller actually migrates; everyone else awaits that
+/// result.
 pub async fn db() -> Arc<DatabaseConnection> {
-    Arc::new(
-        seaql::init_db(TEST_DATABASE_URL)
-            .await
-            .expect("connect to finreport-wp4-pg on 127.0.0.1:55435 — is the container up?"),
-    )
+    let connection = Database::connect(TEST_DATABASE_URL)
+        .await
+        .expect("connect to finreport-wp4-pg on 127.0.0.1:55435 — is the container up?");
+    migrate::run_migrations_once(TEST_DATABASE_URL, &connection)
+        .await
+        .expect("run migrations against finreport-wp4-pg");
+    Arc::new(connection)
 }
 
 pub fn dummy_settings() -> Arc<utils::settings::Settings> {
