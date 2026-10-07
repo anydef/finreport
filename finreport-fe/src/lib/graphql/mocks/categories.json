@@ -1,0 +1,160 @@
+{
+  "query": "query Categories($includeArchived: Boolean) {\n  categories(includeArchived: $includeArchived) {\n    id\n    slug\n    name\n    kind\n    parentId\n    depth\n    archived\n    origin\n  }\n}",
+  "variables": {
+    "includeArchived": false
+  },
+  "data": {
+    "categories": [
+      {
+        "id": "0ae0fab0-ac33-5507-9606-1865a448e171",
+        "slug": "income",
+        "name": "Income",
+        "kind": "INCOME",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "48bd3664-4932-58b7-a6e7-75fa1de7775e",
+        "slug": "housing",
+        "name": "Housing",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "467a4fec-d8e2-5e38-b5fd-08f6877cd9cc",
+        "slug": "housing.rent",
+        "name": "Rent",
+        "kind": "EXPENSE",
+        "parentId": "48bd3664-4932-58b7-a6e7-75fa1de7775e",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "00212cc8-b1d7-5b77-b04e-d0516fdeca2b",
+        "slug": "housing.coworking",
+        "name": "Co-working",
+        "kind": "EXPENSE",
+        "parentId": "48bd3664-4932-58b7-a6e7-75fa1de7775e",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "a9dc7004-31cf-5cca-9cd6-a6cccf74660e",
+        "slug": "food",
+        "name": "Food",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "ce36b84f-245e-58ed-8d16-afab2945e0fe",
+        "slug": "food.groceries",
+        "name": "Groceries",
+        "kind": "EXPENSE",
+        "parentId": "a9dc7004-31cf-5cca-9cd6-a6cccf74660e",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "828e66f0-395a-5b63-8772-b37f0977b0a8",
+        "slug": "transportation",
+        "name": "Transportation",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "44205561-07aa-5daa-b5f9-38b3262278cd",
+        "slug": "personal",
+        "name": "Personal",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "7721868c-36b2-531f-b7ea-1b1bac14a706",
+        "slug": "personal.gym",
+        "name": "Gym",
+        "kind": "EXPENSE",
+        "parentId": "44205561-07aa-5daa-b5f9-38b3262278cd",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "17c41c41-5883-5aaa-b8ac-09984f06b298",
+        "slug": "entertainment",
+        "name": "Entertainment",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "fe4503c6-d43a-54cc-88d9-264776f55a05",
+        "slug": "entertainment.subscriptions",
+        "name": "Subscriptions",
+        "kind": "EXPENSE",
+        "parentId": "17c41c41-5883-5aaa-b8ac-09984f06b298",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "fbd2b7e5-7c09-5021-9a8c-0753e05bca98",
+        "slug": "other",
+        "name": "Other",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "2b38634e-c189-55e7-8d5e-2f4f002d1e0f",
+        "slug": "other.cash",
+        "name": "Cash withdrawal",
+        "kind": "EXPENSE",
+        "parentId": "fbd2b7e5-7c09-5021-9a8c-0753e05bca98",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "995fc018-34a8-5677-8e3d-a7d10adc5965",
+        "slug": "transfer",
+        "name": "Transfer",
+        "kind": "TRANSFER",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "abfebfca-7057-517d-9b95-09f413276bff",
+        "slug": "saving",
+        "name": "Saving",
+        "kind": "SAVING",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      }
+    ]
+  }
+}

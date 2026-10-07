@@ -1,0 +1,100 @@
+{
+  "query": "query CashflowGraph($filter: TransactionFilter!, $grouping: CashflowGraphInput) {\n  cashflowGraph(filter: $filter, grouping: $grouping) {\n    nodes {\n      id\n      label\n      kind\n      depth\n      value\n      refType\n      refId\n    }\n    links {\n      sourceId\n      targetId\n      value\n    }\n    currency\n    dimensions\n    truncated\n  }\n}",
+  "variables": {
+    "filter": {
+      "accountIds": [
+        "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d"
+      ],
+      "startDate": "2024-01-01",
+      "endDate": "2024-02-29"
+    },
+    "grouping": {
+      "dimensions": [
+        "INCOME_SOURCE",
+        "ACCOUNT",
+        "CATEGORY"
+      ],
+      "maxNodesPerDimension": 8
+    }
+  },
+  "data": {
+    "cashflowGraph": {
+      "nodes": [
+        {
+          "id": "income:acme-gmbh",
+          "label": "ACME GmbH",
+          "kind": "INCOME_SOURCE",
+          "depth": 0,
+          "value": "2500.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "label": "Main",
+          "kind": "NET",
+          "depth": 1,
+          "value": "2500.00",
+          "refType": "account",
+          "refId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d"
+        },
+        {
+          "id": "category:housing.rent",
+          "label": "Rent",
+          "kind": "CATEGORY",
+          "depth": 2,
+          "value": "950.00",
+          "refType": "category",
+          "refId": "housing.rent"
+        },
+        {
+          "id": "category:food.groceries",
+          "label": "Groceries",
+          "kind": "CATEGORY",
+          "depth": 2,
+          "value": "320.50",
+          "refType": "category",
+          "refId": "food.groceries"
+        },
+        {
+          "id": "category:uncategorized",
+          "label": "Uncategorized",
+          "kind": "CATEGORY",
+          "depth": 2,
+          "value": "100.00",
+          "refType": null,
+          "refId": null
+        }
+      ],
+      "links": [
+        {
+          "sourceId": "income:acme-gmbh",
+          "targetId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "value": "2500.00"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "category:housing.rent",
+          "value": "950.00"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "category:food.groceries",
+          "value": "320.50"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "category:uncategorized",
+          "value": "100.00"
+        }
+      ],
+      "currency": "EUR",
+      "dimensions": [
+        "INCOME_SOURCE",
+        "ACCOUNT",
+        "CATEGORY"
+      ],
+      "truncated": false
+    }
+  }
+}
