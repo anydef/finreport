@@ -43,15 +43,15 @@ pub struct RuleMatchInput<'a> {
 /// `description_regex` makes the condition **not match** (and is logged by
 /// the caller via the `Err` path) rather than panicking.
 fn conditions_match(conditions: &RuleConditions, input: &RuleMatchInput<'_>) -> bool {
-    if let Some(key) = &conditions.counterparty_key {
-        if input.counterparty_key != Some(key.as_str()) {
-            return false;
-        }
+    if let Some(key) = &conditions.counterparty_key
+        && input.counterparty_key != Some(key.as_str())
+    {
+        return false;
     }
-    if let Some(iban) = &conditions.counterparty_iban {
-        if input.counterparty_iban != Some(iban.as_str()) {
-            return false;
-        }
+    if let Some(iban) = &conditions.counterparty_iban
+        && input.counterparty_iban != Some(iban.as_str())
+    {
+        return false;
     }
     if let Some(pattern) = &conditions.description_regex {
         match compile_description_regex(pattern) {
@@ -72,28 +72,27 @@ fn conditions_match(conditions: &RuleConditions, input: &RuleMatchInput<'_>) -> 
             return false;
         }
     }
-    if let Some(direction) = &conditions.direction {
-        if !input
+    if let Some(direction) = &conditions.direction
+        && !input
             .direction
             .is_some_and(|d| d.eq_ignore_ascii_case(direction))
-        {
-            return false;
-        }
+    {
+        return false;
     }
-    if let Some(min) = conditions.amount_min {
-        if input.amount < min {
-            return false;
-        }
+    if let Some(min) = conditions.amount_min
+        && input.amount < min
+    {
+        return false;
     }
-    if let Some(max) = conditions.amount_max {
-        if input.amount > max {
-            return false;
-        }
+    if let Some(max) = conditions.amount_max
+        && input.amount > max
+    {
+        return false;
     }
-    if let Some(account_ids) = &conditions.account_ids {
-        if !input.account_id.is_some_and(|id| account_ids.contains(&id)) {
-            return false;
-        }
+    if let Some(account_ids) = &conditions.account_ids
+        && !input.account_id.is_some_and(|id| account_ids.contains(&id))
+    {
+        return false;
     }
     true
 }

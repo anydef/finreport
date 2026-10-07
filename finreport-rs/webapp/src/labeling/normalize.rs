@@ -62,10 +62,7 @@ fn strip_accents(input: &str) -> String {
 /// [`TRAILING_LEGAL_FORM_TOKENS`].
 fn strip_trailing_legal_form(input: &str) -> String {
     let mut tokens: Vec<&str> = input.split_whitespace().collect();
-    loop {
-        let Some(last) = tokens.last() else {
-            break;
-        };
+    while let Some(last) = tokens.last() {
         let bare: String = last.chars().filter(|c| *c != '.' && *c != ',').collect();
         if TRAILING_LEGAL_FORM_TOKENS.contains(&bare.as_str()) {
             tokens.pop();
@@ -88,10 +85,7 @@ fn strip_card_terminal_noise(input: &str) -> String {
         .replace("kartenzahlung", " ");
 
     let mut tokens: Vec<&str> = without_phrases.split_whitespace().collect();
-    loop {
-        let Some(last) = tokens.last() else {
-            break;
-        };
+    while let Some(last) = tokens.last() {
         if is_trailing_date_token(last) || is_store_number_token(last) {
             tokens.pop();
         } else {
