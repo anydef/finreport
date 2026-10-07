@@ -41,6 +41,17 @@ by agreeing where it goes.
   and `needs-review` rows are rendered as buttons but do nothing; category rows
   already work. Cheapest item here and fixes something that currently looks
   broken, so a reasonable candidate to pull forward.
+- **Clickable affordances** — S, frontend-only. Clickable things should look
+  clickable: `cursor-pointer`, a hover state, and a visible focus ring. Today
+  the frontend has only 3 `cursor-pointer` usages against ~10 components with
+  click handlers (Sankey nodes, breakdown rows, badges, tag chips, review
+  cards), so most click targets are indistinguishable from text. Cheap, and it
+  cuts across every other UI item here, so it is worth doing early — ideally as
+  shared classes or a small `clickable` helper rather than per-component
+  one-offs. The inverse matters too: `CategoryBreakdown`'s `uncategorized` and
+  `needs-review` rows currently *look* like buttons and do nothing, so
+  affordance and behaviour must be fixed together (see the drill-down item).
+
 - **Transaction detail modal** — M, frontend-only. Edit category, splits, tags
   and the recurring flag from any list. Every mutation it needs already exists.
   Also extracts a shared `TransactionItem`, which the two items below both
