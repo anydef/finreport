@@ -8,3 +8,14 @@ dotenv = "0.15.0"
 serde = { version = "1.0.219", features = ["derive"] }
 env_logger = "0.11.8"
 config = "0.15.11"
+
+# §2.9 provider trait + deterministic fake (WP0). WP1's categorizer rewrite
+# drops dotenv/env_logger/config in favour of utils::settings + tracing and
+# may add further deps of its own for the real providers.
+async-trait = "0.1.89"
+chrono = "0.4.41"
+rust_decimal = "1"
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
