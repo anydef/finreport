@@ -18,12 +18,15 @@ See `docs/runbooks/iteration-1-deploy.md`.
 
 1. Review iteration 3 against real data (`just dev-demo`, then the deployed stack).
 2. Iteration 4: savings and spending goals (see requirements).
-3. Admin user management in the UI.
-4. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+3. Transaction detail modal: edit category, splits, tags and the recurring
+   flag from any list, via a shared `TransactionItem` + modal (see
+   requirements). Frontend-only — the mutations already exist.
+4. Admin user management in the UI.
+5. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
    decision about credential storage** (security-critical).
-5. C24, PayPal and Scalable Capital integrations. First research the access
+6. C24, PayPal and Scalable Capital integrations. First research the access
    method for each (API vs. CSV fallback).
-6. Sankey cash-flow views.
+7. Sankey cash-flow views.
 
 ## Open debt
 

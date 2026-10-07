@@ -157,3 +157,41 @@ New sources: **C24 Bank**, **PayPal**, **Scalable Capital**. They plug into the 
 - **PayPal specifics:** a PayPal payment is usually also visible on the funding bank account. Detect and link these pairs (like internal transfers) so spending is not double-counted; the PayPal side carries the real merchant and is the one categorized.
 - **Edge cases:** multi-currency PayPal balances (convert or show per currency — decide in spec); pending vs. booked entries; refunds/chargebacks; sources whose transaction ids are not stable across exports (dedup key must be defined per source).
 - **Security:** same credential-storage decision as "Bank connections via UI" applies.
+
+## Transaction detail modal (next planned feature)
+Clicking any transaction, **from every place one is shown**, opens a detail
+modal where its classification can be edited in place: dashboard list,
+`/transactions`, `/recurring`, the admin review queue, and the goal pages
+(iteration 4). Today editing is scattered — the review queue has its own card,
+splits have their own editor, and a transaction in a plain list cannot be
+edited at all.
+
+- **Editable in the modal:** category (with the existing `CategoryPicker`),
+  split into parts (`SplitEditor`), tags (`TagEditor`), and the recurring
+  override (`RecurringBadge`'s you/auto toggle).
+- **Shown, not editable:** amount, dates, counterparty, description, booking
+  status, the label's source badge (user / rule / llm-cache / llm), the
+  transfer badge and its counterpart, and the detected recurring series.
+- **Backend work: none expected.** `setTransactionCategory`,
+  `splitTransaction`/`unsplitTransaction`, `setTransactionTags` and
+  `setTransactionRecurring` already exist and already return the updated
+  `Transaction`, including a label that reflects a just-written user decision
+  rather than the labeler's trailing projection. The gap is purely in the UI.
+- **Two components to extract, which is the point of doing this once:**
+  - a `TransactionItem` used by every list, so a transaction looks and behaves
+    the same everywhere and the click target lives in one place. Each list
+    currently renders rows its own way (`TransactionTable`, `ReviewCard`).
+  - the modal itself. `Modal.svelte` **already exists** (`SplitEditor` uses
+    it), but `RuleForm.svelte` and `/admin/categories` hand-roll a native
+    `<dialog>` and carry stale comments claiming the repo has no `Modal.svelte`.
+    Converging all three on the one component is part of this work.
+- **Edge cases:**
+  - Closing without saving discards nothing silently — either save per field on
+    change, or keep an explicit save with a dirty-state guard. Decide in spec.
+  - A category change clears splits (existing mutation semantics); the modal
+    must say so before doing it, not after.
+  - Accessibility: focus trap, Esc to close, restore focus to the clicked row.
+  - Mobile width: the modal becomes a full-height sheet rather than a dialog.
+  - Opening a transaction held for review should offer the same resolution
+    actions as the review queue, so the queue becomes one entry point rather
+    than a separate flow.
