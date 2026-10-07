@@ -52,6 +52,13 @@ by agreeing where it goes.
   `needs-review` rows currently *look* like buttons and do nothing, so
   affordance and behaviour must be fixed together (see the drill-down item).
 
+- **Split transactions are invisible in the tables** — S, frontend-only.
+  `TransactionTable` never renders a transaction's `splits`, so a split row is
+  indistinguishable from a plain one — on the goal pages this is misleading,
+  since goal totals count splits *by their parts* (iteration 4 §3.1) while the
+  table shows the whole amount under one category. Needs at least a split
+  badge and the parts on expand. Found while building goal fixtures.
+
 - **Transaction detail modal** — M, frontend-only. Edit category, splits, tags
   and the recurring flag from any list. Every mutation it needs already exists.
   Also extracts a shared `TransactionItem`, which the two items below both
