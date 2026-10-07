@@ -24,14 +24,35 @@ services:
     labels:
       - "net.unraid.docker.managed=composeman"
 
+  # One-shot schema migration. Every service that touches the DB waits for
+  # it to exit 0, so a deploy can never start code against an old schema
+  # (APP_run_migrations=false keeps the long-running services from racing it).
+  finreport-be-migrate:
+    image: ${DOCKER_REGISTRY}/finreport-be:latest
+    pull_policy: always
+    container_name: finreport-be-migrate
+    entrypoint: ["finreport-be-migrate"]
+    command: ["up", "-s", "public"]
+    restart: "no"
+    depends_on:
+      finreport-be-postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
+    networks:
+      services-lan:
+        ipv4_address: 192.168.100.51
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
   finreport-be:
     image: ${DOCKER_REGISTRY}/finreport-be:latest
     pull_policy: always
     container_name: finreport-be
     restart: always
     depends_on:
-      finreport-be-postgres:
-        condition: service_healthy
+      finreport-be-migrate:
+        condition: service_completed_successfully
     environment:
       RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
@@ -164,8 +185,8 @@ services:
     entrypoint: ["projector"]
     restart: always
     depends_on:
-      finreport-be-postgres:
-        condition: service_healthy
+      finreport-be-migrate:
+        condition: service_completed_successfully
     environment:
       RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
@@ -202,8 +223,8 @@ services:
     entrypoint: ["labeler"]
     restart: always
     depends_on:
-      finreport-be-postgres:
-        condition: service_healthy
+      finreport-be-migrate:
+        condition: service_completed_successfully
     environment:
       RUST_LOG: info
       APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport

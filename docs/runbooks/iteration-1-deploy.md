@@ -111,7 +111,10 @@ the stack below can be rolled.
    ```bash
    docker stop finreport-be-importer finreport-be
    ```
-2. **Run migrations explicitly.** Startup no longer runs `Migrator::up()`
+2. **Run migrations.** On a normal deploy this is automatic: the one-shot
+   `finreport-be-migrate` compose service runs `up` and every DB-using service
+   waits for it (`service_completed_successfully`). To run it by hand:
+   Startup no longer runs `Migrator::up()`
    implicitly (`APP_run_migrations=false` on both `finreport-be` and
    `finreport-be-projector`, §1) — apply them with the `finreport-be-migrate`
    binary, now built into the same image (reads `DATABASE_URL`, **not**
