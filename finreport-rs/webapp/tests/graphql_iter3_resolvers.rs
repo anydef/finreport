@@ -493,3 +493,165 @@ async fn recurring_series_reports_full_series_extent_under_a_narrow_date_filter(
     assert_eq!(series[0]["firstDate"], "2024-01-15");
     assert_eq!(series[0]["lastDate"], "2024-03-15");
 }
+
+/// A user override outranks the projected label (§2.5 precedence), and the
+/// two layers are written by different processes: the mutation writes the
+/// override synchronously while the labeler rewrites `transaction_label` on
+/// its next pass. In that gap the projection still holds the superseded
+/// answer, so `Transaction.label` must report the override — otherwise a
+/// caller reads a lower-precedence source than the one on record, and the
+/// UI shows the category the user just replaced.
+///
+/// Covered on both read paths: the list/prefetch batch and the
+/// single-transaction fallback (`label_for`).
+#[tokio::test]
+async fn user_category_override_outranks_a_trailing_projected_label() {
+    let (_kafka, bootstrap) = start_kafka_with_labeling_topics().await;
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "override-precedence-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Override precedence account").await;
+    common::link(&db, user, account).await;
+
+    let (llm_category, _) = common::seed_category(&db, "restaurants", "Restaurants", "expense").await;
+    let (user_category, user_slug) =
+        common::seed_category(&db, "groceries", "Groceries", "expense").await;
+
+    // The projection as the labeler last left it: an LLM answer.
+    let tx = common::seed_transaction(&db, account, "2024-07-02", "-24.50", Some("Trattoria")).await;
+    common::seed_transaction_label(&db, tx, Some(llm_category), "llm", "resolved").await;
+    // The override the user has since written, which the labeler has not
+    // yet re-resolved into `transaction_label`.
+    transaction_user_label::ActiveModel {
+        transaction_id: Set(tx),
+        category_id: Set(Some(user_category)),
+        note: Set(None),
+        revision: Set(Utc::now().into()),
+        recurring: Set(None),
+    }
+    .insert(db.as_ref())
+    .await
+    .expect("insert transaction_user_label");
+
+    let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "override-precedence-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    // List path: `prefetch` batch-loads labels for every row.
+    let list = schema
+        .execute(authed(
+            Request::new(
+                r#"{ transactions(filter: { startDate: "2024-07-02", endDate: "2024-07-02" }) { items {
+                    id
+                    label { category { slug } source status }
+                } } }"#,
+            ),
+            Some(caller.clone()),
+        ))
+        .await;
+    assert!(list.errors.is_empty(), "{:?}", list.errors);
+    let data = list.data.into_json().unwrap();
+    let items = data["transactions"]["items"].as_array().unwrap();
+    let t = items
+        .iter()
+        .find(|t| t["id"] == tx.to_string())
+        .unwrap_or_else(|| panic!("seeded transaction not found among {items:?}"));
+    assert_eq!(t["label"]["category"]["slug"], user_slug);
+    assert_eq!(t["label"]["source"], "USER");
+    assert_eq!(t["label"]["status"], "RESOLVED");
+
+    // Single-transaction path: `label_for`'s own fallback query, reached by
+    // a mutation's return value (no prefetch has run for it).
+    let mutation = schema
+        .execute(authed(
+            Request::new(format!(
+                r#"mutation {{ setTransactionRecurring(transactionId: "{tx}", recurring: true) {{
+                    label {{ category {{ slug }} source status }}
+                }} }}"#
+            )),
+            Some(caller),
+        ))
+        .await;
+    assert!(mutation.errors.is_empty(), "{:?}", mutation.errors);
+    let data = mutation.data.into_json().unwrap();
+    let label = &data["setTransactionRecurring"]["label"];
+    assert_eq!(label["category"]["slug"], user_slug);
+    assert_eq!(label["source"], "USER");
+    assert_eq!(label["status"], "RESOLVED");
+}
+
+/// A split outranks even a category override (§2.5 step 1 ahead of step 2)
+/// and resolves to no single category — the parts carry them. Same
+/// trailing-projection problem as
+/// [`user_category_override_outranks_a_trailing_projected_label`]: until
+/// the labeler re-resolves, `transaction_label` still holds the pre-split
+/// answer.
+#[tokio::test]
+async fn a_split_outranks_both_the_projected_label_and_a_category_override() {
+    let (_kafka, bootstrap) = start_kafka_with_labeling_topics().await;
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "split-precedence-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Split precedence account").await;
+    common::link(&db, user, account).await;
+
+    let (llm_category, _) = common::seed_category(&db, "misc", "Misc", "expense").await;
+    let (_, part_slug) = common::seed_category(&db, "electronics", "Electronics", "expense").await;
+
+    let tx = common::seed_transaction(&db, account, "2024-07-03", "-60.00", Some("Amazon")).await;
+    common::seed_transaction_label(&db, tx, Some(llm_category), "llm", "resolved").await;
+
+    let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "split-precedence-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    let mutation = schema
+        .execute(authed(
+            Request::new(format!(
+                r#"mutation {{ splitTransaction(transactionId: "{tx}", parts: [
+                        {{ amount: "-20.00", categorySlug: "{part_slug}" }},
+                        {{ amount: "-40.00", categorySlug: "{part_slug}" }}
+                   ]) {{
+                    label {{ category {{ slug }} source status }}
+                    splits {{ amount }}
+                }} }}"#
+            )),
+            Some(caller.clone()),
+        ))
+        .await;
+    assert!(mutation.errors.is_empty(), "{:?}", mutation.errors);
+    let data = mutation.data.into_json().unwrap();
+    let label = &data["splitTransaction"]["label"];
+    assert_eq!(label["source"], "USER");
+    assert_eq!(label["status"], "RESOLVED");
+    assert!(
+        label["category"].is_null(),
+        "a split has no single category, got {label:?}"
+    );
+    assert_eq!(data["splitTransaction"]["splits"].as_array().unwrap().len(), 2);
+
+    // Same answer on the list/prefetch path.
+    let list = schema
+        .execute(authed(
+            Request::new(
+                r#"{ transactions(filter: { startDate: "2024-07-03", endDate: "2024-07-03" }) { items {
+                    id
+                    label { category { slug } source }
+                } } }"#,
+            ),
+            Some(caller),
+        ))
+        .await;
+    assert!(list.errors.is_empty(), "{:?}", list.errors);
+    let data = list.data.into_json().unwrap();
+    let items = data["transactions"]["items"].as_array().unwrap();
+    let t = items.iter().find(|t| t["id"] == tx.to_string()).unwrap();
+    assert_eq!(t["label"]["source"], "USER");
+    assert!(t["label"]["category"].is_null(), "got {:?}", t["label"]);
+}
