@@ -10,6 +10,8 @@ pub mod events;
 pub mod insights;
 pub mod labeling;
 pub mod producer;
+pub mod repair;
+pub mod scan;
 pub mod watermark;
 
 // Topic constants are owned by `envelope` (the frozen §2.2 contract); re-exported
@@ -18,4 +20,3 @@ pub mod watermark;
 pub use envelope::{
     TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_IMPORT_WATERMARK, TOPIC_TRANSACTION,
 };
-

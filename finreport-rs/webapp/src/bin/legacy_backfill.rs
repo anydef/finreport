@@ -18,23 +18,25 @@ use std::time::Duration;
 use chrono::{NaiveDate, TimeZone, Utc};
 use dotenv::dotenv;
 use entity::entities::{legacy_account, legacy_account_balance, legacy_account_transactions};
-use rdkafka::consumer::{BaseConsumer, Consumer};
-use rdkafka::message::Headers;
+use rdkafka::ClientConfig;
 use rdkafka::producer::{FutureProducer, FutureRecord};
-use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use sea_orm::{Database, EntityTrait};
 use secrecy::ExposeSecret;
 use serde::Serialize;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 use utils::settings::Settings;
 use webapp::kafka::envelope::{
-    RecordMeta, CURRENT_SCHEMA_VERSION, HEADER_IMPORTED_AT, ORIGIN_LEGACY_BACKFILL,
+    CURRENT_SCHEMA_VERSION, HEADER_IMPORTED_AT, ORIGIN_LEGACY_BACKFILL, RecordMeta,
     SOURCE_COMDIRECT,
 };
 use webapp::kafka::producer::EventPublisher;
-use webapp::kafka::watermark::{load_watermarks, Watermark};
-use webapp::kafka::{TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_IMPORT_WATERMARK, TOPIC_TRANSACTION};
+use webapp::kafka::repair::{RepairReport, repair_headers};
+use webapp::kafka::scan::{ScannedRecord, scan_topic};
+use webapp::kafka::watermark::{Watermark, load_watermarks};
+use webapp::kafka::{
+    TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_IMPORT_WATERMARK, TOPIC_TRANSACTION,
+};
 
 /// `comdirect_account_key` is a config key (`"0"`, `"1"`, ...) that names
 /// which login imported a *live* record. `legacy_*` rows predate that
@@ -59,34 +61,40 @@ const ACCOUNT_IMPORTED_AT_PLACEHOLDER: &str = "1970-01-01T00:00:00Z";
 enum Mode {
     Backfill,
     TombstoneWatermarks { dry_run: bool },
+    RepairHeaders { dry_run: bool },
 }
 
-/// Parses `std::env::args()` into a [`Mode`]. Anything beyond the two
+/// `--repair-headers` republishes records that were published without
+/// `source_account_id` (which the projector drops as poison) with corrected
+/// headers and their original value bytes.
+const USAGE: &str = "[--tombstone-watermarks [--dry-run] | --repair-headers [--dry-run]]";
+
+/// Parses `std::env::args()` into a [`Mode`]. Anything beyond the
 /// recognized shapes is a startup error rather than a silent no-op — same
 /// spirit as `projector`'s `until_caught_up_arg`.
 fn parse_args<I: Iterator<Item = String>>(mut args: I) -> Result<Mode, String> {
     match args.next().as_deref() {
         None => Ok(Mode::Backfill),
-        Some("--tombstone-watermarks") => {
+        Some(flag @ ("--tombstone-watermarks" | "--repair-headers")) => {
             let dry_run = match args.next().as_deref() {
                 None => false,
                 Some("--dry-run") => true,
                 Some(other) => {
                     return Err(format!(
-                        "unexpected argument {other:?}; usage: --tombstone-watermarks [--dry-run]"
-                    ))
+                        "unexpected argument {other:?}; usage: {flag} [--dry-run]"
+                    ));
                 }
             };
             if args.next().is_some() {
-                return Err(
-                    "too many arguments; usage: --tombstone-watermarks [--dry-run]".to_string(),
-                );
+                return Err(format!("too many arguments; usage: {flag} [--dry-run]"));
             }
-            Ok(Mode::TombstoneWatermarks { dry_run })
+            Ok(if flag == "--repair-headers" {
+                Mode::RepairHeaders { dry_run }
+            } else {
+                Mode::TombstoneWatermarks { dry_run }
+            })
         }
-        Some(other) => Err(format!(
-            "unknown argument {other:?}; usage: [--tombstone-watermarks [--dry-run]]"
-        )),
+        Some(other) => Err(format!("unknown argument {other:?}; usage: {USAGE}")),
     }
 }
 
@@ -94,7 +102,9 @@ fn parse_args<I: Iterator<Item = String>>(mut args: I) -> Result<Mode, String> {
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
         .init();
 
     let mode = parse_args(std::env::args().skip(1)).map_err(|e| {
@@ -108,6 +118,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     match mode {
         Mode::Backfill => run_backfill(&settings, &brokers).await,
         Mode::TombstoneWatermarks { dry_run } => run_tombstone_watermarks(&brokers, dry_run).await,
+        Mode::RepairHeaders { dry_run } => run_repair_headers(&settings, &brokers, dry_run).await,
     }
 }
 
@@ -120,7 +131,9 @@ async fn run_backfill(settings: &Settings, brokers: &str) -> Result<(), Box<dyn 
 
     let accounts = legacy_account::Entity::find().all(&conn).await?;
     let balances = legacy_account_balance::Entity::find().all(&conn).await?;
-    let transactions = legacy_account_transactions::Entity::find().all(&conn).await?;
+    let transactions = legacy_account_transactions::Entity::find()
+        .all(&conn)
+        .await?;
     info!(
         accounts = accounts.len(),
         balances = balances.len(),
@@ -176,10 +189,60 @@ async fn run_backfill(settings: &Settings, brokers: &str) -> Result<(), Box<dyn 
     let skipped = (accounts.len() + balances.len() + transactions.len()) as u32 - published;
     info!(published, skipped, "[legacy-backfill] done");
     if published == 0 {
-        info!("[legacy-backfill] nothing to publish — every legacy identity is already on its topic (idempotent re-run)");
+        info!(
+            "[legacy-backfill] nothing to publish — every legacy identity is already on its topic (idempotent re-run)"
+        );
     }
 
     Ok(())
+}
+
+// --- Header repair ------------------------------------------------------------
+
+/// Loads the `reference -> account_id` lookup from `legacy_account_transactions`
+/// (read-only) and hands off to the repair logic in `webapp::kafka::repair`.
+async fn run_repair_headers(
+    settings: &Settings,
+    brokers: &str,
+    dry_run: bool,
+) -> Result<(), Box<dyn Error>> {
+    let conn = Database::connect(settings.require_database_url()?.expose_secret()).await?;
+    let account_by_reference: HashMap<String, String> = legacy_account_transactions::Entity::find()
+        .all(&conn)
+        .await?
+        .into_iter()
+        .map(|t| (t.reference, t.account_id))
+        .collect();
+    info!(
+        references = account_by_reference.len(),
+        "[repair-headers] loaded legacy transaction lookup"
+    );
+
+    let publisher = if dry_run {
+        None
+    } else {
+        Some(EventPublisher::connect(brokers)?)
+    };
+    let report = repair_headers(brokers, publisher.as_ref(), &account_by_reference).await?;
+    log_repair_report(&report, dry_run);
+    Ok(())
+}
+
+fn log_repair_report(report: &RepairReport, dry_run: bool) {
+    for (topic, count) in &report.repaired {
+        info!(%topic, count, dry_run, "[repair-headers] repaired");
+    }
+    let total: usize = report.repaired.iter().map(|(_, c)| c).sum();
+    info!(
+        repaired = total,
+        unrecoverable = report.unrecoverable,
+        imported_at_defaulted = report.imported_at_defaulted,
+        dry_run,
+        "[repair-headers] done"
+    );
+    if total == 0 && report.unrecoverable == 0 {
+        info!("[repair-headers] nothing to repair (idempotent re-run)");
+    }
 }
 
 // --- Watermark tombstoning (runbook §3 step 4) ------------------------------
@@ -384,105 +447,17 @@ fn missing<'a, T>(
     key_of: impl Fn(&T) -> &str,
     existing: &HashSet<String>,
 ) -> Vec<&'a T> {
-    rows.iter().filter(|row| !existing.contains(key_of(row))).collect()
+    rows.iter()
+        .filter(|row| !existing.contains(key_of(row)))
+        .collect()
 }
 
 // --- Topic scanning (§2.8 "read each target topic to its end") -------------
 
-/// One record read back from a target topic while determining what is
-/// already there. `payload: None` is a tombstone (compaction's deletion
-/// marker) — `existing_keys`/`existing_balance_identities` both treat it as
-/// "this identity is gone", not "this identity exists with an empty value".
-struct ExistingRecord {
-    key: Option<String>,
-    payload: Option<Vec<u8>>,
-    imported_at_header: Option<String>,
-}
-
-/// Reads `topic` to its current end and returns every record seen. Mirrors
-/// `webapp::kafka::watermark::load_watermarks`'s drain pattern (manual
-/// `assign`, no consumer group, read until each partition's offset reaches
-/// the high watermark captured at the start) — this is a one-off batch read,
-/// not a resumable consumer, so there is nothing to commit.
-fn scan_topic(
-    brokers: &str,
-    topic: &str,
-) -> Result<Vec<ExistingRecord>, rdkafka::error::KafkaError> {
-    const POLL_TIMEOUT: Duration = Duration::from_secs(5);
-    const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
-
-    let consumer: BaseConsumer = ClientConfig::new()
-        .set("bootstrap.servers", brokers)
-        .set("group.id", "finreport-legacy-backfill")
-        .set("enable.auto.commit", "false")
-        .set("auto.offset.reset", "earliest")
-        .create()?;
-
-    let metadata = consumer.fetch_metadata(Some(topic), Duration::from_secs(10))?;
-    let Some(topic_metadata) = metadata.topics().first() else {
-        warn!(%topic, "topic not found; treating as empty");
-        return Ok(Vec::new());
-    };
-
-    let mut pending = Vec::new();
-    let mut assignment = TopicPartitionList::new();
-    for partition in topic_metadata.partitions() {
-        let (low, high) = consumer.fetch_watermarks(topic, partition.id(), Duration::from_secs(10))?;
-        if low >= high {
-            continue;
-        }
-        assignment.add_partition_offset(topic, partition.id(), Offset::Beginning)?;
-        pending.push((partition.id(), high));
-    }
-
-    if pending.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    consumer.assign(&assignment)?;
-
-    let mut records = Vec::new();
-    let deadline = std::time::Instant::now() + DRAIN_TIMEOUT;
-    while !pending.is_empty() && std::time::Instant::now() < deadline {
-        let Some(message) = consumer.poll(POLL_TIMEOUT) else {
-            continue;
-        };
-        let message = message?;
-
-        let key = message
-            .key()
-            .map(|k| String::from_utf8_lossy(k).into_owned());
-        let payload = message.payload().map(|p| p.to_vec());
-        let imported_at_header = message.headers().and_then(|headers| {
-            (0..headers.count()).find_map(|idx| {
-                let header = headers.get(idx);
-                (header.key == HEADER_IMPORTED_AT)
-                    .then(|| header.value.map(|v| String::from_utf8_lossy(v).into_owned()))
-                    .flatten()
-            })
-        });
-
-        records.push(ExistingRecord {
-            key,
-            payload,
-            imported_at_header,
-        });
-
-        let position = message.offset() + 1;
-        pending.retain(|(id, high)| !(*id == message.partition() && position >= *high));
-    }
-
-    if !pending.is_empty() {
-        warn!(%topic, partitions = ?pending, "timed out draining topic; some identities may be rescanned as missing");
-    }
-
-    Ok(records)
-}
-
 /// Compacted-topic identity: the key survives iff its newest record on the
 /// topic is not a tombstone. Used for `finreport.account` and
 /// `finreport.transaction`.
-fn existing_keys(records: &[ExistingRecord]) -> HashSet<String> {
+fn existing_keys(records: &[ScannedRecord]) -> HashSet<String> {
     let mut keys = HashSet::new();
     for record in records {
         let Some(key) = &record.key else { continue };
@@ -512,7 +487,7 @@ fn existing_keys(records: &[ExistingRecord]) -> HashSet<String> {
 /// - the live Comdirect endpoint's `{value, unit}` payload has no date at all
 ///   (`webapp::projection::comdirect::ComdirectMapper::map_balance` falls
 ///   back to `imported_at`) — the `imported_at` header, checked second.
-fn existing_balance_identities(records: &[ExistingRecord]) -> HashSet<(String, NaiveDate)> {
+fn existing_balance_identities(records: &[ScannedRecord]) -> HashSet<(String, NaiveDate)> {
     let mut identities = HashSet::new();
     for record in records {
         let (Some(key), Some(payload)) = (&record.key, &record.payload) else {
@@ -520,8 +495,7 @@ fn existing_balance_identities(records: &[ExistingRecord]) -> HashSet<(String, N
         };
         let date = payload_balance_date(payload).or_else(|| {
             record
-                .imported_at_header
-                .as_deref()
+                .header(HEADER_IMPORTED_AT)
                 .and_then(parse_rfc3339_date)
         });
         if let Some(date) = date {
@@ -557,7 +531,10 @@ mod tests {
 
     #[test]
     fn parse_args_with_no_arguments_runs_the_backfill() {
-        assert!(matches!(parse_args(std::iter::empty()).unwrap(), Mode::Backfill));
+        assert!(matches!(
+            parse_args(std::iter::empty()).unwrap(),
+            Mode::Backfill
+        ));
     }
 
     #[test]
@@ -569,9 +546,42 @@ mod tests {
 
     #[test]
     fn parse_args_tombstone_watermarks_dry_run() {
-        let args = vec!["--tombstone-watermarks".to_string(), "--dry-run".to_string()].into_iter();
+        let args = vec![
+            "--tombstone-watermarks".to_string(),
+            "--dry-run".to_string(),
+        ]
+        .into_iter();
         let mode = parse_args(args).unwrap();
         assert!(matches!(mode, Mode::TombstoneWatermarks { dry_run: true }));
+    }
+
+    #[test]
+    fn parse_args_repair_headers_defaults_to_publishing() {
+        let args = vec!["--repair-headers".to_string()].into_iter();
+        assert!(matches!(
+            parse_args(args).unwrap(),
+            Mode::RepairHeaders { dry_run: false }
+        ));
+    }
+
+    #[test]
+    fn parse_args_repair_headers_dry_run() {
+        let args = vec!["--repair-headers".to_string(), "--dry-run".to_string()].into_iter();
+        assert!(matches!(
+            parse_args(args).unwrap(),
+            Mode::RepairHeaders { dry_run: true }
+        ));
+    }
+
+    #[test]
+    fn parse_args_repair_headers_rejects_trailing_arguments() {
+        let args = vec![
+            "--repair-headers".to_string(),
+            "--dry-run".to_string(),
+            "x".to_string(),
+        ]
+        .into_iter();
+        assert!(parse_args(args).is_err());
     }
 
     #[test]
@@ -617,11 +627,13 @@ mod tests {
         assert!(live_watermark_keys(&HashMap::new()).is_empty());
     }
 
-    fn record(key: &str, payload: Option<&str>, imported_at: Option<&str>) -> ExistingRecord {
-        ExistingRecord {
+    fn record(key: &str, payload: Option<&str>, imported_at: Option<&str>) -> ScannedRecord {
+        ScannedRecord {
             key: Some(key.to_string()),
             payload: payload.map(|p| p.as_bytes().to_vec()),
-            imported_at_header: imported_at.map(str::to_string),
+            headers: imported_at
+                .map(|v| vec![(HEADER_IMPORTED_AT.to_string(), v.to_string())])
+                .unwrap_or_default(),
         }
     }
 
@@ -641,7 +653,10 @@ mod tests {
     fn existing_keys_forgets_a_tombstoned_key() {
         let records = vec![record("A-1", Some("{}"), None), record("A-1", None, None)];
         let keys = existing_keys(&records);
-        assert!(!keys.contains("A-1"), "a later tombstone must remove the key");
+        assert!(
+            !keys.contains("A-1"),
+            "a later tombstone must remove the key"
+        );
     }
 
     #[test]
@@ -658,7 +673,8 @@ mod tests {
     }
 
     #[test]
-    fn existing_balance_identities_keys_by_account_and_date_from_imported_at_when_payload_has_no_date() {
+    fn existing_balance_identities_keys_by_account_and_date_from_imported_at_when_payload_has_no_date()
+     {
         // The live Comdirect `{value, unit}` shape — no `date` field, so this
         // falls back to `imported_at`, matching `ComdirectMapper::map_balance`.
         let records = vec![
@@ -724,7 +740,10 @@ mod tests {
         let second_run = missing(&rows, |a| a.account_id.as_str(), &existing);
 
         assert!(first_run.is_empty(), "already-present key must be skipped");
-        assert_eq!(first_run, second_run, "a re-run must make the same decision");
+        assert_eq!(
+            first_run, second_run,
+            "a re-run must make the same decision"
+        );
     }
 
     #[test]
