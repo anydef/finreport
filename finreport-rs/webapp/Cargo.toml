@@ -45,6 +45,9 @@ rust_decimal = "1"
 # `integration` feature so `just test` stays fast and offline.
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres", "kafka"] }
+# WP3 labeler unit tests implement a panicking `LabelProvider` fake to assert
+# cache/rule hits never call the provider; the trait is `#[async_trait]`.
+async-trait = "0.1.89"
 
 [features]
 # Gates the testcontainers-based integration tests (projector replay
