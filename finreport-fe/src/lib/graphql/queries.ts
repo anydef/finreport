@@ -163,7 +163,7 @@ query CashflowGraph($filter: TransactionFilter!, $grouping: CashflowGraphInput) 
 // ---------------------------------------------------------------------------
 
 export const CATEGORIES_QUERY = `
-query Categories($includeArchived: Boolean) {
+query Categories($includeArchived: Boolean! = false) {
 	categories(includeArchived: $includeArchived) {
 		id
 		slug
@@ -177,7 +177,7 @@ query Categories($includeArchived: Boolean) {
 }`;
 
 export const CATEGORY_BREAKDOWN_QUERY = `
-query CategoryBreakdown($filter: TransactionFilter!, $level: Int, $kind: CategoryKind) {
+query CategoryBreakdown($filter: TransactionFilter!, $level: Int! = 1, $kind: CategoryKind) {
 	categoryBreakdown(filter: $filter, level: $level, kind: $kind) {
 		rows {
 			category {
@@ -241,7 +241,7 @@ query Rules($state: RuleState) {
 }`;
 
 export const RECENTLY_AUTO_APPROVED_RULES_QUERY = `
-query RecentlyAutoApprovedRules($limit: Int) {
+query RecentlyAutoApprovedRules($limit: Int! = 20) {
 	recentlyAutoApprovedRules(limit: $limit) {${RULE_FIELDS}
 	}
 }`;
