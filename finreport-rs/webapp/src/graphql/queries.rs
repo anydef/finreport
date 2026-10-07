@@ -12,8 +12,8 @@ use crate::graphql::current_user::{current_user, scoped_account_ids, Authenticat
 use crate::graphql::labels::LabelSplitCache;
 use crate::graphql::types::{
     Account, CashflowGraph, CashflowGraphInput, CashflowSummary, Category,
-    CategoryBreakdown, CategoryKind, Granularity, Me, PageInput, ReviewQueue, Rule, RuleState,
-    TransactionFilter, TransactionPage,
+    CategoryBreakdown, CategoryKind, Granularity, Me, PageInput, RecurringOverview, ReviewQueue,
+    Rule, RuleState, TagCount, TransactionFilter, TransactionPage,
 };
 use crate::graphql::{accounts, breakdown, categories, review_queue, rules, transactions};
 
@@ -163,5 +163,26 @@ impl QueryRoot {
         let scoped_ids = scoped_account_ids(user, None)?;
         let cache = ctx.data::<LabelSplitCache>()?;
         review_queue::fetch_review_queue(db, cache, &scoped_ids, page.limit, page.offset).await
+    }
+
+    /// `tags` (§4): all tags, descending count. **Stub**: frozen by WP0,
+    /// real body is WP-B's.
+    async fn tags(&self, ctx: &Context<'_>) -> GqlResult<Vec<TagCount>> {
+        current_user(ctx)?;
+        Err(crate::graphql::types::not_implemented_iter3("Query.tags", "WP-B"))
+    }
+
+    /// `recurringSeries` (§4). **Stub**: frozen by WP0, real body is WP-B's.
+    async fn recurring_series(
+        &self,
+        ctx: &Context<'_>,
+        filter: Option<TransactionFilter>,
+    ) -> GqlResult<RecurringOverview> {
+        current_user(ctx)?;
+        let _ = filter;
+        Err(crate::graphql::types::not_implemented_iter3(
+            "Query.recurringSeries",
+            "WP-B",
+        ))
     }
 }

@@ -192,6 +192,38 @@ impl MutationRoot {
         let scoped_ids = scoped_account_ids(user, None)?;
         rules::reapply_rule(db, publisher, &scoped_ids, id.0).await
     }
+
+    /// Replaces the whole tag set; `[]` clears (§4). **Stub**: frozen by
+    /// WP0, real body is WP-B's.
+    async fn set_transaction_tags(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+        tags: Vec<String>,
+    ) -> GqlResult<Transaction> {
+        current_user(ctx)?;
+        let _ = (transaction_id, tags);
+        Err(crate::graphql::types::not_implemented_iter3(
+            "Mutation.setTransactionTags",
+            "WP-B",
+        ))
+    }
+
+    /// `null` clears the override and lets auto-detection decide again
+    /// (§4). **Stub**: frozen by WP0, real body is WP-B's.
+    async fn set_transaction_recurring(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+        recurring: Option<bool>,
+    ) -> GqlResult<Transaction> {
+        current_user(ctx)?;
+        let _ = (transaction_id, recurring);
+        Err(crate::graphql::types::not_implemented_iter3(
+            "Mutation.setTransactionRecurring",
+            "WP-B",
+        ))
+    }
 }
 
 /// `None` when no broker is configured (`APP_kafka_brokers` unset, e.g.

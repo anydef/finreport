@@ -18,6 +18,16 @@ pub(crate) fn not_implemented(field: &str, wp: u8) -> async_graphql::Error {
     .extend_with(|_, e| e.set("code", "NOT_IMPLEMENTED"))
 }
 
+/// Iteration-3 counterpart of [`not_implemented`]: WP0 freezes these
+/// resolver stubs, lettered work packages (`"WP-A"`/`"WP-B"`/`"WP-C"`) own
+/// the real bodies (see `docs/specs/iteration-3.md` §6).
+pub(crate) fn not_implemented_iter3(field: &str, wp: &str) -> async_graphql::Error {
+    async_graphql::Error::new(format!(
+        "{field} is not implemented yet ({wp}, see docs/specs/iteration-3.md)"
+    ))
+    .extend_with(|_, e| e.set("code", "NOT_IMPLEMENTED"))
+}
+
 // ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
@@ -108,6 +118,107 @@ impl Transaction {
         let cache = ctx.data::<crate::graphql::labels::LabelSplitCache>().ok();
         crate::graphql::labels::splits_for(db.as_ref(), cache, self.id.0).await
     }
+
+    /// Iteration 3 §4: sorted, `[]` when untagged. **Stub**: frozen by WP0,
+    /// real body is WP-B's.
+    async fn tags(&self, _ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<String>> {
+        Err(not_implemented_iter3("Transaction.tags", "WP-B"))
+    }
+
+    /// `null` = not an internal transfer (§4). **Stub**: frozen by WP0, real
+    /// body is WP-B's.
+    async fn transfer(
+        &self,
+        _ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<Option<TransferInfo>> {
+        Err(not_implemented_iter3("Transaction.transfer", "WP-B"))
+    }
+
+    /// Always present; `isRecurring` may be `false` (§4). **Stub**: frozen by
+    /// WP0, real body is WP-B's.
+    async fn recurring(
+        &self,
+        _ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<RecurringInfo> {
+        Err(not_implemented_iter3("Transaction.recurring", "WP-B"))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Iteration 3: tags, internal transfers, recurring costs (§4)
+// ---------------------------------------------------------------------------
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum FlagSource {
+    Auto,
+    User,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum RecurringCadence {
+    Monthly,
+    Quarterly,
+    Yearly,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum TransferMatch {
+    Iban,
+    AmountDate,
+}
+
+/// `counterpartTransactionId` is `null` while the other leg is not
+/// projected yet (§4).
+#[derive(SimpleObject)]
+pub struct TransferInfo {
+    pub counterpart_transaction_id: Option<Uuid>,
+    pub counterpart_account_id: Option<Uuid>,
+    #[graphql(name = "match")]
+    pub match_: TransferMatch,
+}
+
+/// `source = User` when overridden (§2.2); `seriesId` is `null` when
+/// overridden in or out of a series.
+#[derive(SimpleObject)]
+pub struct RecurringInfo {
+    pub is_recurring: bool,
+    pub source: FlagSource,
+    pub series_id: Option<Uuid>,
+    pub cadence: Option<RecurringCadence>,
+    pub median_amount: Option<Decimal>,
+}
+
+#[derive(SimpleObject)]
+pub struct RecurringSeries {
+    pub id: Uuid,
+    pub counterparty_key: String,
+    pub counterparty_name: Option<String>,
+    pub direction: Direction,
+    pub cadence: RecurringCadence,
+    /// Signed.
+    pub median_amount: Decimal,
+    /// Signed, 4 dp (§3.2).
+    pub monthly_equivalent: Decimal,
+    pub occurrence_count: i32,
+    pub first_date: Date,
+    pub last_date: Date,
+    pub next_expected_date: Date,
+    /// `lastDate` older than cadence + grace.
+    pub stale: bool,
+}
+
+#[derive(SimpleObject)]
+pub struct RecurringOverview {
+    pub series: Vec<RecurringSeries>,
+    /// Expense series only, positive magnitude.
+    pub total_monthly_equivalent: Decimal,
+    pub currency: String,
+}
+
+#[derive(SimpleObject)]
+pub struct TagCount {
+    pub tag: String,
+    pub transaction_count: i32,
 }
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
@@ -145,6 +256,12 @@ pub struct TransactionFilter {
     pub uncategorized: Option<bool>,
     pub needs_review: Option<bool>,
     pub label_sources: Option<Vec<LabelSource>>,
+    /// Iteration 3 §4: AND-ed — the transaction carries all of them.
+    pub tags: Option<Vec<String>>,
+    /// Matches the *effective* flag (§2.2, §4): auto unless overridden.
+    pub recurring: Option<bool>,
+    /// `true` = only transfers, `false` = only non-transfers (§4).
+    pub transfer: Option<bool>,
 }
 
 #[derive(InputObject)]
