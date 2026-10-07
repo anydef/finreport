@@ -21,6 +21,7 @@ use testcontainers_modules::kafka::apache::{Kafka, KAFKA_PORT};
 use webapp::kafka::envelope::{
     TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_IMPORT_WATERMARK, TOPIC_TRANSACTION,
 };
+use webapp::kafka::insights::TOPIC_TRANSACTION_INSIGHT;
 use webapp::kafka::labeling::{
     TOPIC_CATEGORY, TOPIC_LABEL_REQUEST, TOPIC_LLM_CACHE, TOPIC_RULE, TOPIC_TRANSACTION_LABEL,
     TOPIC_USER_LABEL,
@@ -81,6 +82,8 @@ impl TestKafka {
             TOPIC_USER_LABEL,
             TOPIC_RULE,
             TOPIC_LABEL_REQUEST,
+            // Iteration 3 §2.2 detector output, owned by WP-A.
+            TOPIC_TRANSACTION_INSIGHT,
         ]
         .map(|name| NewTopic::new(name, 1, TopicReplication::Fixed(1)));
 

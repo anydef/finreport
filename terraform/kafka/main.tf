@@ -206,3 +206,21 @@ resource "kafka_topic" "label_request" {
     "retention.ms"   = "604800000"
   }
 }
+
+# Iteration 3 detector output (docs/specs/iteration-3.md §2.2): the auto
+# layer for internal transfers and recurring costs, one row per
+# transaction, keyed <source>:<external_id>. Compacted; a tombstone deletes
+# the row (un-flagging).
+resource "kafka_topic" "transaction_insight" {
+  name               = "finreport.transaction-insight"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

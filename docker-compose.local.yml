@@ -82,6 +82,12 @@ services:
         $$RPK topic create finreport.label-request \
           --partitions 1 --replicas 1 \
           --topic-config cleanup.policy=delete --topic-config retention.ms=604800000 || true
+        # Iteration 3 detector output (docs/specs/iteration-3.md §2.2): the
+        # auto layer for internal transfers and recurring costs, keyed
+        # <source>:<external_id>, same compaction posture as the other
+        # per-entity topics above.
+        $$RPK topic create finreport.transaction-insight \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 
   finreport-be:

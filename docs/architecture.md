@@ -27,12 +27,13 @@ flowchart LR
         LR[(finreport.label-request)]
         TL[(finreport.transaction-label)]
         LC[(finreport.llm-cache)]
+        TI[(finreport.transaction-insight)]
     end
 
     subgraph Processors
         PRJ[projector<br/>raw → normalized read model<br/>+ every labeling topic]
         LBL[labeler<br/>rules → cache → LLM]
-        TRF[transfer / recurring detector<br/><i>iteration 3</i>]
+        TRF[transfer / recurring detector<br/>pure algorithms + processor]
     end
 
     PG[(Postgres<br/>read model + labels + overrides)]
@@ -44,11 +45,12 @@ flowchart LR
     IMP -- raw bank JSON + headers --> T1 & T2 & T3
     IMP <--> WM
     LB -- "origin=legacy-backfill<br/>missing keys only" --> T1 & T2 & T3
-    T1 & T2 & T3 & UL & RU & CAT & TL & LC --> PRJ --> PG
+    T1 & T2 & T3 & UL & RU & CAT & TL & LC & TI --> PRJ --> PG
     T3 & UL & RU & LR --> LBL
     PG -- "rules, overrides,<br/>cache, category tree" --> LBL
     LBL -- "compare-before-publish" --> TL & LC
-    PG --> TRF --> PG
+    PG -- "every transaction, each labeler pass" --> TRF
+    TRF -- "compare-before-publish" --> TI
     PG --> API -- cookie session --> UI
     API -- "mutations (§5)" --> UL & RU & CAT & LR
 ```
@@ -60,6 +62,8 @@ flowchart LR
 - Your labels and overrides live in separate tables, so a replay never overwrites them.
 - The labeler never writes Postgres directly: it publishes label/cache records to Kafka, and the projector — same process as the iteration-1 topics, one more dispatch entry — is what actually projects them. This keeps "Postgres is always rebuildable from the log" true for labels too.
 - Compare-before-publish (docs/specs/iteration-2.md §2.3): the labeler republishes only when an *input* changed (a new override, a rule win/loss, a changed fingerprint), not merely because the recomputed record differs textually from the stored one — otherwise every replay would rewrite the whole `transaction-label` topic.
+- The detector (iteration 3 §3) is a post-batch pass inside the `labeler` process, not a separate binary: pure `detect_transfers`/`detect_recurring` functions over an in-memory read of every transaction, then publish-then-project each changed `transaction_insight` row (same dual-write/compare-before-publish shape as labels above), including un-flagging a row whose pair/series no longer holds.
+- The detector writes only the `transaction_insight` *auto* layer; it never touches `transaction_user_label.recurring`, the *user override* layer. The two merge only at read time (`effective_recurring = user_label.recurring ?? insight.is_recurring`), so a re-detection pass can never clobber a user override and a replay can never undo one.
 
 ## 2. How a transaction gets its category
 
