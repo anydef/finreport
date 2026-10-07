@@ -327,6 +327,9 @@ pub async fn project_user_label(
         transaction_id: Set(transaction_id),
         category_id: Set(record.category_slug.as_deref().map(category_uuid)),
         note: Set(record.note.clone()),
+        // Iteration 3 §2.1: whole-state record, so every mutation republishes
+        // `recurring` alongside the pre-existing fields.
+        recurring: Set(record.recurring),
         revision: Set(record.revision.into()),
     };
 
@@ -336,6 +339,7 @@ pub async fn project_user_label(
                 .update_columns([
                     transaction_user_label::Column::CategoryId,
                     transaction_user_label::Column::Note,
+                    transaction_user_label::Column::Recurring,
                     transaction_user_label::Column::Revision,
                 ])
                 .to_owned(),

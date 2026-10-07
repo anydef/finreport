@@ -10,6 +10,9 @@
 	const tabs = [
 		{ label: 'Dashboard', href: '/' },
 		{ label: 'Transactions', href: '/transactions' },
+		// Iteration 3 §6 WP0: added once here so WP-C's Recurring page and the
+		// existing tabs never both edit this layout.
+		{ label: 'Recurring', href: '/recurring' },
 		// §10: added once here so WP5 (transactions) and WP6 (admin) never both
 		// edit this layout. Route content under /admin/** is WP6's.
 		{ label: 'Admin', href: '/admin' }

@@ -1,0 +1,26 @@
+{
+  "reference": "ACC1-RECURRING-QUARTERLY-01",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-01-15",
+  "amount": {
+    "value": "-187.43",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "KFZ-Versicherung HUK",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-01-15",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "KFZ Versicherungsbeitrag Q1",
+  "transactionType": {
+    "key": "DIRECT_DEBIT",
+    "text": "Lastschrift"
+  }
+}

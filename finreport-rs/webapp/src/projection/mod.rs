@@ -7,6 +7,7 @@
 //! `StreamConsumer` and feeds it batches.
 
 pub mod comdirect;
+pub mod insights;
 pub mod labeling;
 pub mod legacy;
 pub mod mapper;
@@ -58,7 +59,7 @@ pub const DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 5;
 pub const INGEST_TOPICS: [&str; 3] = [TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION];
 const INGEST_PARTITION: i32 = 0;
 
-/// The five labeling *output* topics ([`labeling_topic_for`]) this projector
+/// The six labeling *output* topics ([`labeling_topic_for`]) this projector
 /// also consumes and projects, alongside [`INGEST_TOPICS`] — same batch,
 /// same transaction, same offset bookkeeping (unsuffixed keys, like the
 /// ingest topics; distinct from the labeler's own `@labeler`-suffixed
@@ -67,13 +68,15 @@ const INGEST_PARTITION: i32 = 0;
 /// labeler's own consume loop), so this is belt-and-braces (idempotent
 /// upserts) for those three — it is load-bearing for `transaction-label`,
 /// which only the labeler itself wrote before, under an offset key nothing
-/// ever advanced.
-pub const LABELING_PROJECTION_TOPICS: [&str; 5] = [
+/// ever advanced. `transaction-insight` (iteration 3 §2.3/§3) is the
+/// detector's own output, consumed the same way.
+pub const LABELING_PROJECTION_TOPICS: [&str; 6] = [
     crate::kafka::labeling::TOPIC_CATEGORY,
     crate::kafka::labeling::TOPIC_TRANSACTION_LABEL,
     crate::kafka::labeling::TOPIC_LLM_CACHE,
     crate::kafka::labeling::TOPIC_USER_LABEL,
     crate::kafka::labeling::TOPIC_RULE,
+    crate::kafka::insights::TOPIC_TRANSACTION_INSIGHT,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,6 +117,7 @@ pub enum LabelingTopic {
     LlmCache,
     UserLabel,
     Rule,
+    TransactionInsight,
 }
 
 /// Maps a §2.2 topic name to the [`LabelingTopic`] WP3's projector dispatches
@@ -121,6 +125,7 @@ pub enum LabelingTopic {
 /// queue the labeler consumes to decide what to re-resolve, not a topic any
 /// `projection::labeling` function projects.
 pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
+    use crate::kafka::insights::TOPIC_TRANSACTION_INSIGHT;
     use crate::kafka::labeling::{
         TOPIC_CATEGORY, TOPIC_LLM_CACHE, TOPIC_RULE, TOPIC_TRANSACTION_LABEL, TOPIC_USER_LABEL,
     };
@@ -130,6 +135,7 @@ pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
         TOPIC_LLM_CACHE => Some(LabelingTopic::LlmCache),
         TOPIC_USER_LABEL => Some(LabelingTopic::UserLabel),
         TOPIC_RULE => Some(LabelingTopic::Rule),
+        TOPIC_TRANSACTION_INSIGHT => Some(LabelingTopic::TransactionInsight),
         _ => None,
     }
 }
@@ -456,6 +462,24 @@ async fn apply_labeling_record(
                 Ok(parsed) => labeling::project_rule(txn, id, Some(parsed)).await,
                 Err(e) => {
                     error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison rule record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::TransactionInsight => {
+            if record.payload.is_empty() {
+                return match tombstone_transaction_id(record) {
+                    Some(id) => insights::project_insight(txn, id, None).await,
+                    None => Ok(()),
+                };
+            }
+            match serde_json::from_slice::<crate::kafka::insights::InsightRecord>(&record.payload) {
+                Ok(parsed) => {
+                    let id = transaction_uuid(&parsed.source, &parsed.external_id);
+                    insights::project_insight(txn, id, Some(parsed)).await
+                }
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison transaction-insight record, skipped");
                     Ok(())
                 }
             }

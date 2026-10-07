@@ -818,7 +818,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "phase-1-style record predating the envelope contract (\u00a72.2): no source/origin/schema_version/source_account_id headers at all"
+    "note": "phase-1-style record predating the envelope contract (§2.2): no source/origin/schema_version/source_account_id headers at all"
   },
   {
     "topic": "finreport.transaction",
@@ -832,7 +832,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "missing source_account_id: exercises the projector's skip+log path (\u00a72.2)"
+    "note": "missing source_account_id: exercises the projector's skip+log path (§2.2)"
   },
   {
     "topic": "finreport.transaction",
@@ -845,7 +845,7 @@
       "schema_version": 1,
       "imported_at": "2023-11-15T20:00:00Z"
     },
-    "note": "legacy-backfill reconstruction (\u00a72.8): value is our own JSON, not bank bytes \u2014 is_bank_verbatim must be false for this record"
+    "note": "legacy-backfill reconstruction (§2.8): value is our own JSON, not bank bytes — is_bank_verbatim must be false for this record"
   },
   {
     "topic": "finreport.transaction",
@@ -860,7 +860,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "\u00a77 demo: repeated merchant, occurrence 1/3 towards the learning threshold"
+    "note": "§7 demo: repeated merchant, occurrence 1/3 towards the learning threshold"
   },
   {
     "topic": "finreport.transaction",
@@ -875,7 +875,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "\u00a77 demo: repeated merchant, occurrence 2/3 towards the learning threshold"
+    "note": "§7 demo: repeated merchant, occurrence 2/3 towards the learning threshold"
   },
   {
     "topic": "finreport.transaction",
@@ -890,7 +890,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "\u00a77 demo: repeated merchant, occurrence 3/3 \u2014 crosses APP_rule_learn_min_observations"
+    "note": "§7 demo: repeated merchant, occurrence 3/3 — crosses APP_rule_learn_min_observations"
   },
   {
     "topic": "finreport.transaction",
@@ -905,7 +905,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "\u00a77 demo: ambiguous case (fake provider's AMBIGUOUS_KEYS)"
+    "note": "§7 demo: ambiguous case (fake provider's AMBIGUOUS_KEYS)"
   },
   {
     "topic": "finreport.transaction",
@@ -920,7 +920,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "\u00a77 demo: new-category proposal (fake provider's PROPOSED_PATH_KEYS -> housing.coworking)"
+    "note": "§7 demo: new-category proposal (fake provider's PROPOSED_PATH_KEYS -> housing.coworking)"
   },
   {
     "topic": "finreport.transaction",
@@ -935,7 +935,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "\u00a77 demo: already-overridden case; paired with a finreport.user-label record below"
+    "note": "§7 demo: already-overridden case; paired with a finreport.user-label record below"
   },
   {
     "topic": "finreport.transaction",
@@ -950,7 +950,7 @@
       "comdirect_account_key": "0",
       "comdirect_account_name": "Main"
     },
-    "note": "\u00a77 demo: split case; paired with a finreport.user-label record below"
+    "note": "§7 demo: split case; paired with a finreport.user-label record below"
   },
   {
     "topic": "finreport.user-label",
@@ -963,7 +963,7 @@
       "schema_version": 1,
       "imported_at": "2024-05-10T19:30:00Z"
     },
-    "note": "\u00a77 demo: user override predating the labeler run \u2014 labeler must not touch it (\u00a72.5 step 2)"
+    "note": "§7 demo: user override predating the labeler run — labeler must not touch it (§2.5 step 2)"
   },
   {
     "topic": "finreport.user-label",
@@ -976,6 +976,201 @@
       "schema_version": 1,
       "imported_at": "2024-05-20T20:00:00Z"
     },
-    "note": "\u00a77 demo: split transaction, parts sum exactly to the transaction amount (\u00a72.6)"
+    "note": "§7 demo: split transaction, parts sum exactly to the transaction amount (§2.6)"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-TRANSFER-OUT-01",
+    "payload": "payloads/transactions/acc-1/ACC1-TRANSFER-OUT-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-07-16T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.1 demo: internal transfer, outgoing leg (creditor.iban = acc-2's IBAN, IBAN-confirmed match)"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-TRANSFER-IN-01",
+    "payload": "payloads/transactions/acc-2/ACC2-TRANSFER-IN-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-07-16T06:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "iteration 3 §3.1 demo: internal transfer, incoming leg (remitter has no iban; matched via the outgoing leg's counterparty_iban)"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-MONTHLY-01",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-MONTHLY-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-06T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: 4-occurrence monthly recurring series, occurrence 1/4"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-MONTHLY-02",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-MONTHLY-02.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-06T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: 4-occurrence monthly recurring series, occurrence 2/4"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-MONTHLY-03",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-MONTHLY-03.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-06T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: 4-occurrence monthly recurring series, occurrence 3/4"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-MONTHLY-04",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-MONTHLY-04.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-06T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: 4-occurrence monthly recurring series, occurrence 4/4"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-QUARTERLY-01",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-QUARTERLY-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-16T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: 3-occurrence quarterly recurring series, occurrence 1/3"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-QUARTERLY-02",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-QUARTERLY-02.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-16T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: 3-occurrence quarterly recurring series, occurrence 2/3"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-QUARTERLY-03",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-QUARTERLY-03.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-07-16T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: 3-occurrence quarterly recurring series, occurrence 3/3"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-DRIFT-01",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-DRIFT-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-21T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: amount-drift monthly series (-65.00 -> -70.00), occurrence 1/4"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-DRIFT-02",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-DRIFT-02.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-21T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: amount-drift monthly series (-65.00 -> -70.00), occurrence 2/4"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-DRIFT-03",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-DRIFT-03.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-21T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: amount-drift monthly series (-65.00 -> -70.00), occurrence 3/4 (amount steps up)"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-RECURRING-DRIFT-04",
+    "payload": "payloads/transactions/acc-1/ACC1-RECURRING-DRIFT-04.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-21T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "iteration 3 §3.2 demo: amount-drift monthly series (-65.00 -> -70.00), occurrence 4/4"
   }
 ]

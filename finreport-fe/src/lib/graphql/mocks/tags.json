@@ -1,0 +1,10 @@
+{
+  "query": "query Tags {\n\ttags {\n\t\ttag\n\t\ttransactionCount\n\t}\n}",
+  "data": {
+    "tags": [
+      { "tag": "hobby", "transactionCount": 4 },
+      { "tag": "italy-2026", "transactionCount": 2 },
+      { "tag": "reimbursable", "transactionCount": 1 }
+    ]
+  }
+}

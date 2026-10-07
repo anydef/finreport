@@ -1022,6 +1022,9 @@ pub async fn run(
         u64::from(config.llm_max_requests_per_run),
     )
     .await?;
+    // Detection (iteration 3 §3): a post-batch pass "invoked after the rule
+    // learner" — same cadence as the sweep above.
+    crate::detect::processor::run_detection_pass(&db, &publisher).await?;
 
     let mut next_offsets: HashMap<String, i64> = HashMap::new();
     let high_watermarks = if config.until_caught_up {
@@ -1061,6 +1064,7 @@ pub async fn run(
                     u64::from(config.llm_max_requests_per_run),
                 )
                 .await?;
+                crate::detect::processor::run_detection_pass(&db, &publisher).await?;
                 info!("labeler: caught up with all input topics, exiting (--until-caught-up)");
                 return Ok(());
             }

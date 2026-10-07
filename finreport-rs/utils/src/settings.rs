@@ -154,6 +154,25 @@ pub struct Settings {
     #[serde(default)]
     pub labeler_max_projection_lag: u64,
 
+    // --- Iteration 3 §2.4: detection configuration ---------------------
+    /// Internal-transfer matching window (§3.1): inclusive on
+    /// `abs(Δ booking_date)` between the two candidate legs.
+    #[serde(default = "default_transfer_match_days")]
+    pub transfer_match_days: u32,
+    /// Minimum occurrences for a recurring series (§3.2).
+    #[serde(default = "default_recurring_min_occurrences")]
+    pub recurring_min_occurrences: u32,
+    /// Relative amount-band tolerance around the series median (§3.2).
+    #[serde(default = "default_recurring_amount_tolerance")]
+    pub recurring_amount_tolerance: f32,
+    /// How many months of history the recurring detector looks back over
+    /// (§3.2).
+    #[serde(default = "default_recurring_window_months")]
+    pub recurring_window_months: u32,
+    /// Mutation-side validation cap (§4: `extensions.code = "TOO_MANY_TAGS"`).
+    #[serde(default = "default_max_tags_per_transaction")]
+    pub max_tags_per_transaction: u32,
+
     /// Comdirect logins keyed by the segment in `APP_accounts__<key>__*`.
     /// A `BTreeMap` rather than a `Vec` because config-rs turns numbered env
     /// segments into a table keyed by `"0"`, `"1"`, ... — sorting by key keeps
@@ -536,6 +555,31 @@ fn default_rule_learn_min_observations() -> u32 {
 /// boundary.
 fn default_rule_auto_approve_threshold() -> f32 {
     0.9
+}
+
+/// `APP_transfer_match_days` default (iteration 3 §2.4).
+fn default_transfer_match_days() -> u32 {
+    3
+}
+
+/// `APP_recurring_min_occurrences` default (iteration 3 §2.4).
+fn default_recurring_min_occurrences() -> u32 {
+    3
+}
+
+/// `APP_recurring_amount_tolerance` default (iteration 3 §2.4).
+fn default_recurring_amount_tolerance() -> f32 {
+    0.10
+}
+
+/// `APP_recurring_window_months` default (iteration 3 §2.4).
+fn default_recurring_window_months() -> u32 {
+    18
+}
+
+/// `APP_max_tags_per_transaction` default (iteration 3 §2.4).
+fn default_max_tags_per_transaction() -> u32 {
+    10
 }
 
 fn env_source() -> Environment {

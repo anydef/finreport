@@ -166,10 +166,21 @@ pub struct SplitPart {
     pub category_slug: String,
 }
 
-/// Published on [`TOPIC_USER_LABEL`] (§2.2, §2.6). Keyed
+/// `UserLabelRecord.schema_version` as of iteration 3 §2.1: `tags`/
+/// `recurring` added. A v1 record (this field absent or `1`) read as v2
+/// means `tags: []`, `recurring: None` — both fields are `#[serde(default)]`
+/// so an old record on the compacted topic still deserializes.
+pub const USER_LABEL_SCHEMA_VERSION_V2: u32 = 2;
+
+/// Published on [`TOPIC_USER_LABEL`] (§2.2, §2.6, iteration 3 §2.1). Keyed
 /// `<source>:<external_id>`. `category_slug: None` together with an empty
 /// `parts` is a real event ("clear the override, fall back to the next
 /// source"), distinct from a tombstone ("the transaction is gone").
+///
+/// **Whole-state, read-modify-write** (iteration 3 §2.1): `tags`/`recurring`
+/// ride the same record as the iteration-2 category/split fields, so every
+/// mutation that touches any one of them must load the current row and
+/// republish all of it — publishing `{tags}` alone would erase the category.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct UserLabelRecord {
     pub schema_version: u32,
@@ -179,6 +190,13 @@ pub struct UserLabelRecord {
     pub category_slug: Option<String>,
     #[serde(default)]
     pub parts: Vec<SplitPart>,
+    /// Normalized, deduped, sorted; `[]` = none (iteration 3 §2.1/§4).
+    #[serde(default)]
+    pub tags: Vec<String>,
+    /// `true` | `false` | `None` (no opinion — defer to auto-detection,
+    /// iteration 3 §2.1/§2.2).
+    #[serde(default)]
+    pub recurring: Option<bool>,
     /// RFC 3339; last-writer-wins (§2.1).
     pub revision: DateTime<Utc>,
     pub note: Option<String>,
@@ -403,6 +421,8 @@ mod tests {
             external_id: "ACC1-SPEND-00".to_string(),
             category_slug: None,
             parts: Vec::new(),
+            tags: Vec::new(),
+            recurring: None,
             revision: Utc::now(),
             note: None,
         };
@@ -411,6 +431,45 @@ mod tests {
         assert_eq!(clear, round_tripped);
         assert!(round_tripped.category_slug.is_none());
         assert!(round_tripped.parts.is_empty());
+    }
+
+    /// Iteration 3 §2.1: a v1 record (no `tags`/`recurring` fields at all)
+    /// must still parse, defaulting to `tags: []`, `recurring: None`.
+    #[test]
+    fn v1_user_label_record_defaults_tags_and_recurring() {
+        let v1_json = serde_json::json!({
+            "schema_version": 1,
+            "source": "comdirect",
+            "external_id": "ACC1-SPEND-00",
+            "category_slug": "food.groceries",
+            "parts": [],
+            "revision": Utc::now().to_rfc3339(),
+            "note": null,
+        })
+        .to_string();
+
+        let parsed: UserLabelRecord = serde_json::from_str(&v1_json).unwrap();
+        assert!(parsed.tags.is_empty());
+        assert_eq!(parsed.recurring, None);
+    }
+
+    /// Iteration 3 §2.1: the v2 shape (tags + a recurring override) round-trips.
+    #[test]
+    fn v2_user_label_record_round_trips_tags_and_recurring() {
+        let record = UserLabelRecord {
+            schema_version: USER_LABEL_SCHEMA_VERSION_V2,
+            source: "comdirect".to_string(),
+            external_id: "ACC1-SPEND-00".to_string(),
+            category_slug: Some("food.groceries".to_string()),
+            parts: Vec::new(),
+            tags: vec!["hobby".to_string(), "italy-2026".to_string()],
+            recurring: Some(true),
+            revision: Utc::now(),
+            note: None,
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let round_tripped: UserLabelRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(record, round_tripped);
     }
 
     #[test]

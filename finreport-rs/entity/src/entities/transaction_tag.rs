@@ -3,15 +3,13 @@
 use sea_orm::entity::prelude::*;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
-#[sea_orm(table_name = "transaction_user_label")]
+#[sea_orm(table_name = "transaction_tag")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub transaction_id: Uuid,
-    pub category_id: Option<Uuid>,
-    #[sea_orm(column_type = "Text", nullable)]
-    pub note: Option<String>,
+    #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
+    pub tag: String,
     pub revision: DateTimeWithTimeZone,
-    pub recurring: Option<bool>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

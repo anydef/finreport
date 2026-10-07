@@ -1,0 +1,39 @@
+{
+  "query": "query RecurringSeries($filter: TransactionFilter) {\n\trecurringSeries(filter: $filter) {\n\t\tseries {\n\t\t\tid\n\t\t\tcounterpartyKey\n\t\t\tcounterpartyName\n\t\t\tdirection\n\t\t\tcadence\n\t\t\tmedianAmount\n\t\t\tmonthlyEquivalent\n\t\t\toccurrenceCount\n\t\t\tfirstDate\n\t\t\tlastDate\n\t\t\tnextExpectedDate\n\t\t\tstale\n\t\t}\n\t\ttotalMonthlyEquivalent\n\t\tcurrency\n\t}\n}",
+  "data": {
+    "recurringSeries": {
+      "series": [
+        {
+          "id": "8a1b2c3d-4e5f-4061-8273-849506a7b8c9",
+          "counterpartyKey": "fitnessstudio powergym",
+          "counterpartyName": "Fitnessstudio PowerGym",
+          "direction": "SPENDING",
+          "cadence": "MONTHLY",
+          "medianAmount": "-39.9000",
+          "monthlyEquivalent": "-39.9000",
+          "occurrenceCount": 4,
+          "firstDate": "2025-09-01",
+          "lastDate": "2025-12-01",
+          "nextExpectedDate": "2026-01-01",
+          "stale": false
+        },
+        {
+          "id": "9b2c3d4e-5f60-4172-9384-95a617b8c9da",
+          "counterpartyKey": "kfz-versicherung huk",
+          "counterpartyName": "KFZ-Versicherung HUK",
+          "direction": "SPENDING",
+          "cadence": "QUARTERLY",
+          "medianAmount": "-187.4300",
+          "monthlyEquivalent": "-62.4767",
+          "occurrenceCount": 3,
+          "firstDate": "2025-06-15",
+          "lastDate": "2025-12-15",
+          "nextExpectedDate": "2026-03-15",
+          "stale": false
+        }
+      ],
+      "totalMonthlyEquivalent": "102.3767",
+      "currency": "EUR"
+    }
+  }
+}
