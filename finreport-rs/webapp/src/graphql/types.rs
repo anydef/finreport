@@ -114,7 +114,7 @@ pub enum Granularity {
     Month,
 }
 
-#[derive(InputObject)]
+#[derive(InputObject, Default)]
 pub struct TransactionFilter {
     /// Inclusive; `None` = unbounded.
     pub start_date: Option<Date>,
@@ -136,24 +136,6 @@ pub struct TransactionFilter {
     pub uncategorized: Option<bool>,
     pub needs_review: Option<bool>,
     pub label_sources: Option<Vec<LabelSource>>,
-}
-
-impl Default for TransactionFilter {
-    fn default() -> Self {
-        Self {
-            start_date: None,
-            end_date: None,
-            account_ids: None,
-            search: None,
-            direction: None,
-            counterparty_names: None,
-            has_counterparty: None,
-            category_slugs: None,
-            uncategorized: None,
-            needs_review: None,
-            label_sources: None,
-        }
-    }
 }
 
 #[derive(InputObject)]

@@ -52,7 +52,7 @@ pub async fn run_migrations_once(
         let mut cells = MIGRATION_CELLS
             .lock()
             .expect("migration cell registry mutex poisoned");
-        *cells
+        cells
             .entry(database_url.to_string())
             .or_insert_with(|| Box::leak(Box::new(MigrationCell::new())))
     };

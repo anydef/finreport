@@ -139,11 +139,13 @@ async fn replay_is_idempotent_and_reset_replay_reproduces_identical_state() {
     );
     assert_eq!(
         first.skipped, second.skipped,
-        "an identical replay must skip the same poison records (ACC1-MISSING-ACCOUNT-0001, ACC1-PHASE1-0001)"
+        "an identical replay must skip the same poison/unrecognized-topic records"
     );
     assert_eq!(
-        first.skipped, 2,
-        "exactly the two source_account_id-less fixtures must be skipped (§2.2 skip+log)"
+        first.skipped, 4,
+        "the two source_account_id-less fixtures (§2.2 skip+log) plus the two \
+         finreport.user-label fixtures (§2.6, unrecognized by this ingest-only \
+         registry until WP3 wires a mapper) must be skipped"
     );
 
     // Reset (as a fresh DB would be) and replay once more: must reproduce
