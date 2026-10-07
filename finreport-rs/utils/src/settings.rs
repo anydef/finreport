@@ -51,6 +51,10 @@ pub struct ComdirectProfile {
     pub save_file_path: String,
 }
 
+/// Default `APP_projection_group`; also the `group_id` the migration backfills
+/// onto pre-existing `projection_offset` rows, so keep the two in step.
+pub const DEFAULT_PROJECTION_GROUP: &str = "default";
+
 /// Key used for the legacy flat `APP_client_id` / `APP_pin` / ... form.
 pub const DEFAULT_ACCOUNT_KEY: &str = "default";
 
@@ -165,6 +169,13 @@ pub struct Settings {
     /// records.
     #[serde(default)]
     pub labeler_max_projection_lag: u64,
+    /// Consumer-group-style scope for the offsets the projector and labeler
+    /// persist in `projection_offset`. Both read and write only rows under
+    /// this id, so changing it makes them find no offsets and replay their
+    /// topics from the beginning — replay by configuration, no SQL. The
+    /// labeler's lag guard reads the projector's rows under the same id.
+    #[serde(default = "default_projection_group")]
+    pub projection_group: String,
 
     // --- Iteration 3 §2.4: detection configuration ---------------------
     /// Internal-transfer matching window (§3.1): inclusive on
@@ -532,6 +543,12 @@ fn default_session_ttl_days() -> i64 {
     30
 }
 
+/// `APP_projection_group` default: matches the `group_id` the migration
+/// backfills onto existing offset rows.
+fn default_projection_group() -> String {
+    DEFAULT_PROJECTION_GROUP.to_string()
+}
+
 /// `APP_admin_username` default (webapp's admin bootstrap).
 fn default_admin_username() -> String {
     "admin".to_string()
@@ -639,6 +656,19 @@ mod test {
             ("APP_url", "https://api.comdirect.de/api"),
             ("APP_save_file_path", ".session.json"),
         ]
+    }
+
+    #[test]
+    fn projection_group_defaults_to_default() {
+        let settings = settings_from(&base_vars());
+        assert_eq!(settings.projection_group, DEFAULT_PROJECTION_GROUP);
+    }
+
+    #[test]
+    fn projection_group_is_read_from_env() {
+        let mut vars = base_vars();
+        vars.push(("APP_projection_group", "replay-2"));
+        assert_eq!(settings_from(&vars).projection_group, "replay-2");
     }
 
     #[test]

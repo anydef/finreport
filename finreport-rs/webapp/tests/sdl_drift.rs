@@ -85,6 +85,7 @@ fn dummy_settings() -> Arc<Settings> {
         rule_learn_min_observations: 3,
         rule_auto_approve_threshold: 0.9,
         labeler_max_projection_lag: 0,
+        projection_group: "default".to_string(),
         transfer_match_days: 3,
         recurring_min_occurrences: 3,
         recurring_amount_tolerance: 0.10,

@@ -11,6 +11,8 @@ pub struct Model {
     pub partition: i32,
     pub next_offset: i64,
     pub updated_at: DateTimeWithTimeZone,
+    #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
+    pub group_id: String,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

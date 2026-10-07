@@ -854,12 +854,13 @@ pub struct ProjectionLag {
 /// start (§2.3) — calling this is the caller's job, not this function's.
 pub async fn check_projection_lag(
     db: &DatabaseConnection,
+    group_id: &str,
     brokers: &str,
     max_lag: u64,
 ) -> Result<(), Vec<ProjectionLag>> {
     use crate::kafka::envelope::{TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE};
 
-    let stored = offsets::load_offsets(db)
+    let stored = offsets::load_offsets(db, group_id)
         .await
         .map_err(|e| vec![ProjectionLag { topic: format!("<offsets query failed: {e}>"), committed: 0, high_watermark: 0 }])?;
 
@@ -918,6 +919,9 @@ pub async fn check_projection_lag(
 
 pub struct LabelerConfig {
     pub brokers: String,
+    /// `APP_projection_group`: scopes both the labeler's own offsets and the
+    /// projector offsets its lag guard reads.
+    pub group_id: String,
     pub batch_max_records: usize,
     pub batch_max_wait: Duration,
     pub llm_max_requests_per_run: u32,
@@ -994,7 +998,7 @@ pub async fn run(
         .create()
         .map_err(LabelerError::Kafka)?;
 
-    let stored_offsets = offsets::load_offsets(&db).await?;
+    let stored_offsets = offsets::load_offsets(&db, &config.group_id).await?;
     let mut tpl = TopicPartitionList::new();
     for topic in LABELER_INPUT_TOPICS {
         let offset = stored_offsets
@@ -1080,6 +1084,7 @@ pub async fn run(
         for record in &batch {
             offsets::commit_offset(
                 &txn,
+                &config.group_id,
                 &offset_topic_key(&record.topic),
                 LABELER_PARTITION,
                 record.offset + 1,

@@ -210,6 +210,7 @@ impl From<MapError> for ApplyError {
 /// is written to tolerate.
 pub async fn process_batch(
     db: &DatabaseConnection,
+    group_id: &str,
     registry: &MapperRegistry,
     default_owner: Option<Uuid>,
     records: &[ConsumedRecord],
@@ -282,7 +283,7 @@ pub async fn process_batch(
     }
 
     for ((topic, partition), next_offset) in &next_offsets {
-        offsets::commit_offset(&txn, topic, *partition, *next_offset, Utc::now()).await?;
+        offsets::commit_offset(&txn, group_id, topic, *partition, *next_offset, Utc::now()).await?;
     }
 
     txn.commit().await?;
@@ -508,6 +509,9 @@ fn tombstone_transaction_id(record: &ConsumedRecord) -> Option<Uuid> {
 /// Everything `run` needs besides the DB connection it is handed.
 pub struct ProjectorConfig {
     pub brokers: String,
+    /// `APP_projection_group`: the scope of this projector's rows in
+    /// `projection_offset`. A group with no rows replays from the beginning.
+    pub group_id: String,
     pub batch_max_records: usize,
     pub batch_max_wait: Duration,
     pub max_consecutive_write_failures: u32,
@@ -520,9 +524,10 @@ pub struct ProjectorConfig {
 }
 
 impl ProjectorConfig {
-    pub fn new(brokers: String) -> Self {
+    pub fn new(brokers: String, group_id: String) -> Self {
         Self {
             brokers,
+            group_id,
             batch_max_records: DEFAULT_BATCH_MAX_RECORDS,
             batch_max_wait: DEFAULT_BATCH_MAX_WAIT,
             max_consecutive_write_failures: DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES,
@@ -578,7 +583,7 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
         .create()
         .map_err(ProjectorError::Kafka)?;
 
-    let stored_offsets = offsets::load_offsets(&db).await.map_err(ProjectorError::Db)?;
+    let stored_offsets = offsets::load_offsets(&db, &config.group_id).await.map_err(ProjectorError::Db)?;
     let mut tpl = TopicPartitionList::new();
     for topic in INGEST_TOPICS.into_iter().chain(LABELING_PROJECTION_TOPICS) {
         let offset = stored_offsets
@@ -641,7 +646,7 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
         }
 
         let (stats, failures) = retry_batch_write(
-            || process_batch(&db, &registry, config.default_owner, &batch),
+            || process_batch(&db, &config.group_id, &registry, config.default_owner, &batch),
             consecutive_write_failures,
             config.max_consecutive_write_failures,
         )
@@ -652,7 +657,7 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
 }
 
 /// Calls `write` (a closure that closes over one fixed batch, e.g.
-/// `|| process_batch(&db, &registry, owner, &batch)`), retrying the
+/// `|| process_batch(&db, group, &registry, owner, &batch)`), retrying the
 /// **identical** batch with backoff on a DB failure instead of letting the
 /// caller move on to a fresh one.
 ///
