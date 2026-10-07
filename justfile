@@ -159,12 +159,21 @@ dev-be-tower:
         cargo run -p webapp --bin webapp
 
 # Run the frontend locally, local profile (talks to `just dev-be` on localhost:8080).
+#
+# Reinstalls first if node_modules is missing or older than package-lock.json
+# (e.g. after a merge bumps a dependency) — a stale node_modules otherwise
+# fails at runtime with something like "Cannot find module 'layerchart'"
+# instead of at install time.
 dev-fe:
-    cd finreport-fe && npm run dev
+    cd finreport-fe && \
+        ( [ node_modules/.package-lock.json -nt package-lock.json ] 2>/dev/null || npm ci ) && \
+        npm run dev
 
 # Run the frontend locally, tower profile (talks to the deployed Unraid backend).
 dev-fe-tower:
-    cd finreport-fe && npm run dev:tower
+    cd finreport-fe && \
+        ( [ node_modules/.package-lock.json -nt package-lock.json ] 2>/dev/null || npm ci ) && \
+        npm run dev:tower
 
 # Run the importer locally against the Postgres started by `db-up`.
 # Comdirect creds are pulled from 1Password via .env.tpl.
