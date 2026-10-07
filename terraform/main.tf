@@ -144,6 +144,24 @@ resource "opnsense_haproxy_reconfigure" "apply" {
     opnsense_haproxy_frontend_action.finreport_be,
     opnsense_haproxy_frontend_action.finreport_fe,
   ]
+
+  # depends_on only orders; without this an existing reconfigure is never
+  # re-run, so newly added routes are saved in OPNsense but never applied
+  # (HAProxy keeps the old config and answers 503 for the new host).
+  lifecycle {
+    replace_triggered_by = [
+      opnsense_haproxy_server.finreport_be,
+      opnsense_haproxy_backend.finreport_be,
+      opnsense_haproxy_acl.finreport_be,
+      opnsense_haproxy_action.finreport_be,
+      opnsense_haproxy_frontend_action.finreport_be,
+      opnsense_haproxy_server.finreport_fe,
+      opnsense_haproxy_backend.finreport_fe,
+      opnsense_haproxy_acl.finreport_fe,
+      opnsense_haproxy_action.finreport_fe,
+      opnsense_haproxy_frontend_action.finreport_fe,
+    ]
+  }
 }
 
 module "portainer_stack" {
