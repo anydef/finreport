@@ -11,7 +11,7 @@
 //! Read-only against Postgres — this binary never writes `legacy_*` or any
 //! other table, only publishes to Kafka.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::time::Duration;
 
@@ -20,11 +20,12 @@ use dotenv::dotenv;
 use entity::entities::{legacy_account, legacy_account_balance, legacy_account_transactions};
 use rdkafka::consumer::{BaseConsumer, Consumer};
 use rdkafka::message::Headers;
+use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
 use sea_orm::{Database, EntityTrait};
 use secrecy::ExposeSecret;
 use serde::Serialize;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 use utils::settings::Settings;
 use webapp::kafka::envelope::{
@@ -32,7 +33,8 @@ use webapp::kafka::envelope::{
     SOURCE_COMDIRECT,
 };
 use webapp::kafka::producer::EventPublisher;
-use webapp::kafka::{TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION};
+use webapp::kafka::watermark::{load_watermarks, Watermark};
+use webapp::kafka::{TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_IMPORT_WATERMARK, TOPIC_TRANSACTION};
 
 /// `comdirect_account_key` is a config key (`"0"`, `"1"`, ...) that names
 /// which login imported a *live* record. `legacy_*` rows predate that
@@ -49,6 +51,45 @@ const LEGACY_BACKFILL_ACCOUNT_KEY: &str = "legacy-backfill-reconstruction";
 /// orders on it since `finreport.account` is compacted by key, not by time.
 const ACCOUNT_IMPORTED_AT_PLACEHOLDER: &str = "1970-01-01T00:00:00Z";
 
+/// What a run of this binary does, parsed from `std::env::args()`. The
+/// default (no arguments) is the legacy-row backfill the module docs
+/// describe; `--tombstone-watermarks` instead runs the deploy runbook's
+/// watermark-reset step (§3 step 4 — previously a manual `kcat` stand-in,
+/// see the runbook's Gaps section).
+enum Mode {
+    Backfill,
+    TombstoneWatermarks { dry_run: bool },
+}
+
+/// Parses `std::env::args()` into a [`Mode`]. Anything beyond the two
+/// recognized shapes is a startup error rather than a silent no-op — same
+/// spirit as `projector`'s `until_caught_up_arg`.
+fn parse_args<I: Iterator<Item = String>>(mut args: I) -> Result<Mode, String> {
+    match args.next().as_deref() {
+        None => Ok(Mode::Backfill),
+        Some("--tombstone-watermarks") => {
+            let dry_run = match args.next().as_deref() {
+                None => false,
+                Some("--dry-run") => true,
+                Some(other) => {
+                    return Err(format!(
+                        "unexpected argument {other:?}; usage: --tombstone-watermarks [--dry-run]"
+                    ))
+                }
+            };
+            if args.next().is_some() {
+                return Err(
+                    "too many arguments; usage: --tombstone-watermarks [--dry-run]".to_string(),
+                );
+            }
+            Ok(Mode::TombstoneWatermarks { dry_run })
+        }
+        Some(other) => Err(format!(
+            "unknown argument {other:?}; usage: [--tombstone-watermarks [--dry-run]]"
+        )),
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv().ok();
@@ -56,10 +97,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
         .init();
 
+    let mode = parse_args(std::env::args().skip(1)).map_err(|e| {
+        error!(%e, "[startup] invalid arguments");
+        e
+    })?;
+
     let settings = Settings::from_env()?;
     let brokers = settings.require_kafka_brokers()?.to_string();
+
+    match mode {
+        Mode::Backfill => run_backfill(&settings, &brokers).await,
+        Mode::TombstoneWatermarks { dry_run } => run_tombstone_watermarks(&brokers, dry_run).await,
+    }
+}
+
+/// The legacy-row backfill described in the module docs: reconstructs
+/// `legacy_*` rows as Kafka records on the live ingest topics, skipping any
+/// identity already published.
+async fn run_backfill(settings: &Settings, brokers: &str) -> Result<(), Box<dyn Error>> {
     let conn = Database::connect(settings.require_database_url()?.expose_secret()).await?;
-    let publisher = EventPublisher::connect(&brokers)?;
+    let publisher = EventPublisher::connect(brokers)?;
 
     let accounts = legacy_account::Entity::find().all(&conn).await?;
     let balances = legacy_account_balance::Entity::find().all(&conn).await?;
@@ -71,10 +128,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         "[legacy-backfill] loaded legacy rows"
     );
 
-    let existing_account_keys = existing_keys(&scan_topic(&brokers, TOPIC_ACCOUNT)?);
-    let existing_transaction_keys = existing_keys(&scan_topic(&brokers, TOPIC_TRANSACTION)?);
+    let existing_account_keys = existing_keys(&scan_topic(brokers, TOPIC_ACCOUNT)?);
+    let existing_transaction_keys = existing_keys(&scan_topic(brokers, TOPIC_TRANSACTION)?);
     let existing_balance_identities =
-        existing_balance_identities(&scan_topic(&brokers, TOPIC_ACCOUNT_BALANCE)?);
+        existing_balance_identities(&scan_topic(brokers, TOPIC_ACCOUNT_BALANCE)?);
 
     let mut published = 0u32;
 
@@ -123,6 +180,65 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
 
     Ok(())
+}
+
+// --- Watermark tombstoning (runbook §3 step 4) ------------------------------
+//
+// Resets every account's resume point so the next import re-walks full
+// history and republishes raw bank bytes — needed once the backfill above
+// has reconstructed pre-dual-write history, so compaction converges on the
+// real payloads rather than leaving them shadowed by whatever the live
+// importer already published past that point.
+
+/// Reads the watermark topic and either lists what a tombstone run would
+/// touch (`dry_run`) or publishes a null-value record for every live key.
+async fn run_tombstone_watermarks(brokers: &str, dry_run: bool) -> Result<(), Box<dyn Error>> {
+    let watermarks = load_watermarks(brokers)?;
+    let keys = live_watermark_keys(&watermarks);
+
+    if keys.is_empty() {
+        info!("[tombstone-watermarks] no live watermark keys found; nothing to do");
+        return Ok(());
+    }
+
+    if dry_run {
+        info!(
+            count = keys.len(),
+            keys = ?keys,
+            "[tombstone-watermarks] dry run — would publish a tombstone for these keys"
+        );
+        return Ok(());
+    }
+
+    let producer: FutureProducer = ClientConfig::new()
+        .set("bootstrap.servers", brokers)
+        .set("message.timeout.ms", "10000")
+        .create()?;
+
+    for key in &keys {
+        // No `.payload(...)` call — a record with a key and no value is a
+        // Kafka tombstone, exactly what `load_watermarks`/`existing_keys`
+        // already treat compaction's deletion marker as.
+        let record = FutureRecord::<str, [u8]>::to(TOPIC_IMPORT_WATERMARK).key(key.as_str());
+        producer
+            .send(record, Duration::from_secs(10))
+            .await
+            .map_err(|(e, _)| e)?;
+        info!(%key, "[tombstone-watermarks] published tombstone");
+    }
+
+    info!(count = keys.len(), "[tombstone-watermarks] done");
+    Ok(())
+}
+
+/// The account keys with a live (non-tombstoned) watermark, sorted for
+/// deterministic output. Pure and unit-tested separately from any broker
+/// connection — `load_watermarks` is what talks to Kafka; this just reads
+/// its result, the same split `missing`/`scan_topic` use above.
+fn live_watermark_keys(watermarks: &HashMap<String, Watermark>) -> Vec<String> {
+    let mut keys: Vec<String> = watermarks.keys().cloned().collect();
+    keys.sort();
+    keys
 }
 
 // --- Reconstructed payload shapes -------------------------------------------
@@ -385,21 +501,48 @@ fn existing_keys(records: &[ExistingRecord]) -> HashSet<String> {
 /// `finreport.account-balance` is delete-cleanup, not compacted — every
 /// observation under a key persists, so "already there" has to mean "this
 /// exact (account, date) observation", not "this key has ever appeared".
-/// The date comes from the `imported_at` header (§2.5: balance payloads carry
-/// no date of their own), parsed to a calendar date in UTC.
+///
+/// The date must be derived exactly the way `webapp::projection` dates each
+/// origin, or a re-run could judge an already-published identity "missing"
+/// (republishing it, harmless but noisy) or, worse, the reverse. The two
+/// origins disagree on where the date lives:
+/// - `legacy-backfill`'s own `ReconstructedBalance` payload carries its own
+///   `date` field (`webapp::projection::legacy::LegacyMapper::map_balance`
+///   reads `balance.date`, never `imported_at`) — checked first here.
+/// - the live Comdirect endpoint's `{value, unit}` payload has no date at all
+///   (`webapp::projection::comdirect::ComdirectMapper::map_balance` falls
+///   back to `imported_at`) — the `imported_at` header, checked second.
 fn existing_balance_identities(records: &[ExistingRecord]) -> HashSet<(String, NaiveDate)> {
     let mut identities = HashSet::new();
     for record in records {
-        let (Some(key), Some(_), Some(imported_at)) =
-            (&record.key, &record.payload, &record.imported_at_header)
-        else {
+        let (Some(key), Some(payload)) = (&record.key, &record.payload) else {
             continue;
         };
-        if let Some(date) = parse_rfc3339_date(imported_at) {
+        let date = payload_balance_date(payload).or_else(|| {
+            record
+                .imported_at_header
+                .as_deref()
+                .and_then(parse_rfc3339_date)
+        });
+        if let Some(date) = date {
             identities.insert((key.clone(), date));
         }
     }
     identities
+}
+
+/// `legacy-backfill`'s own `ReconstructedBalance` payload's `date` field
+/// (`YYYY-MM-DD`, matching `LegacyMapper::map_balance`'s own parsing), or
+/// `None` for any payload without one — including the live Comdirect
+/// `{value, unit}` shape, which this falls through for.
+fn payload_balance_date(payload: &[u8]) -> Option<NaiveDate> {
+    #[derive(serde::Deserialize)]
+    struct PayloadDate {
+        date: String,
+    }
+    serde_json::from_slice::<PayloadDate>(payload)
+        .ok()
+        .and_then(|p| NaiveDate::parse_from_str(&p.date, "%Y-%m-%d").ok())
 }
 
 fn parse_rfc3339_date(value: &str) -> Option<NaiveDate> {
@@ -411,6 +554,68 @@ fn parse_rfc3339_date(value: &str) -> Option<NaiveDate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_args_with_no_arguments_runs_the_backfill() {
+        assert!(matches!(parse_args(std::iter::empty()).unwrap(), Mode::Backfill));
+    }
+
+    #[test]
+    fn parse_args_tombstone_watermarks_defaults_to_publishing() {
+        let args = vec!["--tombstone-watermarks".to_string()].into_iter();
+        let mode = parse_args(args).unwrap();
+        assert!(matches!(mode, Mode::TombstoneWatermarks { dry_run: false }));
+    }
+
+    #[test]
+    fn parse_args_tombstone_watermarks_dry_run() {
+        let args = vec!["--tombstone-watermarks".to_string(), "--dry-run".to_string()].into_iter();
+        let mode = parse_args(args).unwrap();
+        assert!(matches!(mode, Mode::TombstoneWatermarks { dry_run: true }));
+    }
+
+    #[test]
+    fn parse_args_rejects_unknown_arguments() {
+        let args = vec!["--bogus".to_string()].into_iter();
+        assert!(parse_args(args).is_err());
+    }
+
+    #[test]
+    fn parse_args_rejects_trailing_arguments() {
+        let args = vec![
+            "--tombstone-watermarks".to_string(),
+            "--dry-run".to_string(),
+            "extra".to_string(),
+        ]
+        .into_iter();
+        assert!(parse_args(args).is_err());
+    }
+
+    fn watermark(account_id: &str) -> Watermark {
+        Watermark {
+            account_id: account_id.to_string(),
+            last_booking_date: None,
+            last_reference: None,
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn live_watermark_keys_returns_sorted_account_ids() {
+        let watermarks: HashMap<String, Watermark> = [
+            ("B-2".to_string(), watermark("B-2")),
+            ("A-1".to_string(), watermark("A-1")),
+        ]
+        .into_iter()
+        .collect();
+
+        assert_eq!(live_watermark_keys(&watermarks), vec!["A-1", "B-2"]);
+    }
+
+    #[test]
+    fn live_watermark_keys_is_empty_when_no_watermarks_are_live() {
+        assert!(live_watermark_keys(&HashMap::new()).is_empty());
+    }
 
     fn record(key: &str, payload: Option<&str>, imported_at: Option<&str>) -> ExistingRecord {
         ExistingRecord {
@@ -453,7 +658,9 @@ mod tests {
     }
 
     #[test]
-    fn existing_balance_identities_keys_by_account_and_date_from_imported_at() {
+    fn existing_balance_identities_keys_by_account_and_date_from_imported_at_when_payload_has_no_date() {
+        // The live Comdirect `{value, unit}` shape — no `date` field, so this
+        // falls back to `imported_at`, matching `ComdirectMapper::map_balance`.
         let records = vec![
             record("A-1", Some("{}"), Some("2024-01-31T06:00:00Z")),
             record("A-1", Some("{}"), Some("2024-03-31T06:00:00Z")),
@@ -471,10 +678,30 @@ mod tests {
     }
 
     #[test]
-    fn existing_balance_identities_ignores_records_with_no_imported_at() {
-        // Can't happen on the real topic (the importer always sets it), but
-        // the scanner must not panic or silently mis-key on one that somehow
-        // lacks it.
+    fn existing_balance_identities_prefers_the_payloads_own_date_over_imported_at() {
+        // A `legacy-backfill` reconstruction: `imported_at` is only the
+        // placeholder import time, but the payload's own `date` field is the
+        // real observation date `LegacyMapper::map_balance` reads — that one
+        // must win so a re-run's identity matches the first run's.
+        let records = vec![record(
+            "A-1",
+            Some(r#"{"account_id":"A-1","date":"2023-11-30","amount":1.0}"#),
+            Some("2024-06-15T00:00:00+00:00"),
+        )];
+        let identities = existing_balance_identities(&records);
+
+        let nov_30 = NaiveDate::from_ymd_opt(2023, 11, 30).unwrap();
+        let jun_15 = NaiveDate::from_ymd_opt(2024, 6, 15).unwrap();
+        assert!(identities.contains(&("A-1".to_string(), nov_30)));
+        assert!(!identities.contains(&("A-1".to_string(), jun_15)));
+        assert_eq!(identities.len(), 1);
+    }
+
+    #[test]
+    fn existing_balance_identities_ignores_records_with_no_date_anywhere() {
+        // Can't happen on the real topic (the importer always sets
+        // `imported_at`), but the scanner must not panic or silently mis-key
+        // on one that somehow lacks both.
         let records = vec![record("A-1", Some("{}"), None)];
         assert!(existing_balance_identities(&records).is_empty());
     }

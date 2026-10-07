@@ -33,14 +33,29 @@ by individual IP rather than by subnet, add `.36` to the same allow rule as
 `.32`/`.33`/`.35` by hand in the OPNsense UI before continuing — this repo's
 Terraform does not express it, so it will not appear in a `terraform plan`.
 
-**New env vars / secrets.** None are required to stand the projector up:
-`docker-compose.yml`'s `finreport-be-projector` block already sets
-`APP_database_url` and `APP_kafka_brokers`, and `.env.tpl`/`terraform/variables.tf`
-need no new entries for this cutover. Optional:
+**New env vars / secrets.** No new secrets, and `.env.tpl`/
+`terraform/variables.tf` need no new entries for this cutover —
+`docker-compose.yml` now carries, as plain (non-secret) values:
 
+- `finreport-be-projector` already sets `APP_database_url` and
+  `APP_kafka_brokers`.
+- `finreport-be` sets `APP_allowed_origins=https://finreport.lab.anydef.de`
+  and `APP_cookie_secure=true`. The frontend isn't deployed through this
+  compose file or `terraform/main.tf` yet, so there is no confirmed origin to
+  read back; the value follows the existing `<service>.lab.anydef.de`
+  OPNsense/HAProxy naming convention used for `finreport-be.lab.anydef.de`
+  itself. **Confirm or correct this once the frontend's real deployed origin
+  is known** — an empty/wrong allow-list means actix CORS rejects every
+  request the SvelteKit proxy forwards (it relays the browser's own `Origin`
+  header verbatim), and a frontend served over plain HTTP would need
+  `APP_cookie_secure=false` instead, since a browser silently drops Secure
+  cookies set over an insecure origin.
+- `finreport-be` and `finreport-be-projector` both set
+  `APP_run_migrations=false` — see §3 step 2; `just dev-be`/`dev-demo` are
+  unaffected (the flag defaults to `true`, i.e. unchanged, when unset).
 - `APP_projector_default_owner=<username>` on `finreport-be-projector` links
   every projected account to that user automatically instead of a manual
-  `user-admin link --all` in §3 step 7. Not set today — leave the manual step
+  `user-admin link --all` in §3 step 6. Not set today — leave the manual step
   if you don't want to touch `docker-compose.yml`.
 
 **Verify the broker is reachable** before touching anything:
@@ -86,51 +101,61 @@ the stack below can be rolled.
    ```bash
    docker stop finreport-be-importer finreport-be
    ```
-2. **Run migrations.** `webapp` normally runs `Migrator::up()` on every start
-   (`db/seaql.rs::init_db`), but it's stopped, so apply them explicitly against
-   the tower DB instead:
+2. **Run migrations explicitly.** Startup no longer runs `Migrator::up()`
+   implicitly (`APP_run_migrations=false` on both `finreport-be` and
+   `finreport-be-projector`, §1) — apply them with the `finreport-be-migrate`
+   binary, now built into the same image (reads `DATABASE_URL`, **not**
+   `APP_database_url`):
    ```bash
-   cd finreport-rs
-   DB_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
-     sea-orm-cli migrate -u "$DB_URL" -s public
+   docker run --rm --network finreport-be_services-lan \
+     -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     --entrypoint finreport-be-migrate "${DOCKER_REGISTRY}/finreport-be:latest" up -s public
    ```
    This renames `account`/`account_balance`/`account_transactions` to
    `legacy_*` and creates the new `account`/`account_balance`/`transaction`/
    `app_user`/`user_account`/`user_session`/`projection_offset` tables.
 3. **Run `legacy-backfill`** (read-only against Postgres, publishes to Kafka,
-   key-skipping — safe to re-run):
-   ```bash
-   APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
-     APP_kafka_brokers="kafka.lab.anydef.de:9092" \
-     cargo run --manifest-path finreport-rs/Cargo.toml --bin legacy-backfill
-   ```
-4. **Tombstone the watermark topic** (`finreport.import-watermark`) so the next
-   import re-walks full history and republishes raw bank bytes, landing them
-   *after* the backfill so compaction converges on raw data. No bin implements
-   this (see Gaps) — do it with `kcat`, one tombstone per account key still
-   live on the topic:
-   ```bash
-   # List the keys currently on the topic:
-   docker run --rm edenhill/kcat:1.7.1 -b kafka.lab.anydef.de:9092 \
-     -t finreport.import-watermark -C -e -K: -f 'key=%k\n' | sort -u
-   # For each key printed above, publish a null-value record (a tombstone):
-   echo "<account_id>:" | docker run --rm -i edenhill/kcat:1.7.1 \
-     -b kafka.lab.anydef.de:9092 -t finreport.import-watermark -P -K:
-   ```
-5. **Start the projector, caught up first.** There's no standalone
-   `--until-caught-up` invocation wired into `docker-compose.yml` (the deployed
-   service always tails), so run it once to convergence before leaving it
-   running long-term:
+   key-skipping — safe to re-run), now built into the image instead of
+   requiring a local checkout:
    ```bash
    docker run --rm --network finreport-be_services-lan \
      -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
+     --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest"
+   ```
+4. **Tombstone the watermark topic** (`finreport.import-watermark`) so the next
+   import re-walks full history and republishes raw bank bytes, landing them
+   *after* the backfill so compaction converges on raw data. The same
+   `legacy-backfill` binary does this via `--tombstone-watermarks` — list the
+   keys it would tombstone first, then publish for real:
+   ```bash
+   # Dry run — lists every live key, publishes nothing:
+   docker run --rm --network finreport-be_services-lan \
+     -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
+     --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest" \
+     --tombstone-watermarks --dry-run
+   # Publish a null-value record for each key listed above:
+   docker run --rm --network finreport-be_services-lan \
+     -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
+     --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest" \
+     --tombstone-watermarks
+   ```
+5. **Start the projector, caught up first.** There's no standalone
+   `--until-caught-up` invocation wired into `docker-compose.yml` (the deployed
+   service always tails), so run it once to convergence before leaving it
+   running long-term. Migrations already ran in step 2, so this throwaway run
+   also passes `APP_run_migrations=false`:
+   ```bash
+   docker run --rm --network finreport-be_services-lan \
+     -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
+     -e APP_run_migrations=false \
      --entrypoint projector "${DOCKER_REGISTRY}/finreport-be:latest" --until-caught-up
    # Then bring up the long-running, tailing instance:
    docker start finreport-be-projector
    ```
-6. **Create the first user and link accounts** (`user-admin`, same image —
-   see Gaps, this binary is not currently in the runtime image):
+6. **Create the first user and link accounts** (`user-admin`, same image,
+   now built into the runtime image):
    ```bash
    FINREPORT_PASSWORD='<choose one>' \
      APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
@@ -195,20 +220,32 @@ Clean up the local dump/cookie files once satisfied (`rm cookies.txt`).
    ```bash
    docker stop finreport-be-importer finreport-be finreport-be-projector
    ```
-2. **Restore from the pre-cutover dump** (drops and recreates the schema —
-   confirm you have the right file from §2):
+2. **Revert the schema with the new migrate binary**, while the image that
+   still understands these migrations is the one running — do this *before*
+   swapping back to the old image/binary, which doesn't know about them:
+   ```bash
+   docker run --rm --network finreport-be_services-lan \
+     -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     --entrypoint finreport-be-migrate "${DOCKER_REGISTRY}/finreport-be:latest" down -n 2 -s public
+   ```
+   This reverses the two migrations this cutover introduced (new tables
+   dropped, `legacy_*` renamed back to `account`/`account_balance`/
+   `account_transactions`).
+3. **Fallback: restore from the pre-cutover dump** instead, if `migrate down`
+   fails or the result looks wrong (drops and recreates the schema — confirm
+   you have the right file from §2):
    ```bash
    PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" \
      pg_restore -h 192.168.100.33 -U finreport -d finreport \
      --clean --if-exists -Fc finreport-pre-iter1-*.dump
    ```
-3. **Redeploy the previous image tags.** Repoint `docker-compose.yml`'s
+4. **Redeploy the previous image tags.** Repoint `docker-compose.yml`'s
    `${DOCKER_REGISTRY}/finreport-be:latest` at the pre-cutover tag (or re-run
    `just deploy` against the prior commit) and drop the
    `finreport-be-projector` service/entrypoint from the stack definition —
    it has nothing to consume once Postgres is back on the old schema and the
    importer resumes writing it directly.
-4. **Kafka topics are untouched by this rollback.** `finreport.account`,
+5. **Kafka topics are untouched by this rollback.** `finreport.account`,
    `.account-balance`, `.transaction` and `.import-watermark` all have
    `prevent_destroy` (`terraform/kafka/main.tf`) and nothing here deletes them.
    The backfilled/raw records already published stay on the topics; replaying
@@ -222,19 +259,6 @@ Clean up the local dump/cookie files once satisfied (`rm cookies.txt`).
 
 Found while writing this runbook; none were invented around — flagged instead:
 
-- **Dockerfile only builds/copies `webapp` and `import-transactions`**
-  (`cargo build --release --package webapp --bin webapp --bin
-  import-transactions`). `projector`, `user-admin` and `legacy-backfill` are
-  separate `[[bin]]` targets in `finreport-rs/webapp/Cargo.toml` but are never
-  built into the runtime image, even though `docker-compose.yml`'s
-  `finreport-be-projector` service already sets `entrypoint: ["projector"]`
-  against that same image. The Dockerfile needs those three bins added before
-  §3 steps 3, 5 and 6 can run against the deployed image as written; until
-  then they must run as `cargo run` from a checkout with network access to
-  tower Postgres/Kafka (as shown above).
-- **No bin/script tombstones the watermark topic.** §3 step 4 is spec'd
-  (`docs/specs/iteration-1.md` §2.8) but unimplemented — the `kcat` commands
-  above are a manual stand-in, not an existing documented procedure.
 - **No per-IP OPNsense firewall resource in Terraform** for `services-lan`
   members (`.32`/`.33`/`.35`/`.36`) — only `opnsense_haproxy_*` and
   `opnsense_unbound_host_override` exist for `.32`. If filtering is per-IP
@@ -246,3 +270,9 @@ Found while writing this runbook; none were invented around — flagged instead:
   doesn't express it.
 - **`APP_projector_default_owner` is unset in `docker-compose.yml`** — every
   cutover currently needs the manual `user-admin link --all` in §3 step 6.
+- **`APP_allowed_origins` in `docker-compose.yml` is a best-guess hostname**
+  (`https://finreport.lab.anydef.de`, following the existing
+  `<service>.lab.anydef.de` naming convention), not a confirmed one — the
+  frontend isn't deployed through this compose file or `terraform/main.tf`.
+  Confirm/correct it (and `APP_cookie_secure` if the frontend ends up served
+  over plain HTTP) once the frontend's real deployment is known; see §1.

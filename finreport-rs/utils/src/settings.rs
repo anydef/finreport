@@ -274,6 +274,40 @@ impl Settings {
             .collect()
     }
 
+    /// Whether `webapp::db::seaql::init_db` (and `projector`, which calls
+    /// it) should run `Migrator::up` on startup. Defaults to `true` — local
+    /// dev's `just dev-be`/`just dev-demo` keep migrating automatically on
+    /// every start, same as before this flag existed. Prod sets
+    /// `APP_run_migrations=false` on both `finreport-be` and
+    /// `finreport-be-projector` so a CI deploy never migrates the live
+    /// database as a side effect of a container restart; migrations there
+    /// run only as the deploy runbook's explicit `migration` binary step.
+    ///
+    /// Read straight from the environment (`config`'s `Environment` source,
+    /// same prefix/separator as everything else) rather than stored as a
+    /// `Settings` field: this crate's `Settings` is built with `Deserialize`
+    /// and no `Default` impl, so struct literals across the workspace (tests,
+    /// `graphql_schema_exporter`) list every field explicitly — a new
+    /// mandatory field would break every one of them. A method has no such
+    /// cost and reads the same `APP_run_migrations` env var either way.
+    pub fn run_migrations(&self) -> bool {
+        Self::parse_run_migrations(std::env::var("APP_run_migrations").ok().as_deref())
+    }
+
+    /// Pure parsing half of [`Settings::run_migrations`], split out so it is
+    /// unit-testable without mutating the real process environment (which
+    /// `cfg(test)`'s parallel threads would otherwise race on).
+    fn parse_run_migrations(value: Option<&str>) -> bool {
+        value
+            .map(|v| {
+                !matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "false" | "0" | "no" | "off"
+                )
+            })
+            .unwrap_or(true)
+    }
+
     /// Every configured Comdirect login, ordered by account key.
     pub fn profiles(&self) -> Result<Vec<ComdirectProfile>, SettingsError> {
         if self.accounts.is_empty() {
@@ -780,6 +814,31 @@ mod test {
             settings_from(&vars).allowed_origins(),
             vec!["https://app.example.com", "https://admin.example.com"]
         );
+    }
+
+    #[test]
+    fn run_migrations_defaults_to_true_when_unset() {
+        assert!(Settings::parse_run_migrations(None));
+    }
+
+    #[test]
+    fn run_migrations_is_false_for_recognized_falsey_values() {
+        for value in ["false", "FALSE", " False ", "0", "no", "NO", "off"] {
+            assert!(
+                !Settings::parse_run_migrations(Some(value)),
+                "{value:?} should disable migrations"
+            );
+        }
+    }
+
+    #[test]
+    fn run_migrations_is_true_for_anything_else() {
+        for value in ["true", "TRUE", "1", "yes", ""] {
+            assert!(
+                Settings::parse_run_migrations(Some(value)),
+                "{value:?} should leave migrations enabled"
+            );
+        }
     }
 
     #[test]

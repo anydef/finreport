@@ -191,6 +191,16 @@ watermark record for that `account_id` with an older/empty
 `finreport.import-watermark`. The importer only reads watermarks at process
 startup, so a reset takes effect on the next restart, not mid-run.
 
+**Tombstoning every watermark** (forcing a full re-import across all
+accounts, e.g. after a legacy backfill) is `legacy_backfill --tombstone-watermarks
+[--dry-run]` (same binary, a separate mode from the default backfill run):
+it drains `finreport.import-watermark` with the same
+`watermark::load_watermarks` read the importer itself uses, collects every
+live key, and — unless `--dry-run`, which only lists the keys it would
+tombstone — publishes a null-value record for each. The key-collection step
+(`live_watermark_keys`) is plain, network-free and unit-tested; only the
+publish step touches Kafka.
+
 ## 6. Legacy backfill (§2.8)
 
 The `legacy_backfill` binary (`webapp/src/bin/legacy_backfill.rs`) is a
@@ -220,14 +230,19 @@ not already present:
   observation is meant to persist, not just the latest one per account. Key
   presence alone would see *any* balance record for an account (e.g. from a
   live import) and wrongly skip backfilling that account's entire legacy
-  balance history. The tool instead dedups on `(account_id, date)`, deriving
-  the date from each existing record's `imported_at` header — since the
-  Comdirect balance payload itself carries no date field (confirmed against
-  `fixtures/payloads/balances/*.json`, which is just `{value, unit}`), and
-  the legacy `legacy_account_balance` row's own `date` column is exactly
-  what phase 2's normalization uses as that record's calendar date anyway
-  (§2.5: "balance dates are calendar dates from the record... never
-  `imported_at`").
+  balance history. The tool dedups on `(account_id, date)`, deriving the date
+  the same way the projector dates each origin (§2.5):
+  `legacy-backfill`'s own `ReconstructedBalance` payload carries its own
+  `date` field — the tool reads that first, matching the projector's
+  `LegacyMapper::map_balance` (which reads `balance.date`, never
+  `imported_at`) — falling back to the `imported_at` header only for records
+  whose payload has no `date` field at all (the live Comdirect `{value,
+  unit}` shape, which `ComdirectMapper::map_balance` dates from
+  `imported_at` for the same reason). Reading `imported_at` unconditionally
+  would misdate a re-scan against the backfill's own prior output: a
+  `legacy-backfill` record's `imported_at` is the fixed import-time
+  placeholder, not the balance's own observed date, so the two origins must
+  be told apart rather than treated as one rule.
 
 **Sentinel values**, used because legacy rows lack fields the envelope
 otherwise requires: `comdirect_account_key` is set to the fixed string

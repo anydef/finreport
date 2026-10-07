@@ -38,6 +38,24 @@ services:
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
+      # CORS allow-list for the SvelteKit frontend's same-origin proxy
+      # (`finreport-fe/src/lib/server/graphqlBackend.ts` forwards the
+      # browser's own `Origin` header verbatim) — an empty list rejects every
+      # request. The frontend isn't deployed through this compose file or
+      # terraform/main.tf yet, so there is no concrete hostname to read back;
+      # this follows the existing `<service>.lab.anydef.de` OPNsense/HAProxy
+      # convention used for `finreport-be.lab.anydef.de` (terraform/main.tf).
+      # Update to the frontend's actual origin once it is deployed — see the
+      # runbook's Gaps section.
+      APP_allowed_origins: https://finreport.lab.anydef.de
+      # The same HAProxy frontend (`1_HTTPS_frontend`, terraform/main.tf)
+      # terminates TLS for every `*.lab.anydef.de` host, so the frontend will
+      # be HTTPS too once deployed: Secure cookies are safe to require.
+      APP_cookie_secure: "true"
+      # Startup no longer runs migrations implicitly (see
+      # finreport-be-projector below and the runbook's explicit migrate
+      # step) — CI's image swap must not auto-migrate a live database.
+      APP_run_migrations: "false"
     ports:
       - "9040:8080"
     networks:
@@ -121,6 +139,10 @@ services:
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
+      # Same reasoning as finreport-be above: migrations are an explicit
+      # runbook step (`finreport-be-migrate`), not an implicit side effect of
+      # a container restart.
+      APP_run_migrations: "false"
     networks:
       services-lan:
         ipv4_address: 192.168.100.36

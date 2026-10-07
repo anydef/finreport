@@ -50,8 +50,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let brokers = settings.require_kafka_brokers()?.to_string();
 
     info!("[startup] Connecting to database");
-    let db = seaql::init_db(settings.require_database_url()?.expose_secret()).await?;
-    info!("[startup] Database connected, migrations applied.");
+    let db = seaql::init_db_with_migrations(
+        settings.require_database_url()?.expose_secret(),
+        settings.run_migrations(),
+    )
+    .await?;
+    info!(
+        run_migrations = settings.run_migrations(),
+        "[startup] Database connected."
+    );
 
     let default_owner = match &settings.projector_default_owner {
         Some(username) => {
