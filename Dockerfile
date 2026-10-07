@@ -19,7 +19,11 @@ COPY finreport-rs/ ./
 
 # BuildKit cache mounts: cargo registry/git and the workspace target dir are
 # persisted across CI runs on the same daemon, so incremental builds reuse
-# downloaded crates and compiled dependencies.
+# downloaded crates and compiled dependencies. Each mount has an explicit `id`
+# scoped to this project and builder image: without one, BuildKit keys the
+# cache by path alone, so any other image on the daemon mounting /build/target
+# shares it — and build scripts compiled there against a newer glibc then fail
+# here ("GLIBC_2.39 not found"). Bump the id when changing the builder image.
 #
 # Every binary the deploy runbook needs against the running image lives here:
 # `webapp`/`import-transactions` are the two long-running services;
@@ -30,9 +34,9 @@ COPY finreport-rs/ ./
 # already ships) is the explicit migrate step `APP_run_migrations=false`
 # requires. `fixture-replay` rides along too: same package, same deps already
 # compiled, so adding it costs nothing extra.
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/build/target \
+RUN --mount=type=cache,id=finreport-cargo-registry,target=/usr/local/cargo/registry \
+    --mount=type=cache,id=finreport-cargo-git,target=/usr/local/cargo/git \
+    --mount=type=cache,id=finreport-target-rust1.93-bookworm,target=/build/target \
     cargo build --release \
         --package webapp \
         --bin webapp \
