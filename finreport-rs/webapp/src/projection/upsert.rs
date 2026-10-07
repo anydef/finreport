@@ -199,6 +199,7 @@ pub async fn upsert_transaction(
         origin: Set(record.origin.clone()),
         imported_at: Set(record.imported_at.into()),
         updated_at: Set(record.updated_at.into()),
+        counterparty_key: Set(record.counterparty_key.clone()),
     };
 
     let mut on_conflict =
@@ -217,6 +218,7 @@ pub async fn upsert_transaction(
         transaction::Column::Origin,
         transaction::Column::ImportedAt,
         transaction::Column::UpdatedAt,
+        transaction::Column::CounterpartyKey,
     ]);
     if record.origin != ORIGIN_SOURCE {
         on_conflict.action_cond_where(legacy_guard(

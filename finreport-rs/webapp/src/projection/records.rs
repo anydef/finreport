@@ -74,6 +74,14 @@ pub struct TransactionRecord {
     pub origin: String,
     pub imported_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// Derived, projector-owned column (iteration 2 §2.5/§3): the
+    /// normalized counterparty (falling back to the normalized description)
+    /// that rules and the learner index on. Mappers leave this `None`; it is
+    /// filled in by the labeler's processor (WP3), which calls WP2's
+    /// `labeling::normalize` after the mapper has produced this record —
+    /// normalization needs no mapper-specific context, so it is not done
+    /// here.
+    pub counterparty_key: Option<String>,
 }
 
 /// Why a mapper could not turn one ingest record into a row. Every variant is

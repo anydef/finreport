@@ -7,6 +7,7 @@
 
 pub mod envelope;
 pub mod events;
+pub mod labeling;
 pub mod producer;
 pub mod watermark;
 
