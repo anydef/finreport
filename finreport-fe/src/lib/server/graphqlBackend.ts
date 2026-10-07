@@ -121,6 +121,51 @@ function mockLogout(): GraphqlBackendResult {
 	return { status: 200, body: { data: { logout: true } }, setCookies: [setCookie] };
 }
 
+interface MockTransaction {
+	tags: string[];
+	transfer: unknown;
+	recurring: { isRecurring: boolean };
+}
+
+/**
+ * Applies the iteration-3 `tags`/`recurring`/`transfer` filter fields (§4)
+ * over the static fixture in mock mode, so `/transactions`'s new filters are
+ * visibly functional without a real backend. `tags` is AND-ed; `recurring`
+ * matches the *effective* flag; `transfer` selects only transfers (`true`)
+ * or only non-transfers (`false`).
+ */
+function applyInsightFilters(
+	items: MockTransaction[],
+	filter: Record<string, unknown> | undefined
+): MockTransaction[] {
+	if (!filter) return items;
+	const tags = filter.tags as string[] | undefined;
+	const recurring = filter.recurring as boolean | undefined;
+	const transfer = filter.transfer as boolean | undefined;
+	return items.filter((item) => {
+		if (tags && tags.length > 0 && !tags.every((t) => item.tags.includes(t))) return false;
+		if (recurring !== undefined && recurring !== null && item.recurring.isRecurring !== recurring) {
+			return false;
+		}
+		if (transfer !== undefined && transfer !== null && Boolean(item.transfer) !== transfer) {
+			return false;
+		}
+		return true;
+	});
+}
+
+function mockTransactions(variables: Record<string, unknown> | undefined): unknown {
+	const items = transactionsMock.data.transactions.items as unknown as MockTransaction[];
+	const filtered = applyInsightFilters(items, variables?.filter as Record<string, unknown>);
+	return {
+		transactions: {
+			...transactionsMock.data.transactions,
+			items: filtered,
+			totalCount: filtered.length
+		}
+	};
+}
+
 /**
  * Pick a cashflow-graph fixture: the `CATEGORY` dimension (§5/§6 WP5) gets
  * its own fixture regardless of account scoping, otherwise the richer
@@ -254,7 +299,9 @@ function mockCreateOrUpdateRule(
 	};
 	const existing = existingId ? rulesMock.data.rules.find((r) => r.id === existingId) : undefined;
 	const category =
-		findMockCategory(input.categorySlug) ?? existing?.category ?? placeholderCategory(input.categorySlug);
+		findMockCategory(input.categorySlug) ??
+		existing?.category ??
+		placeholderCategory(input.categorySlug);
 	return {
 		id: existingId ?? crypto.randomUUID(),
 		name: input.name ?? existing?.name ?? 'Untitled rule',
@@ -333,7 +380,7 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'Accounts':
 			return { status: 200, body: { data: accountsMock.data }, setCookies: [] };
 		case 'Transactions':
-			return { status: 200, body: { data: transactionsMock.data }, setCookies: [] };
+			return { status: 200, body: { data: mockTransactions(body.variables) }, setCookies: [] };
 		case 'CashflowSummary':
 			return { status: 200, body: { data: cashflowSummaryMock.data }, setCookies: [] };
 		case 'CashflowGraph':

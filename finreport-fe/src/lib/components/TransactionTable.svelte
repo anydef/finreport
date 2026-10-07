@@ -2,14 +2,19 @@
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 	import { labelSourceBadge, needsReviewBadge } from '$lib/labelBadge';
 	import Badge from './Badge.svelte';
+	import TagEditor from './TagEditor.svelte';
+	import RecurringBadge from './RecurringBadge.svelte';
 	import type { Transaction } from '$lib/graphql/types';
 
 	interface Props {
 		transactions: Transaction[];
 		currency: string;
+		/** Omitted = tags/recurring are read-only (no mutation wiring, e.g. a narrow preview table). */
+		onSetTags?: (transactionId: string, tags: string[]) => void | Promise<void>;
+		onSetRecurring?: (transactionId: string, recurring: boolean | null) => void | Promise<void>;
 	}
 
-	let { transactions, currency }: Props = $props();
+	let { transactions, currency, onSetTags, onSetRecurring }: Props = $props();
 </script>
 
 {#if transactions.length === 0}
@@ -23,6 +28,8 @@
 					<th class="py-2 pr-4 font-medium">Counterparty</th>
 					<th class="py-2 pr-4 font-medium">Description</th>
 					<th class="py-2 pr-4 font-medium">Category</th>
+					<th class="py-2 pr-4 font-medium">Tags</th>
+					<th class="py-2 pr-4 font-medium">Flags</th>
 					<th class="py-2 pr-4 text-right font-medium">Amount</th>
 				</tr>
 			</thead>
@@ -46,6 +53,37 @@
 									<a href="/admin/review" class="inline-block">
 										<Badge text={pill.text} variant={pill.variant} />
 									</a>
+								{/if}
+							</div>
+						</td>
+						<td class="py-2 pr-4">
+							{#if onSetTags}
+								<TagEditor tags={tx.tags} onSave={(tags) => onSetTags(tx.id, tags)} />
+							{:else}
+								<div class="flex flex-wrap gap-1">
+									{#each tx.tags as tag (tag)}
+										<Badge text={tag} variant="neutral" />
+									{/each}
+								</div>
+							{/if}
+						</td>
+						<td class="py-2 pr-4">
+							<div class="flex flex-wrap items-center gap-1">
+								{#if tx.transfer}
+									<Badge text="⇄ transfer" variant="info" />
+								{/if}
+								{#if onSetRecurring}
+									<RecurringBadge
+										recurring={tx.recurring}
+										onToggle={(next) => onSetRecurring(tx.id, next)}
+									/>
+								{:else if tx.recurring.isRecurring}
+									<Badge
+										text={tx.recurring.source === 'USER'
+											? '↻ recurring · you'
+											: '↻ recurring · auto'}
+										variant={tx.recurring.source === 'USER' ? 'success' : 'info'}
+									/>
 								{/if}
 							</div>
 						</td>
