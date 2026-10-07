@@ -5,6 +5,7 @@ import {
 	descendantSlugs,
 	expandSelectedSlugs,
 	filterCategoryTree,
+	filterOptionGroups,
 	flattenCategoryTree
 } from './categoryTree';
 import type { Category } from './graphql/types';
@@ -134,5 +135,51 @@ describe('filterCategoryTree', () => {
 
 	it('returns an empty forest when nothing matches', () => {
 		expect(filterCategoryTree(forest, 'zzz')).toEqual([]);
+	});
+});
+
+describe('filterOptionGroups', () => {
+	const groups = [
+		{
+			groupLabel: 'Food',
+			options: [
+				{ slug: 'food-groceries', label: 'Food / Groceries' },
+				{ slug: 'food-dining', label: 'Food / Dining out' }
+			]
+		},
+		{ groupLabel: 'Transport', options: [{ slug: 'car-fuel', label: 'Transport / Fuel' }] }
+	];
+
+	it('matches on the label', () => {
+		const out = filterOptionGroups(groups, 'dining');
+		expect(out).toEqual([{ groupLabel: 'Food', options: [groups[0].options[1]] }]);
+	});
+
+	it('matches on the slug', () => {
+		const out = filterOptionGroups(groups, 'car-fuel');
+		expect(out.map((g) => g.groupLabel)).toEqual(['Transport']);
+	});
+
+	it('drops a group with no matching option', () => {
+		expect(filterOptionGroups(groups, 'fuel').map((g) => g.groupLabel)).toEqual(['Transport']);
+	});
+
+	it('keeps a group when one option matches', () => {
+		const out = filterOptionGroups(groups, 'groc');
+		expect(out).toHaveLength(1);
+		expect(out[0].options.map((o) => o.slug)).toEqual(['food-groceries']);
+	});
+
+	it('is case-insensitive and trims the query', () => {
+		expect(filterOptionGroups(groups, '  GROCERIES ')[0].options[0].slug).toBe('food-groceries');
+	});
+
+	it('returns everything for a blank query', () => {
+		expect(filterOptionGroups(groups, '')).toEqual(groups);
+		expect(filterOptionGroups(groups, '   ')).toEqual(groups);
+	});
+
+	it('returns empty when nothing matches', () => {
+		expect(filterOptionGroups(groups, 'zzz')).toEqual([]);
 	});
 });

@@ -1,5 +1,6 @@
 <script lang="ts">
 	import type { Category, Transaction } from '$lib/graphql/types';
+	import { filterOptionGroups } from '$lib/categoryTree';
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 
 	interface Props {
@@ -50,6 +51,15 @@
 	const optionGroups = $derived(groupedOptions(categories));
 
 	let picked = $state('');
+	let query = $state('');
+	const visibleGroups = $derived(filterOptionGroups(optionGroups, query));
+
+	/** Typing narrows the options; a selection that gets filtered out is cleared. */
+	function onSearchInput() {
+		if (picked && !visibleGroups.some((g) => g.options.some((o) => o.slug === picked))) {
+			picked = '';
+		}
+	}
 	let suggestionDismissed = $state(false);
 	let busy = $state(false);
 	let errorMessage = $state('');
@@ -140,6 +150,14 @@
 	{/if}
 
 	<div class="flex flex-wrap items-center gap-2">
+		<input
+			type="search"
+			bind:value={query}
+			oninput={onSearchInput}
+			placeholder="Search categories"
+			aria-label="Search categories"
+			class="rounded-md border-slate-300 text-xs"
+		/>
 		<label class="flex items-center gap-2 text-xs text-slate-600">
 			Pick a category
 			<select
@@ -148,7 +166,10 @@
 				aria-label="Pick a category"
 			>
 				<option value="">Select…</option>
-				{#each optionGroups as group (group.groupLabel)}
+				{#if visibleGroups.length === 0}
+					<option value="" disabled>No categories match</option>
+				{/if}
+				{#each visibleGroups as group (group.groupLabel)}
 					<optgroup label={group.groupLabel}>
 						{#each group.options as option (option.slug)}
 							<option value={option.slug}>{option.label}</option>
