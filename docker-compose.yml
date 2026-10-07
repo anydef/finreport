@@ -45,6 +45,46 @@ services:
     labels:
       - "net.unraid.docker.managed=composeman"
 
+  # One-shot replay of the pre-event-log history in the `legacy_*` tables
+  # onto the ingest topics (`origin=legacy-backfill`, iteration-1 spec §2.8),
+  # so `finreport-be-projector` builds it into the read model like any other
+  # record. Read-only against Postgres: it never writes `legacy_*`.
+  #
+  # Runs on every deploy *and that is the point* — it publishes only keys the
+  # target topic does not already carry, so the first run's own output is what
+  # every later run sees as "already there". Steady state is a no-op that logs
+  # skips, which is what makes this a plain service instead of a manual
+  # `docker run` from the runbook.
+  #
+  # Nothing depends on it: it only produces to Kafka, and the projector tails
+  # those topics continuously, so a failed or slow backfill delays the legacy
+  # history appearing without holding up the rest of the stack. It does need
+  # the migration first, since `legacy_*` is what `finreport-be-migrate`
+  # renames the old tables to.
+  #
+  # No `ipv4_address`, unlike every other service here: this one only dials
+  # out (Postgres, the Kafka broker) and serves nothing — no HTTP, no GraphQL,
+  # no port — so nothing ever needs to address it and there is no HAProxy or
+  # DNS entry to point at a fixed one. It still joins `services-lan` to reach
+  # those two.
+  finreport-be-legacy-backfill:
+    image: ${DOCKER_REGISTRY}/finreport-be:latest
+    pull_policy: always
+    container_name: finreport-be-legacy-backfill
+    entrypoint: ["legacy-backfill"]
+    restart: "no"
+    depends_on:
+      finreport-be-migrate:
+        condition: service_completed_successfully
+    environment:
+      RUST_LOG: info
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
+      APP_kafka_brokers: kafka.lab.anydef.de:9092
+    networks:
+      - services-lan
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
   finreport-be:
     image: ${DOCKER_REGISTRY}/finreport-be:latest
     pull_policy: always

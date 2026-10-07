@@ -136,6 +136,15 @@ the stack below can be rolled.
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
      --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest"
    ```
+
+   Since the iteration-3 follow-up this is also a one-shot compose service,
+   `finreport-be-legacy-backfill`, so a normal `just deploy` runs it after
+   `finreport-be-migrate` and it terminates on its own — no manual `docker
+   run` needed. It publishes only keys the ingest topics do not already
+   carry, so every later deploy re-runs it as a no-op that logs skips. The
+   command above stays useful for running it out of band, or for watching its
+   output directly.
+
 4. **Tombstone the watermark topic** (`finreport.import-watermark`) so the next
    import re-walks full history and republishes raw bank bytes, landing them
    *after* the backfill so compaction converges on raw data. The same

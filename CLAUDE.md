@@ -305,16 +305,29 @@ in that shell if you want the same sharing there.
 
 Binding for every agent working in this repo:
 
-- **Never push.** Commit locally only, on feature branches in worktrees (`../finreport-worktrees/<branch>`), never on `main`.
+- **Never push.** No `git push`, to any remote, ever — that is the one hard git
+  limit. Everything local is allowed.
+- **Finish by merging into `main`.** Work goes on a feature branch (in a
+  worktree, `../finreport-worktrees/<branch>`, when agents run in parallel),
+  then gets merged back into local `main` with `git merge --no-ff`, matching
+  this repo's existing merge-commit history. No *direct* commits on `main` —
+  but the merge commit itself is expected, and work left sitting on a branch
+  is not finished.
 - **Never scan the home (`~`) or root (`/`) folder.** Stay inside the repo and its worktrees.
 - **Model roles:**
   - Opus 5 writes specs.
   - Sonnet 5 writes code.
-  - Haiku runs simple scripts, tests, lints and budget checks.
+  - Haiku runs simple scripts, tests and lints.
   - Opus 5.5 evaluates/validates results and orchestrates.
 - These roles are the default. The orchestrator may pick a different model, subagent or effort level per task. Keep costs low without lowering quality.
 - Independent work may run in parallel across agents.
-- **Budget:** each session has an AI-credit (AIC) budget set by the user. A Haiku agent periodically checks spend, using the local session store: `SELECT SUM(total_nano_aiu)/1e9 FROM assistant_usage_events WHERE session_id = '<id>'` (source `local`). Don't use the cloud `session_usage.cost` field: it isn't in AIC and may be empty. Work **hard-stops at 100%** of the budget.
+- **Cost discipline:** delegate mechanical work — test and lint runs, doc and
+  prose edits, regenerating generated files, grep-style spot checks — to a
+  cheap Haiku subagent rather than running it on the orchestrating model. Check
+  delegated *numbers* instead of trusting the summary: a Haiku sweep in this
+  repo once reported 270 passing tests where the real total was 290. There is
+  no AI-credit (AIC) budget in this environment — that was a Copilot-era
+  concept, and the old `assistant_usage_events` spend query does not apply.
 - **Code quality:** code must be readable, well modularized and well tested.
 - **Local runnability:** everything must be runnable locally. Docker is fine, e.g. Postgres via `just db-up` or a local Kafka broker for dev.
 - **Judgement calls:** agents may make their own assumptions and decisions, unless they are security-critical or harmful. Those go to the user.
