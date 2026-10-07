@@ -9,13 +9,22 @@ deploys automatically.
 
 Postgres is `192.168.100.33:5432` (`finreport-be-postgres`). Kafka is the
 central broker `kafka.lab.anydef.de:9092`. The new projector container binds
-`192.168.100.36` on `services-lan`.
+`192.168.100.39` on `services-lan` (`.36` was already taken on Tower).
+Before deploying, confirm none of the stack's static IPs is in use:
+
+```bash
+docker network inspect services-lan \
+  --format '{{range .Containers}}{{.Name}} {{.IPv4Address}}{{"\n"}}{{end}}' | sort -t. -k4 -n
+```
+
+If one is taken, `docker start` fails with "Address already in use" — move
+that service's `ipv4_address` in `docker-compose.yml`.
 
 ---
 
 ## 1. Prerequisites
 
-**Network.** `192.168.100.36` must reach both:
+**Network.** `192.168.100.39` must reach both:
 
 ```bash
 # From a host on services-lan (or exec into any container already on it):
