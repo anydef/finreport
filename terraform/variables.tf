@@ -65,6 +65,18 @@ variable "app_port" {
   default     = 8080
 }
 
+variable "app_fe_host" {
+  description = "Host/IP where the frontend (finreport-fe) is reachable on services-lan"
+  type        = string
+  default     = "192.168.100.50"
+}
+
+variable "app_fe_port" {
+  description = "Port the frontend (adapter-node) listens on"
+  type        = number
+  default     = 3000
+}
+
 variable "postgres_password" {
   description = "Postgres password for the finreport role"
   type        = string

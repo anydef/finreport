@@ -41,12 +41,9 @@ services:
       # CORS allow-list for the SvelteKit frontend's same-origin proxy
       # (`finreport-fe/src/lib/server/graphqlBackend.ts` forwards the
       # browser's own `Origin` header verbatim) — an empty list rejects every
-      # request. The frontend isn't deployed through this compose file or
-      # terraform/main.tf yet, so there is no concrete hostname to read back;
-      # this follows the existing `<service>.lab.anydef.de` OPNsense/HAProxy
-      # convention used for `finreport-be.lab.anydef.de` (terraform/main.tf).
-      # Update to the frontend's actual origin once it is deployed — see the
-      # runbook's Gaps section.
+      # request. `finreport-fe` below is served at this exact origin through
+      # the same `<service>.lab.anydef.de` OPNsense/HAProxy convention used
+      # for `finreport-be.lab.anydef.de` (terraform/main.tf).
       APP_allowed_origins: https://finreport.lab.anydef.de
       # The same HAProxy frontend (`1_HTTPS_frontend`, terraform/main.tf)
       # terminates TLS for every `*.lab.anydef.de` host, so the frontend will
@@ -69,6 +66,37 @@ services:
       - "net.unraid.docker.managed=composeman"
       - "net.unraid.docker.shell=bash"
       - "net.unraid.docker.icon=https://raw.githubusercontent.com/docker-library/docs/refs/heads/master/mediawiki/logo.svg"
+
+  # SvelteKit (adapter-node) frontend, served at finreport.lab.anydef.de
+  # through the same HAProxy/unbound convention as finreport-be (see
+  # terraform/main.tf). Its own GraphQL proxy route forwards to finreport-be
+  # over services-lan, so it never needs to leave the macvlan network.
+  finreport-fe:
+    image: ${DOCKER_REGISTRY}/finreport-fe:latest
+    pull_policy: always
+    container_name: finreport-fe
+    restart: always
+    depends_on:
+      - finreport-be
+    environment:
+      NODE_ENV: production
+      PORT: "3000"
+      # `graphqlBackend.ts` reads this via `$env/dynamic/private` (runtime,
+      # not baked into the build), so it can point at finreport-be's
+      # services-lan address without a rebuild.
+      GRAPHQL_URL: http://192.168.100.45:8080/graphql
+      # SvelteKit's CSRF check and the proxy's cookie handling both need the
+      # real external origin, not the container's own http://localhost:3000.
+      ORIGIN: https://finreport.lab.anydef.de
+      # Mock mode is a dev-only escape hatch (`src/lib/server/graphqlBackend.ts`)
+      # — explicitly unset here so a stray default can never ship fake data.
+      PUBLIC_USE_MOCKS: "0"
+    networks:
+      services-lan:
+        ipv4_address: 192.168.100.50
+    labels:
+      - "net.unraid.docker.webui=http://192.168.100.50:3000"
+      - "net.unraid.docker.managed=composeman"
 
   finreport-be-importer:
     image: ${DOCKER_REGISTRY}/finreport-be:latest

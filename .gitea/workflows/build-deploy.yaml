@@ -61,6 +61,11 @@ jobs:
           _OP_LOADED: "1"
         run: just build
 
+      - name: Build and push frontend Docker image
+        env:
+          _OP_LOADED: "1"
+        run: just build-fe
+
       - name: Deploy to Portainer
         env:
           _OP_LOADED: "1"

@@ -41,6 +41,8 @@ resource anywhere in `terraform/`). If OPNsense filters `services-lan` traffic
 by individual IP rather than by subnet, add `.36` to the same allow rule as
 `.32`/`.33`/`.35` by hand in the OPNsense UI before continuing — this repo's
 Terraform does not express it, so it will not appear in a `terraform plan`.
+`finreport-fe` (`.38`) only needs to reach `.32:8080` (GraphQL) — same caveat
+applies if filtering is per-IP.
 
 **New env vars / secrets.** No new secrets, and `.env.tpl`/
 `terraform/variables.tf` need no new entries for this cutover —
@@ -49,16 +51,15 @@ Terraform does not express it, so it will not appear in a `terraform plan`.
 - `finreport-be-projector` already sets `APP_database_url` and
   `APP_kafka_brokers`.
 - `finreport-be` sets `APP_allowed_origins=https://finreport.lab.anydef.de`
-  and `APP_cookie_secure=true`. The frontend isn't deployed through this
-  compose file or `terraform/main.tf` yet, so there is no confirmed origin to
-  read back; the value follows the existing `<service>.lab.anydef.de`
-  OPNsense/HAProxy naming convention used for `finreport-be.lab.anydef.de`
-  itself. **Confirm or correct this once the frontend's real deployed origin
-  is known** — an empty/wrong allow-list means actix CORS rejects every
-  request the SvelteKit proxy forwards (it relays the browser's own `Origin`
-  header verbatim), and a frontend served over plain HTTP would need
-  `APP_cookie_secure=false` instead, since a browser silently drops Secure
-  cookies set over an insecure origin.
+  and `APP_cookie_secure=true`. The frontend (`finreport-fe`) is now deployed
+  through this same compose file/`terraform/main.tf`, bound to
+  `192.168.100.50` on `services-lan` and served over HTTPS at exactly this
+  origin (OPNsense/HAProxy, same convention as `finreport-be.lab.anydef.de`),
+  so both values are confirmed, not a guess — an empty/wrong allow-list means
+  actix CORS rejects every request the SvelteKit proxy forwards (it relays
+  the browser's own `Origin` header verbatim), and a frontend served over
+  plain HTTP would need `APP_cookie_secure=false` instead, since a browser
+  silently drops Secure cookies set over an insecure origin.
 - `finreport-be` and `finreport-be-projector` both set
   `APP_run_migrations=false` — see §3 step 2; `just dev-be`/`dev-demo` are
   unaffected (the flag defaults to `true`, i.e. unchanged, when unset).
@@ -180,11 +181,11 @@ the stack below can be rolled.
    ```
 7. **Start the importer, webapp and frontend:**
    ```bash
-   docker start finreport-be-importer finreport-be
+   docker start finreport-be-importer finreport-be finreport-fe
    ```
-   The frontend is static (`finreport-fe`, deployed separately per its own
-   `CLAUDE.md`) — redeploy it if its build changed; no backend restart is
-   required for it specifically.
+   `finreport-fe` (`192.168.100.50:3000`, https://finreport.lab.anydef.de) is
+   its own image built from `finreport-fe/Dockerfile` — redeploy it if its
+   build changed; no backend restart is required for it specifically.
 
 ---
 
@@ -269,19 +270,13 @@ Clean up the local dump/cookie files once satisfied (`rm cookies.txt`).
 Found while writing this runbook; none were invented around — flagged instead:
 
 - **No per-IP OPNsense firewall resource in Terraform** for `services-lan`
-  members (`.32`/`.33`/`.35`/`.36`) — only `opnsense_haproxy_*` and
-  `opnsense_unbound_host_override` exist for `.32`. If filtering is per-IP
-  rather than per-subnet, `.36` needs a manual OPNsense rule; nothing in
-  `terraform plan` will show this as drift either way.
+  members (`.32`/`.33`/`.35`/`.36`/`.38`) — only `opnsense_haproxy_*` and
+  `opnsense_unbound_host_override` exist for `.32`/`.38`. If filtering is
+  per-IP rather than per-subnet, `.36`/`.38` need a manual OPNsense rule;
+  nothing in `terraform plan` will show this as drift either way.
 - **`docker-compose.yml` has no `finreport-be-projector --until-caught-up`
   one-shot step** — the deployed service always tails. §3 step 5 uses a
   throwaway `docker run` for the initial catch-up pass since the compose file
   doesn't express it.
 - **`APP_projector_default_owner` is unset in `docker-compose.yml`** — every
   cutover currently needs the manual `user-admin link --all` in §3 step 6.
-- **`APP_allowed_origins` in `docker-compose.yml` is a best-guess hostname**
-  (`https://finreport.lab.anydef.de`, following the existing
-  `<service>.lab.anydef.de` naming convention), not a confirmed one — the
-  frontend isn't deployed through this compose file or `terraform/main.tf`.
-  Confirm/correct it (and `APP_cookie_secure` if the frontend ends up served
-  over plain HTTP) once the frontend's real deployment is known; see §1.
