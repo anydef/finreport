@@ -745,8 +745,10 @@ pub async fn label_one_transaction(
 ) -> Result<(), ResolveError> {
     // Normalization is independent of resolution outcome and only needs to
     // run once per transaction — the projector's own mapper never fills it
-    // in (§2.5/§3).
-    if txn.counterparty_key.is_none() {
+    // in (§2.5/§3). `txn` is an immutable borrow of the sweep/consume-loop's
+    // read, so a first-time computation here never lands on `txn` itself —
+    // `computed_key` carries it forward for the learn-trigger below instead.
+    let computed_key = if txn.counterparty_key.is_none() {
         let normalized_counterparty = (ops.normalize)(txn.counterparty_name.as_deref(), None);
         let normalized_description = (ops.normalize)(None, txn.description.as_deref());
         let key = if !normalized_counterparty.is_empty() {
@@ -755,7 +757,10 @@ pub async fn label_one_transaction(
             normalized_description
         };
         proj::set_counterparty_key(db, txn.id, &key).await?;
-    }
+        Some(key)
+    } else {
+        None
+    };
 
     let Some(resolved) =
         resolve_transaction(db, ops, provider, catalog, prompt_version, llm_min_confidence, cost_guard, txn)
@@ -776,7 +781,7 @@ pub async fn label_one_transaction(
     if matches!(
         resolved.source,
         LabelSource::User | LabelSource::Llm | LabelSource::LlmCache
-    ) && let Some(key) = txn.counterparty_key.clone()
+    ) && let Some(key) = txn.counterparty_key.clone().or(computed_key)
     {
         maybe_learn_rule(db, publisher, ops, &key).await?;
     }
@@ -870,12 +875,17 @@ pub async fn check_projection_lag(
         .into_iter()
         .map(|t| (t.to_string(), t.to_string()))
         .collect();
-    // `transaction-label`/`llm-cache`, checked under the labeler's *own*
-    // bookkeeping keys — these only ever advance when the labeler itself
-    // publishes, so this is self-consistency, not a race with the projector.
+    // `transaction-label`/`llm-cache`, checked under the *main projector's*
+    // own (unsuffixed) offset keys, now that the projector also consumes
+    // and projects these two topics alongside the three ingest ones
+    // (`projection::LABELING_PROJECTION_TOPICS`) — the labeler must not run
+    // ahead of the projector's own projection of its own published labels,
+    // the same reasoning as `ingest_checks` above. Nothing ever advances an
+    // `@labeler`-suffixed offset for these two topics: the labeler only
+    // *publishes* to them, it never consumes them back.
     let own_checks: Vec<(String, String)> = [TOPIC_TRANSACTION_LABEL, TOPIC_LLM_CACHE]
         .into_iter()
-        .map(|t| (t.to_string(), offset_topic_key(t)))
+        .map(|t| (t.to_string(), t.to_string()))
         .collect();
 
     let mut lagging = Vec::new();

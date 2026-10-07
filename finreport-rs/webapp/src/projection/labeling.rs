@@ -456,12 +456,20 @@ pub async fn project_rule(
         ])
         .action_cond_where(Expr::col((rule::Entity, rule::Column::Revision)).lte(Expr::cust("excluded.revision")));
 
-    rule::Entity::insert(model)
-        .on_conflict(on_conflict.to_owned())
-        .exec(txn)
-        .await?;
-
-    Ok(())
+    match rule::Entity::insert(model).on_conflict(on_conflict.to_owned()).exec(txn).await {
+        Ok(_) => Ok(()),
+        // A real conflict whose stored revision is already newer: the
+        // conditional `WHERE` legitimately declines the update, and
+        // sea-orm's `RETURNING`-based insert surfaces that as an error
+        // rather than "0 rows, nothing to do" — same last-writer-wins
+        // semantics as `project_user_label`'s explicit pre-check (§2.1),
+        // just enforced in SQL here. Seen in practice when the labeler's
+        // own re-affirming calls to `maybe_learn_rule` (each bumping the
+        // revision) echo back out of order through its own consumption of
+        // `finreport.rule` (one of its `LABELER_INPUT_TOPICS`).
+        Err(DbErr::RecordNotInserted) => Ok(()),
+        Err(e) => Err(e),
+    }
 }
 
 // ---------------------------------------------------------------------------

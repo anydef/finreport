@@ -142,10 +142,11 @@ async fn replay_is_idempotent_and_reset_replay_reproduces_identical_state() {
         "an identical replay must skip the same poison/unrecognized-topic records"
     );
     assert_eq!(
-        first.skipped, 4,
-        "the two source_account_id-less fixtures (§2.2 skip+log) plus the two \
-         finreport.user-label fixtures (§2.6, unrecognized by this ingest-only \
-         registry until WP3 wires a mapper) must be skipped"
+        first.skipped, 2,
+        "the two source_account_id-less fixtures (§2.2 skip+log) must be \
+         skipped; the two finreport.user-label fixtures are now recognized \
+         and applied by projection::labeling (projector/mod.rs's \
+         LABELING_PROJECTION_TOPICS wiring)"
     );
 
     // Reset (as a fresh DB would be) and replay once more: must reproduce

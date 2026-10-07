@@ -27,7 +27,11 @@ use tracing::{error, info, warn};
 use uuid::Uuid;
 
 use crate::kafka::envelope::{
-    Envelope, SourceEvent, TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION,
+    transaction_uuid, Envelope, SourceEvent, TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE,
+    TOPIC_TRANSACTION,
+};
+use crate::kafka::labeling::{
+    CacheRecord, CategoryRecord, LabelRecord, RuleRecord, UserLabelRecord,
 };
 use mapper::{MapperInput, MapperRegistry, SourceMapper};
 use records::MapError;
@@ -53,6 +57,24 @@ pub const DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 5;
 /// only partition that ever exists.
 pub const INGEST_TOPICS: [&str; 3] = [TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION];
 const INGEST_PARTITION: i32 = 0;
+
+/// The five labeling *output* topics ([`labeling_topic_for`]) this projector
+/// also consumes and projects, alongside [`INGEST_TOPICS`] — same batch,
+/// same transaction, same offset bookkeeping (unsuffixed keys, like the
+/// ingest topics; distinct from the labeler's own `@labeler`-suffixed
+/// bookkeeping of *its* four input topics). `category`/`rule`/`user-label`
+/// are already self-projected by their writers (`category_seed`, the
+/// labeler's own consume loop), so this is belt-and-braces (idempotent
+/// upserts) for those three — it is load-bearing for `transaction-label`,
+/// which only the labeler itself wrote before, under an offset key nothing
+/// ever advanced.
+pub const LABELING_PROJECTION_TOPICS: [&str; 5] = [
+    crate::kafka::labeling::TOPIC_CATEGORY,
+    crate::kafka::labeling::TOPIC_TRANSACTION_LABEL,
+    crate::kafka::labeling::TOPIC_LLM_CACHE,
+    crate::kafka::labeling::TOPIC_USER_LABEL,
+    crate::kafka::labeling::TOPIC_RULE,
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EntityKind {
@@ -194,6 +216,13 @@ pub async fn process_batch(
         next_offsets.insert((record.topic.clone(), record.partition), record.offset + 1);
 
         let Some(kind) = entity_kind_for_topic(&record.topic) else {
+            if let Some(labeling_kind) = labeling_topic_for(&record.topic) {
+                match apply_labeling_record(&txn, labeling_kind, record).await {
+                    Ok(()) => stats.applied += 1,
+                    Err(e) => return Err(e),
+                }
+                continue;
+            }
             warn!(topic = %record.topic, "projector: record on an unrecognized topic, skipped");
             stats.skipped += 1;
             continue;
@@ -337,6 +366,117 @@ async fn apply_transaction(
     Ok(())
 }
 
+/// Dispatches one record on a [`LabelingTopic`] to its
+/// `projection::labeling::project_*` function, inside the same transaction
+/// ingest records apply in. A malformed payload is a poison record — logged
+/// and skipped, like [`ApplyError::Map`] — rather than aborting the batch; a
+/// `DbErr` still aborts it, same as every other write here.
+async fn apply_labeling_record(
+    txn: &DatabaseTransaction,
+    kind: LabelingTopic,
+    record: &ConsumedRecord,
+) -> Result<(), DbErr> {
+    match kind {
+        LabelingTopic::Category => {
+            if record.payload.is_empty() {
+                return match tombstone_uuid_from_key(record) {
+                    Some(id) => labeling::project_category(txn, id, None).await,
+                    None => Ok(()),
+                };
+            }
+            match serde_json::from_slice::<CategoryRecord>(&record.payload) {
+                Ok(parsed) => labeling::project_category(txn, parsed.id, Some(parsed)).await,
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison category record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::TransactionLabel => {
+            if record.payload.is_empty() {
+                return match tombstone_transaction_id(record) {
+                    Some(id) => labeling::project_transaction_label(txn, id, None).await,
+                    None => Ok(()),
+                };
+            }
+            match serde_json::from_slice::<LabelRecord>(&record.payload) {
+                Ok(parsed) => {
+                    let id = transaction_uuid(&parsed.source, &parsed.external_id);
+                    labeling::project_transaction_label(txn, id, Some(parsed)).await
+                }
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison transaction-label record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::LlmCache => {
+            let Some(fingerprint) = record.key.as_deref() else {
+                warn!(topic = %record.topic, offset = record.offset, "projector: llm-cache record with no key, skipped");
+                return Ok(());
+            };
+            if record.payload.is_empty() {
+                return labeling::project_llm_cache(txn, fingerprint, None).await;
+            }
+            match serde_json::from_slice::<CacheRecord>(&record.payload) {
+                Ok(parsed) => labeling::project_llm_cache(txn, fingerprint, Some(parsed)).await,
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison llm-cache record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::UserLabel => {
+            if record.payload.is_empty() {
+                return match tombstone_transaction_id(record) {
+                    Some(id) => labeling::project_user_label(txn, id, None).await,
+                    None => Ok(()),
+                };
+            }
+            match serde_json::from_slice::<UserLabelRecord>(&record.payload) {
+                Ok(parsed) => {
+                    let id = transaction_uuid(&parsed.source, &parsed.external_id);
+                    labeling::project_user_label(txn, id, Some(parsed)).await
+                }
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison user-label record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::Rule => {
+            let Some(id) = tombstone_uuid_from_key(record) else {
+                warn!(topic = %record.topic, offset = record.offset, "projector: rule record with no/invalid-UUID key, skipped");
+                return Ok(());
+            };
+            if record.payload.is_empty() {
+                return labeling::project_rule(txn, id, None).await;
+            }
+            match serde_json::from_slice::<RuleRecord>(&record.payload) {
+                Ok(parsed) => labeling::project_rule(txn, id, Some(parsed)).await,
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison rule record, skipped");
+                    Ok(())
+                }
+            }
+        }
+    }
+}
+
+/// `category`/`rule` keys are the entity's own UUID verbatim.
+fn tombstone_uuid_from_key(record: &ConsumedRecord) -> Option<Uuid> {
+    Uuid::parse_str(record.key.as_deref()?).ok()
+}
+
+/// `transaction-label`/`user-label` keys are `<source>:<external_id>`
+/// (§2.2) — the same form `labeling::processor::parse_source_external_id`
+/// parses for the labeler's own tombstone handling.
+fn tombstone_transaction_id(record: &ConsumedRecord) -> Option<Uuid> {
+    let key = record.key.as_deref()?;
+    let (source, external_id) = key.split_once(':')?;
+    Some(transaction_uuid(source, external_id))
+}
+
 // ---------------------------------------------------------------------------
 // The Kafka-facing half
 // ---------------------------------------------------------------------------
@@ -416,7 +556,7 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
 
     let stored_offsets = offsets::load_offsets(&db).await.map_err(ProjectorError::Db)?;
     let mut tpl = TopicPartitionList::new();
-    for topic in INGEST_TOPICS {
+    for topic in INGEST_TOPICS.into_iter().chain(LABELING_PROJECTION_TOPICS) {
         let offset = stored_offsets
             .get(&(topic.to_string(), INGEST_PARTITION))
             .map(|&next| Offset::Offset(next))
@@ -439,7 +579,7 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
     let mut next_offsets: HashMap<String, i64> = HashMap::new();
     let high_watermarks = if config.until_caught_up {
         let mut marks = HashMap::new();
-        for topic in INGEST_TOPICS {
+        for topic in INGEST_TOPICS.into_iter().chain(LABELING_PROJECTION_TOPICS) {
             let (low, high) = consumer
                 .fetch_watermarks(topic, INGEST_PARTITION, Duration::from_secs(10))
                 .map_err(ProjectorError::Kafka)?;
@@ -585,7 +725,7 @@ fn last_offset_per_topic(batch: &[ConsumedRecord]) -> Option<HashMap<String, i64
 /// (`--until-caught-up`). An empty topic (`high == 0`) is trivially caught up
 /// regardless of position.
 fn is_caught_up(next_offsets: &HashMap<String, i64>, high_watermarks: &HashMap<String, i64>) -> bool {
-    for topic in INGEST_TOPICS {
+    for topic in INGEST_TOPICS.into_iter().chain(LABELING_PROJECTION_TOPICS) {
         let high = *high_watermarks.get(topic).unwrap_or(&0);
         if high == 0 {
             continue;

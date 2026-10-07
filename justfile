@@ -134,7 +134,7 @@ dev-labeler *ARGS:
 seed-categories:
     cd finreport-rs && \
         {{local_env}} RUST_LOG=info \
-        cargo run -p webapp --bin category-seed
+        cargo run -p webapp --bin category-seed -- ../prompts/taxonomy.json
 
 # Create (or no-op onto) the `dev` user with a known password, so the seeded
 # stack has something to log in with. Password from $FINREPORT_PASSWORD,
