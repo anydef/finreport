@@ -113,3 +113,30 @@ export function filterCategoryTree(forest: CategoryTreeNode[], query: string): C
 		});
 	return walk(forest);
 }
+
+export interface CategoryOptionGroup {
+	groupLabel: string;
+	options: { slug: string; label: string }[];
+}
+
+/**
+ * Narrow grouped `<select>` options by a free-text query. Case-insensitive
+ * substring match against the option's label (full `Parent / Child` path) and
+ * its slug; the query is trimmed and a blank query returns everything. Groups
+ * left without a matching option are dropped.
+ */
+export function filterOptionGroups(
+	groups: CategoryOptionGroup[],
+	query: string
+): CategoryOptionGroup[] {
+	const needle = query.trim().toLowerCase();
+	if (!needle) return groups;
+	return groups
+		.map((group) => ({
+			...group,
+			options: group.options.filter(
+				(o) => o.label.toLowerCase().includes(needle) || o.slug.toLowerCase().includes(needle)
+			)
+		}))
+		.filter((group) => group.options.length > 0);
+}
