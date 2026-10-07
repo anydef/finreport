@@ -24,12 +24,15 @@ See `docs/runbooks/iteration-1-deploy.md`.
 4. Dashboard transaction filters: account, category, tag, amount, flags —
    reusing `/transactions`' controls. Needs `amountMin`/`amountMax` added to
    `TransactionFilter`; everything else already exists (see requirements).
-5. Admin user management in the UI.
-6. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+5. Spending-by-category drill-down: make the `uncategorized` and
+   `needs-review` rows clickable (they are inert buttons today) and make the
+   drill-down visible. Frontend-only (see requirements).
+6. Admin user management in the UI.
+7. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
    decision about credential storage** (security-critical).
-7. C24, PayPal and Scalable Capital integrations. First research the access
+8. C24, PayPal and Scalable Capital integrations. First research the access
    method for each (API vs. CSV fallback).
-8. Sankey cash-flow views.
+9. Sankey cash-flow views.
 
 ## Open debt
 

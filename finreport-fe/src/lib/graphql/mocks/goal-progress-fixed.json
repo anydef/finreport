@@ -1,0 +1,52 @@
+{
+  "query": "query GoalProgress($id: UUID!, $startDate: Date, $endDate: Date) {\n\tgoalProgress(id: $id, startDate: $startDate, endDate: $endDate) {\n\t\tgoal {\n\tid\n\tname\n\ttype\n\tamount\n\tcurrency\n\tscope {\n\t\tcategories {\n\t\t\tid\n\t\t\tslug\n\t\t\tname\n\t\t\tkind\n\t\t\tparentId\n\t\t\tdepth\n\t\t\tarchived\n\t\t\torigin\n\t\t}\n\t\ttags\n\t\tcombine\n\t\ttagCombine\n\t}\n\tperiodKind\n\tcadence\n\tstartDate\n\tendDate\n\tarchived\n\t\t}\n\t\tbuckets {\n\t\t\tstart\n\t\t\tend\n\t\t\tlabel\n\t\t\ttotal\n\t\t\tpending\n\t\t\tremaining\n\t\t\tmet\n\t\t\tinProgress\n\t\t}\n\t\ttotal\n\t\tpending\n\t\taveragePerPeriod\n\t\tcurrency\n\t}\n}",
+  "data": {
+    "goalProgress": {
+      "goal": {
+        "id": "9d3a7e42-1c5b-4f08-b6a1-2e8c4f0d6b31",
+        "name": "Holiday fund",
+        "type": "SAVING_TARGET",
+        "amount": "3000.0000",
+        "currency": "EUR",
+        "scope": {
+          "categories": [
+            {
+              "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+              "slug": "savings.emergency_fund",
+              "name": "Emergency Fund",
+              "kind": "SAVING",
+              "parentId": "6d4c0e59-45c1-5d80-8537-f8cb40638a55",
+              "depth": 2,
+              "archived": false,
+              "origin": "seed"
+            }
+          ],
+          "tags": [],
+          "combine": "ALL",
+          "tagCombine": "ALL"
+        },
+        "periodKind": "FIXED",
+        "cadence": null,
+        "startDate": "2026-01-01",
+        "endDate": "2026-12-31",
+        "archived": false
+      },
+      "buckets": [
+        {
+          "start": "2026-01-01",
+          "end": "2026-12-31",
+          "label": "2026",
+          "total": "1850.0000",
+          "pending": "150.0000",
+          "remaining": "1150.0000",
+          "met": false,
+          "inProgress": true
+        }
+      ],
+      "total": "1850.0000",
+      "pending": "150.0000",
+      "averagePerPeriod": "0.0000",
+      "currency": "EUR"
+    }
+  }
+}

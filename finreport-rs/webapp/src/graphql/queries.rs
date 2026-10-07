@@ -15,7 +15,8 @@ use crate::graphql::types::{
     CategoryBreakdown, CategoryKind, Granularity, Me, PageInput, RecurringOverview, ReviewQueue,
     Rule, RuleState, TagCount, TransactionFilter, TransactionPage,
 };
-use crate::graphql::{accounts, breakdown, categories, review_queue, rules, transactions};
+use crate::graphql::scalars::{Date, Uuid};
+use crate::graphql::{accounts, breakdown, categories, goals, review_queue, rules, transactions};
 
 pub struct QueryRoot;
 
@@ -171,6 +172,39 @@ impl QueryRoot {
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let scoped_ids = scoped_account_ids(user, None)?;
         crate::graphql::insights::fetch_tag_counts(db, &scoped_ids).await
+    }
+
+    /// `goals` (iteration 4 §4): the caller's own goals.
+    async fn goals(
+        &self,
+        #[graphql(default = false)] include_archived: bool,
+    ) -> GqlResult<Vec<goals::Goal>> {
+        goals::goals(include_archived).await
+    }
+
+    async fn goal(&self, id: Uuid) -> GqlResult<Option<goals::Goal>> {
+        goals::goal(id).await
+    }
+
+    /// Window defaults to the goal's own period for FIXED, last 12 periods for RECURRING.
+    async fn goal_progress(
+        &self,
+        id: Uuid,
+        start_date: Option<Date>,
+        end_date: Option<Date>,
+    ) -> GqlResult<goals::GoalProgress> {
+        goals::goal_progress(id, start_date, end_date).await
+    }
+
+    /// The contribution rows behind a bucket, for drill-down.
+    async fn goal_transactions(
+        &self,
+        id: Uuid,
+        start_date: Date,
+        end_date: Date,
+        page: Option<PageInput>,
+    ) -> GqlResult<TransactionPage> {
+        goals::goal_transactions(id, start_date, end_date, page).await
     }
 
     /// `recurringSeries` (§4).

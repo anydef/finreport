@@ -227,3 +227,27 @@ amount range, and flags**.
 - **Edge cases:** an empty result reads as "no transactions match" rather than
   an empty chart; flags are tri-state (on / off / don't care), not checkboxes
   that silently mean "off"; clearing all filters is one action.
+
+## Spending-by-category drill-down (bug + small feature)
+Clicking a row in the dashboard's "Spending by category" list should show the
+transactions behind that group.
+
+**Already works for real categories.** `CategoryBreakdown`'s `onSelect` calls
+`navigate({ categorySlugs: [slug] })`, which narrows the transaction list
+below. Two gaps:
+
+- **Inert rows (a bug).** The breakdown has three row kinds — `category`,
+  `uncategorized` and `needs-review` (`breakdownShaping.ts`). Only `category`
+  carries a slug, and `CategoryBreakdown.svelte` guards its click on
+  `kind === 'category'`, so the other two render as buttons that do nothing.
+  They should drill down too, via the filters that already exist:
+  `uncategorized: true` and `needsReview: true`. This matters most when the
+  taxonomy is sparse, which is exactly when those two rows hold the bulk of
+  the spending.
+- **The drill-down is easy to miss.** The list it narrows is further down the
+  page, so a click can look like it did nothing. Either scroll the list into
+  view, or show the group's transactions in the transaction modal / a
+  dedicated view (see "Transaction detail modal"). Decide in spec; the
+  existing active-drilldown banner is the hook to build on.
+
+Frontend-only — every filter it needs exists.

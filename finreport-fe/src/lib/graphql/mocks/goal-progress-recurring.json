@@ -1,0 +1,174 @@
+{
+  "query": "query GoalProgress($id: UUID!, $startDate: Date, $endDate: Date) {\n\tgoalProgress(id: $id, startDate: $startDate, endDate: $endDate) {\n\t\tgoal {\n\tid\n\tname\n\ttype\n\tamount\n\tcurrency\n\tscope {\n\t\tcategories {\n\t\t\tid\n\t\t\tslug\n\t\t\tname\n\t\t\tkind\n\t\t\tparentId\n\t\t\tdepth\n\t\t\tarchived\n\t\t\torigin\n\t\t}\n\t\ttags\n\t\tcombine\n\t\ttagCombine\n\t}\n\tperiodKind\n\tcadence\n\tstartDate\n\tendDate\n\tarchived\n\t\t}\n\t\tbuckets {\n\t\t\tstart\n\t\t\tend\n\t\t\tlabel\n\t\t\ttotal\n\t\t\tpending\n\t\t\tremaining\n\t\t\tmet\n\t\t\tinProgress\n\t\t}\n\t\ttotal\n\t\tpending\n\t\taveragePerPeriod\n\t\tcurrency\n\t}\n}",
+  "data": {
+    "goalProgress": {
+      "goal": {
+        "id": "5b2f0c1e-8a64-4d2b-9a57-3c0e1d7f4a10",
+        "name": "Hobbies",
+        "type": "SPENDING_LIMIT",
+        "amount": "200.0000",
+        "currency": "EUR",
+        "scope": {
+          "categories": [
+            {
+              "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+              "slug": "entertainment.games",
+              "name": "Games",
+              "kind": "EXPENSE",
+              "parentId": "587af350-2b4f-5e40-8874-00f0ced5d581",
+              "depth": 2,
+              "archived": false,
+              "origin": "seed"
+            },
+            {
+              "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+              "slug": "entertainment.movies_concerts",
+              "name": "Movies Concerts",
+              "kind": "EXPENSE",
+              "parentId": "587af350-2b4f-5e40-8874-00f0ced5d581",
+              "depth": 2,
+              "archived": false,
+              "origin": "seed"
+            }
+          ],
+          "tags": [
+            "hobby"
+          ],
+          "combine": "ANY",
+          "tagCombine": "ALL"
+        },
+        "periodKind": "RECURRING",
+        "cadence": "MONTHLY",
+        "startDate": null,
+        "endDate": null,
+        "archived": false
+      },
+      "buckets": [
+        {
+          "start": "2025-11-01",
+          "end": "2025-11-30",
+          "label": "Nov 2025",
+          "total": "168.4000",
+          "pending": "0.0000",
+          "remaining": "31.6000",
+          "met": true,
+          "inProgress": false
+        },
+        {
+          "start": "2025-12-01",
+          "end": "2025-12-31",
+          "label": "Dec 2025",
+          "total": "212.9000",
+          "pending": "0.0000",
+          "remaining": "-12.9000",
+          "met": false,
+          "inProgress": false
+        },
+        {
+          "start": "2026-01-01",
+          "end": "2026-01-31",
+          "label": "Jan 2026",
+          "total": "95.0000",
+          "pending": "0.0000",
+          "remaining": "105.0000",
+          "met": true,
+          "inProgress": false
+        },
+        {
+          "start": "2026-02-01",
+          "end": "2026-02-28",
+          "label": "Feb 2026",
+          "total": "240.0000",
+          "pending": "0.0000",
+          "remaining": "-40.0000",
+          "met": false,
+          "inProgress": false
+        },
+        {
+          "start": "2026-03-01",
+          "end": "2026-03-31",
+          "label": "Mar 2026",
+          "total": "187.5000",
+          "pending": "0.0000",
+          "remaining": "12.5000",
+          "met": true,
+          "inProgress": false
+        },
+        {
+          "start": "2026-04-01",
+          "end": "2026-04-30",
+          "label": "Apr 2026",
+          "total": "200.0000",
+          "pending": "0.0000",
+          "remaining": "0.0000",
+          "met": true,
+          "inProgress": false
+        },
+        {
+          "start": "2026-05-01",
+          "end": "2026-05-31",
+          "label": "May 2026",
+          "total": "133.2000",
+          "pending": "0.0000",
+          "remaining": "66.8000",
+          "met": true,
+          "inProgress": false
+        },
+        {
+          "start": "2026-06-01",
+          "end": "2026-06-30",
+          "label": "Jun 2026",
+          "total": "256.8000",
+          "pending": "0.0000",
+          "remaining": "-56.8000",
+          "met": false,
+          "inProgress": false
+        },
+        {
+          "start": "2026-07-01",
+          "end": "2026-07-31",
+          "label": "Jul 2026",
+          "total": "174.0000",
+          "pending": "0.0000",
+          "remaining": "26.0000",
+          "met": true,
+          "inProgress": false
+        },
+        {
+          "start": "2026-08-01",
+          "end": "2026-08-31",
+          "label": "Aug 2026",
+          "total": "149.9000",
+          "pending": "0.0000",
+          "remaining": "50.1000",
+          "met": true,
+          "inProgress": false
+        },
+        {
+          "start": "2026-09-01",
+          "end": "2026-09-30",
+          "label": "Sep 2026",
+          "total": "205.1000",
+          "pending": "24.9900",
+          "remaining": "-5.1000",
+          "met": false,
+          "inProgress": false
+        },
+        {
+          "start": "2026-10-01",
+          "end": "2026-10-31",
+          "label": "Oct 2026",
+          "total": "142.5000",
+          "pending": "18.0000",
+          "remaining": "57.5000",
+          "met": true,
+          "inProgress": true
+        }
+      ],
+      "total": "2165.3000",
+      "pending": "42.9900",
+      "averagePerPeriod": "183.8909",
+      "currency": "EUR"
+    }
+  }
+}

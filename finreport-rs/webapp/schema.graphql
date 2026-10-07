@@ -215,6 +215,122 @@ enum FlagSource {
 	USER
 }
 
+type Goal {
+	id: UUID!
+	name: String!
+	type: GoalType!
+	amount: Decimal!
+	currency: String!
+	scope: GoalScope!
+	periodKind: GoalPeriodKind!
+	"""
+	`null` for `FIXED`.
+	"""
+	cadence: GoalCadence
+	"""
+	`null` for `RECURRING`.
+	"""
+	startDate: Date
+	"""
+	`null` for `RECURRING` or an open-ended `FIXED`.
+	"""
+	endDate: Date
+	archived: Boolean!
+}
+
+type GoalBucket {
+	start: Date!
+	end: Date!
+	label: String!
+	"""
+	Positive magnitude.
+	"""
+	total: Decimal!
+	"""
+	Held-for-review, excluded from `total`.
+	"""
+	pending: Decimal!
+	"""
+	`amount - total`; negative when over.
+	"""
+	remaining: Decimal!
+	"""
+	`<= amount` for a limit, `>= amount` for a target.
+	"""
+	met: Boolean!
+	inProgress: Boolean!
+}
+
+enum GoalCadence {
+	MONTHLY
+	QUARTERLY
+	YEARLY
+}
+
+"""
+Mirrors the `finreport.goal` event's scope and period (§2.1). Validated
+at mutation time (§4): amount > 0; a non-empty scope; `RECURRING` requires
+`cadence` and rejects `startDate`/`endDate`; `FIXED` requires `startDate`
+and rejects `cadence`; `endDate >= startDate`; every category slug exists;
+tags normalized with iteration 3's rules.
+"""
+input GoalInput {
+	name: String!
+	type: GoalType!
+	amount: Decimal!
+	currency: String! = "EUR"
+	categorySlugs: [String!]! = []
+	tags: [String!]! = []
+	"""
+	How the category and tag conditions join; ignored when the scope has
+	only one of them.
+	"""
+	combine: ScopeCombine! = ALL
+	"""
+	How the listed tags join each other.
+	"""
+	tagCombine: ScopeCombine! = ALL
+	periodKind: GoalPeriodKind!
+	cadence: GoalCadence
+	startDate: Date
+	endDate: Date
+}
+
+enum GoalPeriodKind {
+	RECURRING
+	FIXED
+}
+
+type GoalProgress {
+	goal: Goal!
+	buckets: [GoalBucket!]!
+	"""
+	Across every bucket.
+	"""
+	total: Decimal!
+	pending: Decimal!
+	"""
+	Over completed buckets only.
+	"""
+	averagePerPeriod: Decimal!
+	currency: String!
+}
+
+type GoalScope {
+	"""
+	Resolved from slugs; archived ones are still listed.
+	"""
+	categories: [Category!]!
+	tags: [String!]!
+	combine: ScopeCombine!
+	tagCombine: ScopeCombine!
+}
+
+enum GoalType {
+	SPENDING_LIMIT
+	SAVING_TARGET
+}
+
 enum Granularity {
 	DAY
 	WEEK
@@ -271,6 +387,15 @@ type Mutation {
 	setRuleState(id: UUID!, state: RuleState!): Rule!
 	reapplyRule(id: UUID!): Int!
 	"""
+	`createGoal` (iteration 4 §4).
+	"""
+	createGoal(input: GoalInput!): Goal!
+	"""
+	`updateGoal` (iteration 4 §4): read-modify-write on `finreport.goal`.
+	"""
+	updateGoal(id: UUID!, input: GoalInput!): Goal!
+	archiveGoal(id: UUID!): Goal!
+	"""
 	Replaces the whole tag set; `[]` clears (§4).
 	"""
 	setTransactionTags(transactionId: UUID!, tags: [String!]!): Transaction!
@@ -319,6 +444,19 @@ type Query {
 	`tags` (§4): all tags, descending count.
 	"""
 	tags: [TagCount!]!
+	"""
+	`goals` (iteration 4 §4): the caller's own goals.
+	"""
+	goals(includeArchived: Boolean! = false): [Goal!]!
+	goal(id: UUID!): Goal
+	"""
+	Window defaults to the goal's own period for FIXED, last 12 periods for RECURRING.
+	"""
+	goalProgress(id: UUID!, startDate: Date, endDate: Date): GoalProgress!
+	"""
+	The contribution rows behind a bucket, for drill-down.
+	"""
+	goalTransactions(id: UUID!, startDate: Date!, endDate: Date!, page: PageInput): TransactionPage!
 	"""
 	`recurringSeries` (§4).
 	"""
@@ -424,6 +562,11 @@ enum RuleState {
 	IN_REVIEW
 	REVOKED
 	REJECTED
+}
+
+enum ScopeCombine {
+	ALL
+	ANY
 }
 
 input SplitPartInput {

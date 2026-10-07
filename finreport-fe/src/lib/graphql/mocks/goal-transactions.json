@@ -1,0 +1,122 @@
+{
+  "query": "query GoalTransactions($id: UUID!, $startDate: Date!, $endDate: Date!, $page: PageInput) {\n\tgoalTransactions(id: $id, startDate: $startDate, endDate: $endDate, page: $page) {\n\t\titems {\n\t\t\tid\n\t\t\taccountId\n\t\t\tsource\n\t\t\texternalId\n\t\t\tbookingDate\n\t\t\tvalutaDate\n\t\t\tbookingStatus\n\t\t\tamount\n\t\t\tcurrency\n\t\t\tcounterpartyName\n\t\t\tcounterpartyIban\n\t\t\tdescription\n\t\t\ttransactionType\n\t\t\tlabel {\n\t\t\t\tcategory {\n\t\t\t\t\tid\n\t\t\t\t\tslug\n\t\t\t\t\tname\n\t\t\t\t\tkind\n\t\t\t\t}\n\t\t\t\tsource\n\t\t\t\tconfidence\n\t\t\t\tstatus\n\t\t\t\treviewReason\n\t\t\t\tproposedCategoryPath\n\t\t\t\treasoning\n\t\t\t}\n\t\t\tsplits {\n\t\t\t\tindex\n\t\t\t\tamount\n\t\t\t\tcategory {\n\t\t\t\t\tid\n\t\t\t\t\tslug\n\t\t\t\t\tname\n\t\t\t\t\tkind\n\t\t\t\t}\n\t\t\t}\n\t\t\ttags\n\t\t\ttransfer {\n\t\t\t\tcounterpartTransactionId\n\t\t\t\tcounterpartAccountId\n\t\t\t\tmatch\n\t\t\t}\n\t\t\trecurring {\n\t\t\t\tisRecurring\n\t\t\t\tsource\n\t\t\t\tseriesId\n\t\t\t\tcadence\n\t\t\t\tmedianAmount\n\t\t\t}\n\t\t}\n\t\ttotalCount\n\t\tlimit\n\t\toffset\n\t}\n}",
+  "data": {
+    "goalTransactions": {
+      "items": [
+        {
+          "id": "966aa3c4-530f-5d92-b1b5-3afd7de55b3b",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-01-SALARY",
+          "bookingDate": "2024-01-02",
+          "valutaDate": "2024-01-02",
+          "bookingStatus": "BOOKED",
+          "amount": "2500.00",
+          "currency": "EUR",
+          "counterpartyName": "ACME GmbH",
+          "counterpartyIban": null,
+          "description": "Gehalt",
+          "transactionType": "Überweisungsgutschrift",
+          "label": null,
+          "splits": [],
+          "tags": [],
+          "transfer": null,
+          "recurring": {
+            "isRecurring": false,
+            "source": "AUTO",
+            "seriesId": null,
+            "cadence": null,
+            "medianAmount": null
+          }
+        },
+        {
+          "id": "28c22a97-bb87-5656-bbfb-9e2137ac51e0",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-01-RENT",
+          "bookingDate": "2024-01-03",
+          "valutaDate": "2024-01-03",
+          "bookingStatus": "BOOKED",
+          "amount": "-950.00",
+          "currency": "EUR",
+          "counterpartyName": "Hausverwaltung Mustermann",
+          "counterpartyIban": "DE02500105170123456789",
+          "description": "Miete",
+          "transactionType": "Lastschrift",
+          "label": {
+            "category": {
+              "id": "467a4fec-d8e2-5e38-b5fd-08f6877cd9cc",
+              "slug": "housing.rent",
+              "name": "Rent",
+              "kind": "EXPENSE"
+            },
+            "source": "USER",
+            "confidence": null,
+            "status": "RESOLVED",
+            "reviewReason": null,
+            "proposedCategoryPath": null,
+            "reasoning": null
+          },
+          "splits": [],
+          "tags": [
+            "housing"
+          ],
+          "transfer": null,
+          "recurring": {
+            "isRecurring": true,
+            "source": "AUTO",
+            "seriesId": "8a1b2c3d-4e5f-4061-8273-849506a7b8c0",
+            "cadence": "MONTHLY",
+            "medianAmount": "-950.0000"
+          }
+        },
+        {
+          "id": "936fcf84-237d-5ed6-96e9-8c0bf7458a64",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "source": "comdirect",
+          "externalId": "ACC1-CASH-01",
+          "bookingDate": "2024-02-20",
+          "valutaDate": "2024-02-20",
+          "bookingStatus": "BOOKED",
+          "amount": "-100.00",
+          "currency": "EUR",
+          "counterpartyName": null,
+          "counterpartyIban": null,
+          "description": "Bargeldauszahlung",
+          "transactionType": "Barauszahlung",
+          "label": {
+            "category": {
+              "id": "2b38634e-c189-55e7-8d5e-2f4f002d1e0f",
+              "slug": "other.cash",
+              "name": "Cash withdrawal",
+              "kind": "EXPENSE"
+            },
+            "source": "RULE",
+            "confidence": 0.95,
+            "status": "RESOLVED",
+            "reviewReason": null,
+            "proposedCategoryPath": null,
+            "reasoning": null
+          },
+          "splits": [],
+          "tags": [],
+          "transfer": {
+            "counterpartTransactionId": null,
+            "counterpartAccountId": "3c1fe9c2-2f4b-5753-95ad-133501e3bd5e",
+            "match": "AMOUNT_DATE"
+          },
+          "recurring": {
+            "isRecurring": false,
+            "source": "AUTO",
+            "seriesId": null,
+            "cadence": null,
+            "medianAmount": null
+          }
+        }
+      ],
+      "totalCount": 3,
+      "limit": 50,
+      "offset": 0
+    }
+  }
+}

@@ -7,6 +7,7 @@
 //! `StreamConsumer` and feeds it batches.
 
 pub mod comdirect;
+pub mod goals;
 pub mod insights;
 pub mod labeling;
 pub mod legacy;
@@ -59,7 +60,7 @@ pub const DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 5;
 pub const INGEST_TOPICS: [&str; 3] = [TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION];
 const INGEST_PARTITION: i32 = 0;
 
-/// The six labeling *output* topics ([`labeling_topic_for`]) this projector
+/// The seven labeling *output* topics ([`labeling_topic_for`]) this projector
 /// also consumes and projects, alongside [`INGEST_TOPICS`] — same batch,
 /// same transaction, same offset bookkeeping (unsuffixed keys, like the
 /// ingest topics; distinct from the labeler's own `@labeler`-suffixed
@@ -69,14 +70,16 @@ const INGEST_PARTITION: i32 = 0;
 /// upserts) for those three — it is load-bearing for `transaction-label`,
 /// which only the labeler itself wrote before, under an offset key nothing
 /// ever advanced. `transaction-insight` (iteration 3 §2.3/§3) is the
-/// detector's own output, consumed the same way.
-pub const LABELING_PROJECTION_TOPICS: [&str; 6] = [
+/// detector's own output, consumed the same way, and `goal` (iteration 4
+/// §2.1) is the user's goal decisions, projected by `projection::goals`.
+pub const LABELING_PROJECTION_TOPICS: [&str; 7] = [
     crate::kafka::labeling::TOPIC_CATEGORY,
     crate::kafka::labeling::TOPIC_TRANSACTION_LABEL,
     crate::kafka::labeling::TOPIC_LLM_CACHE,
     crate::kafka::labeling::TOPIC_USER_LABEL,
     crate::kafka::labeling::TOPIC_RULE,
     crate::kafka::insights::TOPIC_TRANSACTION_INSIGHT,
+    crate::kafka::goals::TOPIC_GOAL,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -118,6 +121,7 @@ pub enum LabelingTopic {
     UserLabel,
     Rule,
     TransactionInsight,
+    Goal,
 }
 
 /// Maps a §2.2 topic name to the [`LabelingTopic`] WP3's projector dispatches
@@ -125,6 +129,7 @@ pub enum LabelingTopic {
 /// queue the labeler consumes to decide what to re-resolve, not a topic any
 /// `projection::labeling` function projects.
 pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
+    use crate::kafka::goals::TOPIC_GOAL;
     use crate::kafka::insights::TOPIC_TRANSACTION_INSIGHT;
     use crate::kafka::labeling::{
         TOPIC_CATEGORY, TOPIC_LLM_CACHE, TOPIC_RULE, TOPIC_TRANSACTION_LABEL, TOPIC_USER_LABEL,
@@ -136,6 +141,7 @@ pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
         TOPIC_USER_LABEL => Some(LabelingTopic::UserLabel),
         TOPIC_RULE => Some(LabelingTopic::Rule),
         TOPIC_TRANSACTION_INSIGHT => Some(LabelingTopic::TransactionInsight),
+        TOPIC_GOAL => Some(LabelingTopic::Goal),
         _ => None,
     }
 }
@@ -481,6 +487,22 @@ async fn apply_labeling_record(
                 }
                 Err(e) => {
                     error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison transaction-insight record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::Goal => {
+            let Some(id) = tombstone_uuid_from_key(record) else {
+                warn!(topic = %record.topic, offset = record.offset, "projector: goal record with no/invalid-UUID key, skipped");
+                return Ok(());
+            };
+            if record.payload.is_empty() {
+                return goals::project_goal(txn, id, None).await;
+            }
+            match serde_json::from_slice::<crate::kafka::goals::GoalRecord>(&record.payload) {
+                Ok(parsed) => goals::project_goal(txn, id, Some(parsed)).await,
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison goal record, skipped");
                     Ok(())
                 }
             }
@@ -881,5 +903,19 @@ mod retry_tests {
             1,
             "starting already at 2 failures, the very next failure (3) must hit the limit"
         );
+    }
+}
+
+#[cfg(test)]
+mod goal_dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn goal_topic_is_projected_and_consumed() {
+        assert_eq!(
+            labeling_topic_for(crate::kafka::goals::TOPIC_GOAL),
+            Some(LabelingTopic::Goal)
+        );
+        assert!(LABELING_PROJECTION_TOPICS.contains(&crate::kafka::goals::TOPIC_GOAL));
     }
 }

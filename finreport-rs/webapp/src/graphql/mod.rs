@@ -5,6 +5,7 @@ mod categories;
 pub mod cookies;
 pub mod current_user;
 mod events;
+pub mod goals;
 pub mod http;
 mod insights;
 mod labels;

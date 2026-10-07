@@ -13,6 +13,8 @@
 		// Iteration 3 §6 WP0: added once here so WP-C's Recurring page and the
 		// existing tabs never both edit this layout.
 		{ label: 'Recurring', href: '/recurring' },
+		// Iteration 4 §5: added once here so WP-C's /goals routes never edit this layout.
+		{ label: 'Goals', href: '/goals' },
 		// §10: added once here so WP5 (transactions) and WP6 (admin) never both
 		// edit this layout. Route content under /admin/** is WP6's.
 		{ label: 'Admin', href: '/admin' }
