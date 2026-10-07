@@ -18,9 +18,11 @@ pub(crate) fn not_implemented(field: &str, wp: u8) -> async_graphql::Error {
     .extend_with(|_, e| e.set("code", "NOT_IMPLEMENTED"))
 }
 
-/// Iteration-3 counterpart of [`not_implemented`]: WP0 freezes these
-/// resolver stubs, lettered work packages (`"WP-A"`/`"WP-B"`/`"WP-C"`) own
-/// the real bodies (see `docs/specs/iteration-3.md` §6).
+/// Iteration-3 counterpart of [`not_implemented`]: WP0 froze these resolver
+/// stubs; WP-B has since implemented all five call sites, so nothing
+/// references this anymore — kept (like [`not_implemented`] above) in case
+/// a future iteration adds another stub needing the same shape.
+#[allow(dead_code)]
 pub(crate) fn not_implemented_iter3(field: &str, wp: &str) -> async_graphql::Error {
     async_graphql::Error::new(format!(
         "{field} is not implemented yet ({wp}, see docs/specs/iteration-3.md)"
@@ -120,28 +122,28 @@ impl Transaction {
         crate::graphql::labels::splits_for(db.as_ref(), cache, self.id.0).await
     }
 
-    /// Iteration 3 §4: sorted, `[]` when untagged. **Stub**: frozen by WP0,
-    /// real body is WP-B's.
-    async fn tags(&self, _ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<String>> {
-        Err(not_implemented_iter3("Transaction.tags", "WP-B"))
+    /// Iteration 3 §4: sorted, `[]` when untagged.
+    async fn tags(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Vec<String>> {
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        crate::graphql::insights::tags_for(db.as_ref(), self.id.0).await
     }
 
-    /// `null` = not an internal transfer (§4). **Stub**: frozen by WP0, real
-    /// body is WP-B's.
+    /// `null` = not an internal transfer (§4).
     async fn transfer(
         &self,
-        _ctx: &async_graphql::Context<'_>,
+        ctx: &async_graphql::Context<'_>,
     ) -> async_graphql::Result<Option<TransferInfo>> {
-        Err(not_implemented_iter3("Transaction.transfer", "WP-B"))
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        crate::graphql::insights::transfer_for(db.as_ref(), self.id.0).await
     }
 
-    /// Always present; `isRecurring` may be `false` (§4). **Stub**: frozen by
-    /// WP0, real body is WP-B's.
+    /// Always present; `isRecurring` may be `false` (§4).
     async fn recurring(
         &self,
-        _ctx: &async_graphql::Context<'_>,
+        ctx: &async_graphql::Context<'_>,
     ) -> async_graphql::Result<RecurringInfo> {
-        Err(not_implemented_iter3("Transaction.recurring", "WP-B"))
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        crate::graphql::insights::recurring_for(db.as_ref(), self.id.0).await
     }
 }
 

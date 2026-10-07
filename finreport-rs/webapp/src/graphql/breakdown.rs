@@ -63,10 +63,33 @@ pub async fn fetch_breakdown(
     }
 
     let condition = build_condition_with_category_filters(db, scoped_ids, filter).await?;
-    let transaction_rows = entity::entities::transaction::Entity::find()
+    let mut transaction_rows = entity::entities::transaction::Entity::find()
         .filter(condition)
         .all(db)
         .await?;
+
+    // §4 "totals exclude transfers": drop rows whose effective transfer
+    // flag is set unless the caller explicitly asked for transfers via
+    // `filter.transfer = true` (`build_condition` only applies `transfer`
+    // when the caller sets it explicitly — this adds the *default*
+    // exclusion `cashflowSummary`/`cashflowGraph`/`categoryBreakdown` need
+    // on top of that).
+    if filter.transfer != Some(true) {
+        let candidate_ids: Vec<Uuid> = transaction_rows.iter().map(|t| t.id).collect();
+        if !candidate_ids.is_empty() {
+            let transfer_ids: std::collections::HashSet<Uuid> =
+                entity::entities::transaction_insight::Entity::find()
+                    .filter(entity::entities::transaction_insight::Column::TransactionId.is_in(candidate_ids))
+                    .filter(entity::entities::transaction_insight::Column::IsTransfer.eq(true))
+                    .all(db)
+                    .await?
+                    .into_iter()
+                    .map(|i| i.transaction_id)
+                    .collect();
+            transaction_rows.retain(|t| !transfer_ids.contains(&t.id));
+        }
+    }
+
     let currency = transaction_rows
         .first()
         .map(|t| t.currency.clone())
@@ -174,11 +197,20 @@ pub async fn fetch_breakdown(
         }
     }
 
+    // §4: `kind = TRANSFER` rows are dropped by default (like the
+    // transaction-level transfer flag above), unless the caller explicitly
+    // asked for transfers — either via `filter.transfer = true` or by
+    // requesting `kind: TRANSFER` directly.
+    let drop_transfer_kind = filter.transfer != Some(true) && kind != Some(GqlCategoryKind::Transfer);
+
     let mut rows: Vec<CategoryBreakdownRow> = rolled
         .into_iter()
         .filter_map(|(category_id, (amount, transactions))| {
             let category_row = categories_by_id.get(&category_id)?;
             let category_kind = crate::graphql::categories::kafka_kind_to_gql(&category_row.kind);
+            if drop_transfer_kind && category_kind == GqlCategoryKind::Transfer {
+                return None;
+            }
             if let Some(requested_kind) = kind
                 && category_kind != requested_kind
             {

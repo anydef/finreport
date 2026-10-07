@@ -167,6 +167,9 @@ pub fn build_summary_sql(
         Some(false) => sql.push_str(" AND counterparty_name IS NULL"),
         None => {}
     }
+    // §4 "totals exclude transfers" (unless the caller explicitly asked for
+    // them via `filter.transfer = true`).
+    sql.push_str(&crate::graphql::cashflow::transfer_filter_sql("id", filter));
 
     sql.push_str(" GROUP BY bucket_start ORDER BY bucket_start");
     (sql, params)

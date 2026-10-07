@@ -194,36 +194,49 @@ impl MutationRoot {
         rules::reapply_rule(db, publisher, &scoped_ids, id.0).await
     }
 
-    /// Replaces the whole tag set; `[]` clears (§4). **Stub**: frozen by
-    /// WP0, real body is WP-B's.
+    /// Replaces the whole tag set; `[]` clears (§4).
     async fn set_transaction_tags(
         &self,
         ctx: &Context<'_>,
         transaction_id: crate::graphql::scalars::Uuid,
         tags: Vec<String>,
     ) -> GqlResult<Transaction> {
-        current_user(ctx)?;
-        let _ = (transaction_id, tags);
-        Err(crate::graphql::types::not_implemented_iter3(
-            "Mutation.setTransactionTags",
-            "WP-B",
-        ))
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let settings = ctx.data::<Arc<Settings>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        crate::graphql::insights::set_transaction_tags(
+            db,
+            publisher,
+            &scoped_ids,
+            transaction_id.0,
+            tags,
+            settings.max_tags_per_transaction,
+        )
+        .await
     }
 
     /// `null` clears the override and lets auto-detection decide again
-    /// (§4). **Stub**: frozen by WP0, real body is WP-B's.
+    /// (§4).
     async fn set_transaction_recurring(
         &self,
         ctx: &Context<'_>,
         transaction_id: crate::graphql::scalars::Uuid,
         recurring: Option<bool>,
     ) -> GqlResult<Transaction> {
-        current_user(ctx)?;
-        let _ = (transaction_id, recurring);
-        Err(crate::graphql::types::not_implemented_iter3(
-            "Mutation.setTransactionRecurring",
-            "WP-B",
-        ))
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        crate::graphql::insights::set_transaction_recurring(
+            db,
+            publisher,
+            &scoped_ids,
+            transaction_id.0,
+            recurring,
+        )
+        .await
     }
 }
 

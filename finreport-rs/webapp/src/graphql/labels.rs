@@ -283,7 +283,7 @@ pub async fn splits_for(
 // Mutations
 // ---------------------------------------------------------------------------
 
-async fn load_scoped_transaction(
+pub(crate) async fn load_scoped_transaction(
     db: &DatabaseConnection,
     scoped_ids: &[Uuid],
     transaction_id: Uuid,
@@ -397,6 +397,12 @@ pub async fn set_transaction_category(
         .ok_or_else(|| validation_error(format!("category '{category_slug}' does not exist")))?;
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
 
+    // §2.1 read-modify-write: a category change republishes the whole
+    // record, so the current tags/recurring override must ride along
+    // unchanged (WP0 addendum §9.7 flagged the previous `Vec::new()`/`None`
+    // as a bug WP-B owned fixing).
+    let (tags, recurring) =
+        crate::graphql::insights::preserved_tags_and_recurring(db, transaction_id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -404,10 +410,8 @@ pub async fn set_transaction_category(
         external_id: txn.external_id.clone(),
         category_slug: Some(category_slug),
         parts: Vec::new(),
-        // TODO(WP-B): read-modify-write existing tags/recurring here
-        // instead of dropping them (iteration 3 §2.1).
-        tags: Vec::new(),
-        recurring: None,
+        tags,
+        recurring,
         revision,
         note: None,
     };
@@ -429,6 +433,8 @@ pub async fn clear_transaction_category(
     let txn = load_scoped_transaction(db, scoped_ids, transaction_id).await?;
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
 
+    let (tags, recurring) =
+        crate::graphql::insights::preserved_tags_and_recurring(db, transaction_id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -436,10 +442,8 @@ pub async fn clear_transaction_category(
         external_id: txn.external_id.clone(),
         category_slug: None,
         parts: Vec::new(),
-        // TODO(WP-B): read-modify-write existing tags/recurring here
-        // instead of dropping them (iteration 3 §2.1).
-        tags: Vec::new(),
-        recurring: None,
+        tags,
+        recurring,
         revision,
         note: None,
     };
@@ -520,6 +524,8 @@ pub async fn split_transaction(
     }
 
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
+    let (tags, recurring) =
+        crate::graphql::insights::preserved_tags_and_recurring(db, transaction_id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -534,10 +540,8 @@ pub async fn split_transaction(
                 category_slug: category_slug.clone(),
             })
             .collect(),
-        // TODO(WP-B): read-modify-write existing tags/recurring here
-        // instead of dropping them (iteration 3 §2.1).
-        tags: Vec::new(),
-        recurring: None,
+        tags,
+        recurring,
         revision,
         note: None,
     };
