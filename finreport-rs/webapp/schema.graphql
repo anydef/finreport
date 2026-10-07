@@ -271,13 +271,12 @@ type Mutation {
 	setRuleState(id: UUID!, state: RuleState!): Rule!
 	reapplyRule(id: UUID!): Int!
 	"""
-	Replaces the whole tag set; `[]` clears (§4). **Stub**: frozen by
-	WP0, real body is WP-B's.
+	Replaces the whole tag set; `[]` clears (§4).
 	"""
 	setTransactionTags(transactionId: UUID!, tags: [String!]!): Transaction!
 	"""
 	`null` clears the override and lets auto-detection decide again
-	(§4). **Stub**: frozen by WP0, real body is WP-B's.
+	(§4).
 	"""
 	setTransactionRecurring(transactionId: UUID!, recurring: Boolean): Transaction!
 }
@@ -317,12 +316,11 @@ type Query {
 	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
 	reviewQueue(page: PageInput): ReviewQueue!
 	"""
-	`tags` (§4): all tags, descending count. **Stub**: frozen by WP0,
-	real body is WP-B's.
+	`tags` (§4): all tags, descending count.
 	"""
 	tags: [TagCount!]!
 	"""
-	`recurringSeries` (§4). **Stub**: frozen by WP0, real body is WP-B's.
+	`recurringSeries` (§4).
 	"""
 	recurringSeries(filter: TransactionFilter): RecurringOverview!
 }
@@ -455,18 +453,15 @@ type Transaction {
 	label: TransactionLabel
 	splits: [TransactionSplit!]!
 	"""
-	Iteration 3 §4: sorted, `[]` when untagged. **Stub**: frozen by WP0,
-	real body is WP-B's.
+	Iteration 3 §4: sorted, `[]` when untagged.
 	"""
 	tags: [String!]!
 	"""
-	`null` = not an internal transfer (§4). **Stub**: frozen by WP0, real
-	body is WP-B's.
+	`null` = not an internal transfer (§4).
 	"""
 	transfer: TransferInfo
 	"""
-	Always present; `isRecurring` may be `false` (§4). **Stub**: frozen by
-	WP0, real body is WP-B's.
+	Always present; `isRecurring` may be `false` (§4).
 	"""
 	recurring: RecurringInfo!
 }
