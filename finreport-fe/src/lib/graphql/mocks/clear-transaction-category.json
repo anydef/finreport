@@ -1,0 +1,10 @@
+{
+  "query": "mutation ClearTransactionCategory($transactionId: UUID!) {\n  clearTransactionCategory(transactionId: $transactionId) {\n    id\n    label {\n      category {\n        id\n        slug\n      }\n      source\n      status\n    }\n  }\n}",
+  "variables": { "transactionId": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11" },
+  "data": {
+    "clearTransactionCategory": {
+      "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+      "label": null
+    }
+  }
+}

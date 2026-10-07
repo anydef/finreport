@@ -22,7 +22,8 @@ import categoriesMock from '$lib/graphql/mocks/categories.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
 import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
-import transactionSplitMock from '$lib/graphql/mocks/transaction-split.json';
+import clearTransactionCategoryMock from '$lib/graphql/mocks/clear-transaction-category.json';
+import unsplitTransactionMock from '$lib/graphql/mocks/unsplit-transaction.json';
 
 /** Name of the mock-mode session cookie, mirroring the real `fr_session` cookie's role. */
 const MOCK_SESSION_COOKIE = 'fr_session';
@@ -124,28 +125,82 @@ function mockCashflowGraph(variables: Record<string, unknown> | undefined): unkn
 	return cashflowGraphNetDeficitMock.data;
 }
 
-/**
- * `/admin/rules` + `/admin/categories` (§5, §10 WP6) mutations: the real
- * backend only publishes-then-upserts (§2.1, async via the labeler), so a
- * static fixture can't stand in the way `SplitTransaction`'s does. These
- * echo the caller's own input back as the "fresh row", which is enough for
- * the admin screens to round-trip against in mock mode.
- */
-function findMockCategory(slug: string | undefined): {
+interface MockCategory {
 	id: string;
 	slug: string;
 	name: string;
 	kind: string;
-} {
-	const found = categoriesMock.data.categories.find((c) => c.slug === slug);
-	return (
-		found ?? {
-			id: '00000000-0000-0000-0000-000000000000',
-			slug: slug ?? '',
-			name: slug ?? '',
-			kind: 'EXPENSE'
+	parentId: string | null;
+	depth: number;
+	archived: boolean;
+	origin: string;
+}
+
+/**
+ * `/admin/rules`, `/admin/categories` and `/admin/review` (§5, §10 WP6)
+ * mutations: the real backend only publishes-then-upserts (§2.1, async via
+ * the labeler), so a static fixture can't stand in for the round-trip the
+ * way `ReviewQueue`'s does. These echo the caller's own input back as the
+ * "fresh row", which is enough for the admin/review screens to work
+ * against in mock mode.
+ */
+function findMockCategory(slug: unknown): MockCategory | undefined {
+	return (categoriesMock.data.categories as MockCategory[]).find((c) => c.slug === slug);
+}
+
+/** Placeholder used when a mutation is given a slug the fixture doesn't know about. */
+function placeholderCategory(slug: string | undefined): MockCategory {
+	return {
+		id: '00000000-0000-0000-0000-000000000000',
+		slug: slug ?? '',
+		name: slug ?? '',
+		kind: 'EXPENSE',
+		parentId: null,
+		depth: 1,
+		archived: false,
+		origin: 'user'
+	};
+}
+
+/** `setTransactionCategory`/`splitTransaction`: echo back the requested
+ * transaction/category from `variables` instead of the fixture's fixed
+ * category, so picking a different category in the UI is visible in mock
+ * mode rather than always answering "Groceries". */
+function mockSetTransactionCategory(variables: Record<string, unknown> | undefined): unknown {
+	const transactionId = (variables?.transactionId as string) ?? '';
+	const category = findMockCategory(variables?.categorySlug);
+	return {
+		setTransactionCategory: {
+			id: transactionId,
+			label: {
+				category: category
+					? { id: category.id, slug: category.slug, name: category.name, kind: category.kind }
+					: null,
+				source: 'USER',
+				status: 'RESOLVED'
+			}
 		}
-	);
+	};
+}
+
+function mockSplitTransaction(variables: Record<string, unknown> | undefined): unknown {
+	const transactionId = (variables?.transactionId as string) ?? '';
+	const parts = (variables?.parts as { amount: string; categorySlug: string }[] | undefined) ?? [];
+	return {
+		splitTransaction: {
+			id: transactionId,
+			splits: parts.map((part, index) => {
+				const category = findMockCategory(part.categorySlug);
+				return {
+					index,
+					amount: part.amount,
+					category: category
+						? { id: category.id, slug: category.slug, name: category.name }
+						: { id: '', slug: part.categorySlug, name: part.categorySlug }
+				};
+			})
+		}
+	};
 }
 
 function mockCreateOrUpdateRule(
@@ -159,10 +214,12 @@ function mockCreateOrUpdateRule(
 		priority?: number;
 	};
 	const existing = existingId ? rulesMock.data.rules.find((r) => r.id === existingId) : undefined;
+	const category =
+		findMockCategory(input.categorySlug) ?? existing?.category ?? placeholderCategory(input.categorySlug);
 	return {
 		id: existingId ?? crypto.randomUUID(),
 		name: input.name ?? existing?.name ?? 'Untitled rule',
-		category: findMockCategory(input.categorySlug) ?? existing?.category,
+		category: { id: category.id, slug: category.slug, name: category.name, kind: category.kind },
 		conditions: input.conditions ?? existing?.conditions ?? {},
 		priority: input.priority ?? existing?.priority ?? 0,
 		state: existing?.state ?? 'ACTIVE',
@@ -207,7 +264,7 @@ function mockCreateOrUpdateCategory(
 		name: input.name ?? '',
 		kind: input.kind ?? 'EXPENSE',
 		parentId: parent?.id ?? null,
-		depth: parent ? 2 : 1,
+		depth: parent ? parent.depth + 1 : 1,
 		archived: false,
 		origin: 'user'
 	};
@@ -265,10 +322,20 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 				},
 				setCookies: []
 			};
-		case 'SplitTransaction':
-			return { status: 200, body: { data: transactionSplitMock.data }, setCookies: [] };
 		case 'Categories':
 			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
+		case 'SetTransactionCategory':
+			return {
+				status: 200,
+				body: { data: mockSetTransactionCategory(body.variables) },
+				setCookies: []
+			};
+		case 'ClearTransactionCategory':
+			return { status: 200, body: { data: clearTransactionCategoryMock.data }, setCookies: [] };
+		case 'SplitTransaction':
+			return { status: 200, body: { data: mockSplitTransaction(body.variables) }, setCookies: [] };
+		case 'UnsplitTransaction':
+			return { status: 200, body: { data: unsplitTransactionMock.data }, setCookies: [] };
 		case 'CreateRule':
 			return {
 				status: 200,

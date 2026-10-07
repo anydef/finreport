@@ -1,0 +1,22 @@
+{
+  "query": "mutation SetTransactionCategory($transactionId: UUID!, $categorySlug: String!) {\n  setTransactionCategory(transactionId: $transactionId, categorySlug: $categorySlug) {\n    id\n    label {\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      source\n      status\n    }\n  }\n}",
+  "variables": {
+    "transactionId": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+    "categorySlug": "food.groceries"
+  },
+  "data": {
+    "setTransactionCategory": {
+      "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+      "label": {
+        "category": {
+          "id": "7f5a7e2e-7d0a-5f3d-9c8a-2f1b6a0c4d11",
+          "slug": "food.groceries",
+          "name": "Groceries",
+          "kind": "EXPENSE"
+        },
+        "source": "USER",
+        "status": "RESOLVED"
+      }
+    }
+  }
+}

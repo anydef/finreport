@@ -1,0 +1,24 @@
+{
+  "query": "mutation SetRuleState($id: UUID!, $state: RuleState!) {\n  setRuleState(id: $id, state: $state) {\n    id\n    name\n    category {\n      id\n      slug\n      name\n      kind\n    }\n    conditions\n    priority\n    state\n    origin\n    autoApproved\n    confidence\n    evidenceCount\n    createdAt\n  }\n}",
+  "variables": { "id": "4d3e2f10-9b8c-4a7d-ae6f-2b3c4d5e6f71", "state": "ACTIVE" },
+  "data": {
+    "setRuleState": {
+      "id": "4d3e2f10-9b8c-4a7d-ae6f-2b3c4d5e6f71",
+      "name": "Fitness First → personal.gym",
+      "category": {
+        "id": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+        "slug": "personal.gym",
+        "name": "Gym",
+        "kind": "EXPENSE"
+      },
+      "conditions": { "counterpartyKey": "fitness first" },
+      "priority": 0,
+      "state": "ACTIVE",
+      "origin": "LEARNED",
+      "autoApproved": false,
+      "confidence": 0.88,
+      "evidenceCount": 3,
+      "createdAt": "2024-06-20T08:00:00Z"
+    }
+  }
+}
