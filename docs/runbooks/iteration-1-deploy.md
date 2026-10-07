@@ -117,7 +117,7 @@ the stack below can be rolled.
    binary, now built into the same image (reads `DATABASE_URL`, **not**
    `APP_database_url`):
    ```bash
-   docker run --rm --network finreport-be_services-lan \
+   docker run --rm --network services-lan \
      -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      --entrypoint finreport-be-migrate "${DOCKER_REGISTRY}/finreport-be:latest" up -s public
    ```
@@ -128,7 +128,7 @@ the stack below can be rolled.
    key-skipping — safe to re-run), now built into the image instead of
    requiring a local checkout:
    ```bash
-   docker run --rm --network finreport-be_services-lan \
+   docker run --rm --network services-lan \
      -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
      --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest"
@@ -140,12 +140,12 @@ the stack below can be rolled.
    keys it would tombstone first, then publish for real:
    ```bash
    # Dry run — lists every live key, publishes nothing:
-   docker run --rm --network finreport-be_services-lan \
+   docker run --rm --network services-lan \
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
      --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest" \
      --tombstone-watermarks --dry-run
    # Publish a null-value record for each key listed above:
-   docker run --rm --network finreport-be_services-lan \
+   docker run --rm --network services-lan \
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
      --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest" \
      --tombstone-watermarks
@@ -156,7 +156,7 @@ the stack below can be rolled.
    running long-term. Migrations already ran in step 2, so this throwaway run
    also passes `APP_run_migrations=false`:
    ```bash
-   docker run --rm --network finreport-be_services-lan \
+   docker run --rm --network services-lan \
      -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
      -e APP_run_migrations=false \
@@ -169,13 +169,13 @@ the stack below can be rolled.
    ```bash
    FINREPORT_PASSWORD='<choose one>' \
      APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
-     docker run --rm -i --network finreport-be_services-lan \
+     docker run --rm -i --network services-lan \
      -e APP_database_url -e FINREPORT_PASSWORD \
      --entrypoint user-admin "${DOCKER_REGISTRY}/finreport-be:latest" \
      create-user --username <you>
    # Same image/env, link every projected account (skip if
    # APP_projector_default_owner was set in §1):
-   docker run --rm --network finreport-be_services-lan \
+   docker run --rm --network services-lan \
      -e APP_database_url --entrypoint user-admin \
      "${DOCKER_REGISTRY}/finreport-be:latest" link --username <you> --all
    ```
@@ -234,7 +234,7 @@ Clean up the local dump/cookie files once satisfied (`rm cookies.txt`).
    still understands these migrations is the one running — do this *before*
    swapping back to the old image/binary, which doesn't know about them:
    ```bash
-   docker run --rm --network finreport-be_services-lan \
+   docker run --rm --network services-lan \
      -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      --entrypoint finreport-be-migrate "${DOCKER_REGISTRY}/finreport-be:latest" down -n 2 -s public
    ```
