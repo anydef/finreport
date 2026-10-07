@@ -240,7 +240,9 @@ function mockSetTransactionCategory(variables: Record<string, unknown> | undefin
 					: null,
 				source: 'USER',
 				status: 'RESOLVED'
-			}
+			},
+			// The real mutation clears splits; echo that so the UI can show it.
+			splits: []
 		}
 	};
 }

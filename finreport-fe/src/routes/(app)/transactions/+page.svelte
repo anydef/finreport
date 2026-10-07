@@ -1,16 +1,11 @@
 <script lang="ts">
-	import { goto, invalidateAll } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import Card from '$lib/components/Card.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import CategoryFilter from '$lib/components/CategoryFilter.svelte';
-	import { createGraphqlClient } from '$lib/graphqlClient';
-	import {
-		SET_TRANSACTION_RECURRING_MUTATION,
-		SET_TRANSACTION_TAGS_MUTATION
-	} from '$lib/graphql/queries';
 	import { PERIOD_PRESETS, type PeriodPresetId } from '$lib/period';
 	import type { PageData } from './$types';
 
@@ -69,22 +64,6 @@
 		if (offset) params.set('offset', String(offset));
 		else params.delete('offset');
 		goto(`${page.url.pathname}?${params.toString()}`, { keepFocus: true, noScroll: true });
-	}
-
-	function client() {
-		return createGraphqlClient(fetch);
-	}
-
-	async function setTags(transactionId: string, tags: string[]) {
-		await client().mutation(SET_TRANSACTION_TAGS_MUTATION, { transactionId, tags }).toPromise();
-		await invalidateAll();
-	}
-
-	async function setRecurring(transactionId: string, recurring: boolean | null) {
-		await client()
-			.mutation(SET_TRANSACTION_RECURRING_MUTATION, { transactionId, recurring })
-			.toPromise();
-		await invalidateAll();
 	}
 </script>
 
@@ -205,8 +184,6 @@
 			<TransactionTable
 				transactions={data.transactions.items}
 				currency={data.accounts[0]?.currency ?? 'EUR'}
-				onSetTags={setTags}
-				onSetRecurring={setRecurring}
 			/>
 			<Pagination
 				offset={data.transactions.offset}

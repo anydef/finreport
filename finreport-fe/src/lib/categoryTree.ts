@@ -140,3 +140,29 @@ export function filterOptionGroups(
 		}))
 		.filter((group) => group.options.length > 0);
 }
+
+/**
+ * Flat categories -> `Parent / Child`-labelled options grouped by their
+ * top-level ancestor, the shape `SearchMenu` takes. Archived categories are
+ * left out (they can't be newly assigned).
+ */
+export function categoryOptionGroups(categories: Category[]): CategoryOptionGroup[] {
+	const byId = new Map(categories.map((c) => [c.id, c]));
+	function pathOf(cat: Category): string {
+		const parent = cat.parentId ? byId.get(cat.parentId) : undefined;
+		return parent ? `${pathOf(parent)} / ${cat.name}` : cat.name;
+	}
+	const groups = new Map<string, { slug: string; label: string }[]>();
+	for (const cat of categories) {
+		if (cat.archived) continue;
+		const label = pathOf(cat);
+		const top = label.split(' / ')[0];
+		const list = groups.get(top) ?? [];
+		list.push({ slug: cat.slug, label });
+		groups.set(top, list);
+	}
+	return [...groups.entries()].map(([groupLabel, options]) => ({
+		groupLabel,
+		options: options.sort((a, b) => a.label.localeCompare(b.label))
+	}));
+}

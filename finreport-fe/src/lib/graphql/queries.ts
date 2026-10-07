@@ -289,6 +289,16 @@ mutation SetTransactionCategory($transactionId: UUID!, $categorySlug: String!) {
 			source
 			status
 		}
+		splits {
+			index
+			amount
+			category {
+				id
+				slug
+				name
+				kind
+			}
+		}
 	}
 }`;
 
