@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "source": "comdirect",
+  "external_id": "ACC1-LABEL-SPLIT-01",
+  "category_slug": null,
+  "parts": [
+    { "index": 0, "amount": "-40.0000", "category_slug": "household_items_supplies.cleaning" },
+    { "index": 1, "amount": "-20.0000", "category_slug": "personal.cosmetics" }
+  ],
+  "revision": "2024-05-20T20:00:00Z",
+  "note": "Split demo case (§2.6): parts sum exactly to -60.00."
+}

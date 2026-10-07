@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "source": "comdirect",
+  "external_id": "ACC1-LABEL-OVERRIDDEN-01",
+  "category_slug": "food.restaurants",
+  "parts": [],
+  "revision": "2024-05-10T19:30:00Z",
+  "note": "User already categorized this as a restaurant before the labeler ever ran — the labeler must leave it alone (§2.5 step 2)."
+}
