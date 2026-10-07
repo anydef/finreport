@@ -43,7 +43,12 @@ async fn seed_transaction(
     account::ActiveModel {
         id: Set(account_id),
         source: Set("comdirect".to_string()),
-        external_id: Set("ACC1".to_string()),
+        // Derived from the caller's (always-unique) external_id, not a
+        // shared "ACC1" constant: tests that seed multiple transactions
+        // (e.g. the learner's repeated-observation tests) call this helper
+        // more than once and would otherwise collide on account's
+        // (source, external_id) unique index.
+        external_id: Set(format!("ACC-{external_id}")),
         display_id: Set(Some("1053820100".to_string())),
         account_type: Set(Some("Girokonto".to_string())),
         iban: Set(Some(format!("DE{external_id}"))),
@@ -449,7 +454,12 @@ async fn repeated_llm_agreement_learns_a_rule() {
     let cost_guard = CostGuard::new(10);
 
     for i in 0..3 {
-        let txn = seed_transaction(&db, &format!("LEARN-TEST-{i:02}"), "Fitness First").await;
+        let mut txn = seed_transaction(&db, &format!("LEARN-TEST-{i:02}"), "Fitness First").await;
+        let normalized_key = webapp::labeling::normalize::normalize(txn.counterparty_name.as_deref(), None);
+        proj::set_counterparty_key(&db, txn.id, &normalized_key)
+            .await
+            .expect("set counterparty key");
+        txn.counterparty_key = Some(normalized_key);
         label_one_transaction(
             &db,
             &publisher,
