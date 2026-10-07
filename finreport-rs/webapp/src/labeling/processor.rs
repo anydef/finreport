@@ -22,7 +22,7 @@ use rdkafka::message::{BorrowedMessage, Message};
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
 use rdkafka::ClientConfig;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, TransactionTrait};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use categorizer::provider::{CategoryCatalog, LabelProvider, LabelRequest};
@@ -143,16 +143,27 @@ impl LabelingOps {
 // §2.3 cost guard
 // ---------------------------------------------------------------------------
 
-/// Bounds LLM calls to `APP_llm_max_requests_per_run` for one process run
-/// (§2.3). Exhausted ⇒ the labeler leaves the rest unlabelled (not held, not
-/// failed) and the next sweep picks them up.
+/// Bounds uncached LLM calls to `APP_llm_max_requests_per_run` per *budget
+/// window* (§2.3) - NOT per process lifetime. A window starts at
+/// construction and at every [`CostGuard::reset`]; [`run_sweep`] resets its
+/// guard on entry, and the long-running loop resets the live guard on each
+/// periodic sweep tick (`APP_labeler_sweep_interval_secs`). Exhausted => the
+/// labeler leaves the rest unlabelled (not held, not failed, never
+/// mislabelled) and the next sweep picks them up.
+///
+/// The consume loop owns two guards, deliberately: one for sweeps (backlog
+/// drain) and one for live records, so a backlog drain can never starve
+/// newly arriving transactions of LLM calls, nor the reverse.
 pub struct CostGuard {
+    max: u32,
     remaining: AtomicU32,
+    /// Calls refused since the last reset, for the exhaustion report.
+    denied: AtomicU32,
 }
 
 impl CostGuard {
     pub fn new(max_requests: u32) -> Self {
-        Self { remaining: AtomicU32::new(max_requests) }
+        Self { max: max_requests, remaining: AtomicU32::new(max_requests), denied: AtomicU32::new(0) }
     }
 
     /// Reserves one LLM call, returning `false` (without consuming anything)
@@ -171,6 +182,23 @@ impl CostGuard {
 
     pub fn is_exhausted(&self) -> bool {
         self.remaining.load(Ordering::SeqCst) == 0
+    }
+
+    /// Starts a fresh budget window: full allowance, refusal count cleared.
+    pub fn reset(&self) {
+        self.remaining.store(self.max, Ordering::SeqCst);
+        self.denied.store(0, Ordering::SeqCst);
+    }
+
+    /// Records one refused call; returns how many were refused before it, so
+    /// callers can log loudly on the first refusal of a window only.
+    pub fn note_denied(&self) -> u32 {
+        self.denied.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// Calls refused since the last [`CostGuard::reset`].
+    pub fn denied(&self) -> u32 {
+        self.denied.load(Ordering::SeqCst)
     }
 }
 
@@ -429,7 +457,12 @@ pub async fn resolve_transaction(
     }
 
     if !cost_guard.try_consume() {
-        warn!(transaction_id = %txn.id, "labeler: cost guard exhausted, leaving unlabelled for the next sweep");
+        // Once per budget window at warn; the sweep summary carries the total.
+        if cost_guard.note_denied() == 0 {
+            warn!(transaction_id = %txn.id, "labeler: LLM budget exhausted, leaving transactions unlabelled until the next sweep");
+        } else {
+            debug!(transaction_id = %txn.id, "labeler: LLM budget exhausted, leaving unlabelled");
+        }
         return Ok(None);
     }
 
@@ -796,6 +829,10 @@ pub async fn label_one_transaction(
 /// Resolves every candidate the sweep query returns (unlabelled, or held
 /// with `review_reason = provider_error`), bounded by `limit` — the only
 /// mechanism that makes a failed label eventually succeed (§2.3).
+///
+/// Starts a fresh LLM budget window (`cost_guard.reset()`), so every sweep
+/// gets the full `APP_llm_max_requests_per_run`. If the budget runs out, the
+/// remainder stays unlabelled and one `warn` reports how many.
 #[allow(clippy::too_many_arguments)]
 pub async fn run_sweep(
     db: &impl ConnectionTrait,
@@ -808,11 +845,14 @@ pub async fn run_sweep(
     cost_guard: &CostGuard,
     limit: u64,
 ) -> Result<usize, ResolveError> {
+    cost_guard.reset();
     let candidates = proj::sweep_candidates(db, limit).await?;
+    let total = candidates.len();
     let mut labeled = 0usize;
-    for transaction_id in candidates {
+    let mut not_attempted = 0usize;
+    for (index, transaction_id) in candidates.into_iter().enumerate() {
         if cost_guard.is_exhausted() {
-            info!("labeler: sweep stopping, cost guard exhausted");
+            not_attempted = total - index;
             break;
         }
         let Some(txn) = proj::find_transaction(db, transaction_id).await? else {
@@ -831,6 +871,16 @@ pub async fn run_sweep(
         )
         .await?;
         labeled += 1;
+    }
+    let denied = cost_guard.denied() as usize;
+    if not_attempted > 0 || denied > 0 {
+        warn!(
+            candidates = total,
+            processed = labeled,
+            denied_llm_calls = denied,
+            not_attempted,
+            "labeler: sweep hit the LLM budget (APP_llm_max_requests_per_run); the rest stay unlabelled until the next sweep"
+        );
     }
     Ok(labeled)
 }
@@ -928,6 +978,16 @@ pub struct LabelerConfig {
     pub prompt_version: String,
     pub llm_min_confidence: f32,
     pub until_caught_up: bool,
+    /// Re-sweep (and refill the LLM budget) this often while running
+    /// forever. `None` = startup sweep only; always `None` with
+    /// `until_caught_up`.
+    pub sweep_interval: Option<Duration>,
+}
+
+/// `APP_labeler_sweep_interval_secs` -> the loop's interval: `0` disables, and
+/// `--until-caught-up` never sweeps on a timer (it exits instead).
+pub fn effective_sweep_interval(secs: u64, until_caught_up: bool) -> Option<Duration> {
+    (secs > 0 && !until_caught_up).then(|| Duration::from_secs(secs))
 }
 
 #[derive(Debug)]
@@ -1011,9 +1071,16 @@ pub async fn run(
     consumer.assign(&tpl).map_err(LabelerError::Kafka)?;
 
     let catalog = proj::build_catalog(&db).await?;
+    // Two independent budgets (see `CostGuard`): sweeps drain the backlog,
+    // live records are categorised as they arrive. Neither can starve the
+    // other; worst case is 2x `llm_max_requests_per_run` per sweep interval.
+    // Live records refused for lack of budget get no label row and are
+    // picked up by the next sweep, never mislabelled.
+    let sweep_guard = CostGuard::new(config.llm_max_requests_per_run);
     let cost_guard = CostGuard::new(config.llm_max_requests_per_run);
 
-    // Sweep once at startup, per §2.3 ("at the start of every run").
+    // Sweep at startup, per §2.3 ("at the start of every run"), and then -
+    // unless --until-caught-up - every `sweep_interval` (below).
     run_sweep(
         &db,
         &publisher,
@@ -1022,7 +1089,7 @@ pub async fn run(
         &catalog,
         &config.prompt_version,
         config.llm_min_confidence,
-        &cost_guard,
+        &sweep_guard,
         u64::from(config.llm_max_requests_per_run),
     )
     .await?;
@@ -1049,7 +1116,29 @@ pub async fn run(
         None
     };
 
+    let mut last_sweep = std::time::Instant::now();
     loop {
+        if let Some(interval) = config.sweep_interval
+            && last_sweep.elapsed() >= interval
+        {
+            info!(interval_secs = interval.as_secs(), "labeler: periodic sweep");
+            cost_guard.reset();
+            run_sweep(
+                &db,
+                &publisher,
+                &ops,
+                provider.as_ref(),
+                &catalog,
+                &config.prompt_version,
+                config.llm_min_confidence,
+                &sweep_guard,
+                u64::from(config.llm_max_requests_per_run),
+            )
+            .await?;
+            crate::detect::processor::run_detection_pass(&db, &publisher).await?;
+            last_sweep = std::time::Instant::now();
+        }
+
         let batch = collect_batch(&consumer, config.batch_max_records, config.batch_max_wait).await;
 
         if batch.is_empty() {
@@ -1064,7 +1153,7 @@ pub async fn run(
                     &catalog,
                     &config.prompt_version,
                     config.llm_min_confidence,
-                    &cost_guard,
+                    &sweep_guard,
                     u64::from(config.llm_max_requests_per_run),
                 )
                 .await?;
@@ -1511,6 +1600,30 @@ mod tests {
         assert!(guard.try_consume());
         assert!(!guard.try_consume(), "the third call must be refused once the budget is spent");
         assert!(guard.is_exhausted());
+    }
+
+    #[test]
+    fn cost_guard_reset_restores_the_full_budget_and_clears_denials() {
+        let guard = CostGuard::new(1);
+        assert!(guard.try_consume());
+        assert!(!guard.try_consume());
+        assert_eq!(guard.note_denied(), 0);
+        assert_eq!(guard.note_denied(), 1);
+        assert_eq!(guard.denied(), 2);
+
+        guard.reset();
+
+        assert!(!guard.is_exhausted());
+        assert_eq!(guard.denied(), 0);
+        assert!(guard.try_consume(), "a new window must grant the full allowance again");
+        assert!(!guard.try_consume(), "...but no more than the allowance");
+    }
+
+    #[test]
+    fn sweep_interval_is_off_for_zero_and_for_until_caught_up() {
+        assert_eq!(effective_sweep_interval(3600, false), Some(Duration::from_secs(3600)));
+        assert_eq!(effective_sweep_interval(0, false), None);
+        assert_eq!(effective_sweep_interval(3600, true), None);
     }
 
     #[test]

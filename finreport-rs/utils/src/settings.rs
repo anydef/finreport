@@ -148,7 +148,12 @@ pub struct Settings {
     /// (§2.5).
     #[serde(default = "default_llm_min_confidence")]
     pub llm_min_confidence: f32,
-    /// Cost guard: bounds LLM calls per labeler process run (§2.3).
+    /// Cost guard: bounds uncached LLM calls per *sweep* (§2.3), and, as a
+    /// separate allowance of the same size, per sweep interval for live
+    /// records. "Run" means one sweep window, NOT the process lifetime: the
+    /// budget is refilled at the start of every sweep (see
+    /// `labeler_sweep_interval_secs`), so a long-lived labeler never goes
+    /// permanently silent after spending it once.
     #[serde(default = "default_llm_max_requests_per_run")]
     pub llm_max_requests_per_run: u32,
     /// Part of the cache fingerprint (§2.5); bumping it invalidates the
@@ -169,6 +174,13 @@ pub struct Settings {
     /// records.
     #[serde(default)]
     pub labeler_max_projection_lag: u64,
+    /// How often a long-lived labeler re-runs the sweep (seconds), which
+    /// also refills the LLM budget (`llm_max_requests_per_run`). Unlabelled
+    /// transactions left behind by an exhausted budget are retried at this
+    /// cadence. `0` disables periodic sweeps (startup sweep only). Ignored
+    /// with `--until-caught-up`, which sweeps at start and at the end.
+    #[serde(default = "default_labeler_sweep_interval_secs")]
+    pub labeler_sweep_interval_secs: u64,
     /// Consumer-group-style scope for the offsets the projector and labeler
     /// persist in `projection_offset`. Both read and write only rows under
     /// this id, so changing it makes them find no offsets and replay their
@@ -575,6 +587,16 @@ fn default_llm_max_requests_per_run() -> u32 {
     200
 }
 
+/// `APP_labeler_sweep_interval_secs` default: hourly. New transactions are
+/// labelled live as they arrive; the sweep only mops up what a spent budget
+/// or a provider error left behind, so it can be slow. With the default
+/// 200-call budget an hour caps paid LLM traffic at ~200 calls/hour for the
+/// sweep (plus the same again for live records) while still draining even a
+/// multi-thousand backlog in a day or two.
+fn default_labeler_sweep_interval_secs() -> u64 {
+    3600
+}
+
 /// `APP_prompt_version` default (§2.9, §4).
 fn default_prompt_version() -> String {
     "2".to_string()
@@ -656,6 +678,18 @@ mod test {
             ("APP_url", "https://api.comdirect.de/api"),
             ("APP_save_file_path", ".session.json"),
         ]
+    }
+
+    #[test]
+    fn labeler_sweep_interval_defaults_to_an_hour() {
+        assert_eq!(settings_from(&base_vars()).labeler_sweep_interval_secs, 3600);
+    }
+
+    #[test]
+    fn labeler_sweep_interval_is_read_from_env() {
+        let mut vars = base_vars();
+        vars.push(("APP_labeler_sweep_interval_secs", "0"));
+        assert_eq!(settings_from(&vars).labeler_sweep_interval_secs, 0);
     }
 
     #[test]

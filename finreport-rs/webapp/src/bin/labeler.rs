@@ -18,7 +18,7 @@ use tracing_subscriber::EnvFilter;
 use utils::settings::Settings;
 use webapp::db::seaql;
 use webapp::kafka::producer::EventPublisher;
-use webapp::labeling::processor::{check_projection_lag, run, LabelerConfig, LabelingOps};
+use webapp::labeling::processor::{check_projection_lag, effective_sweep_interval, run, LabelerConfig, LabelingOps};
 
 /// Reads `--until-caught-up` from the process arguments, mirroring
 /// `projector`'s own arg parsing (§2.3's CI/replay-and-verify use case
@@ -106,6 +106,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         prompt_version: settings.prompt_version.clone(),
         llm_min_confidence: settings.llm_min_confidence,
         until_caught_up,
+        sweep_interval: effective_sweep_interval(settings.labeler_sweep_interval_secs, until_caught_up),
     };
 
     info!(until_caught_up, "[startup] labeler starting");

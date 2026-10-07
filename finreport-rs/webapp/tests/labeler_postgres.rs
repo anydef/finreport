@@ -538,3 +538,42 @@ async fn differently_formatted_counterparties_share_a_normalized_key() {
     assert!(reloaded_a.counterparty_key.is_some());
     assert_eq!(reloaded_a.counterparty_key, reloaded_b.counterparty_key);
 }
+
+/// The LLM budget is per sweep, not per process: a sweep that spends it
+/// leaves the rest unlabelled (no row, never a wrong one), and the next
+/// sweep starts with a full budget and makes progress on the backlog.
+#[tokio::test]
+async fn each_sweep_gets_a_fresh_llm_budget_and_exhaustion_leaves_rows_unlabelled() {
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .try_init();
+
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url())
+        .await
+        .expect("connect to test Postgres");
+    let publisher =
+        EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(3, 0.9);
+    let guard = CostGuard::new(1);
+
+    for (i, name) in ["Fitness First", "Lidl Sagt Danke", "Netflix International"].iter().enumerate() {
+        seed_transaction(&db, &format!("BUDGET-{i}"), name).await;
+    }
+
+    for expected_labelled in [1usize, 2, 3] {
+        run_sweep(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &guard, 10)
+            .await
+            .expect("sweep");
+        let labelled = transaction_label::Entity::find().all(&db).await.expect("labels").len();
+        assert_eq!(
+            labelled, expected_labelled,
+            "a budget of 1 labels exactly one more transaction per sweep"
+        );
+    }
+}
