@@ -43,7 +43,7 @@ services:
       timeout: 5s
       retries: 10
 
-  # One-shot: (re-)creates the four topics with the same partitions/cleanup
+  # One-shot: (re-)creates the topics with the same partitions/cleanup
   # policies as terraform/kafka/main.tf. Keep both in step — drift means local
   # dev behaves unlike the deployed broker.
   finreport-redpanda-init:
@@ -66,6 +66,22 @@ services:
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic create finreport.import-watermark \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        # Iteration 2 labeling pipeline topics (docs/specs/iteration-2.md
+        # §2.2) — same partitions/RF/compaction posture as terraform/kafka,
+        # except label-request, which is a time-retained work queue.
+        $$RPK topic create finreport.transaction-label \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.llm-cache \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.user-label \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.rule \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.category \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.label-request \
+          --partitions 1 --replicas 1 \
+          --topic-config cleanup.policy=delete --topic-config retention.ms=604800000 || true
         $$RPK topic list
 
   finreport-be:
@@ -139,6 +155,21 @@ services:
     volumes:
       - finreport-data:/app/data
 
+  # Optional local OpenAI-compatible model server for APP_llm_provider=ollama
+  # (docs/specs/iteration-2.md §2.9/§4) — off by default, started only with
+  # `--profile ollama` (e.g. `docker compose -f docker-compose.local.yml
+  # --profile ollama up finreport-ollama -d`). Not needed for `just dev-demo`,
+  # which uses the default `fake` provider.
+  finreport-ollama:
+    image: ollama/ollama:latest
+    profiles: ["ollama"]
+    restart: unless-stopped
+    ports:
+      - "${FINREPORT_OLLAMA_PORT:-11434}:11434"
+    volumes:
+      - ollama-data:/root/.ollama
+
 volumes:
   pgdata:
   finreport-data:
+  ollama-data:

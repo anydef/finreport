@@ -46,3 +46,9 @@ TF_VAR_app_account_1_pin="op://HomeLab/finreport/comdirect 42992464/pin"
 # Postgres password — pulled from 1Password and passed to Terraform, which
 # then injects it into the Portainer stack via extra_env.
 TF_VAR_postgres_password="op://HomeLab/finreport/psql/password"
+
+# Anthropic API key for the labeler (docs/specs/iteration-2.md §4) — optional,
+# only needed once APP_llm_provider=anthropic (default is `fake`, which never
+# calls a paid API). terraform/variables.tf declares it sensitive;
+# docker-compose.yml passes it to finreport-be-labeler as APP_anthropic_api_key.
+TF_VAR_anthropic_api_key="op://HomeLab/finreport/anthropic/api_key"
