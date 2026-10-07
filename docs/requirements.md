@@ -251,3 +251,59 @@ below. Two gaps:
   existing active-drilldown banner is the hook to build on.
 
 Frontend-only — every filter it needs exists.
+
+## Transaction table: search, multi-select and bulk edit (next planned feature)
+Every transaction table gets search/filter controls, and a selection model that
+allows editing tags and categories for many transactions at once.
+
+### Search and filter
+- Applies to **every** table, not just `/transactions`: the dashboard list,
+  `/recurring`, the goal pages and the review queue. The same filter component
+  everywhere, as "Dashboard transaction filters" already requires — this
+  request widens that to all tables rather than adding a second mechanism.
+- `TransactionFilter` already provides `search` (case-insensitive substring over
+  `counterpartyName` + `description`), accounts, categories, tags, direction and
+  the flags. Only the amount range is missing (see the dashboard-filters entry).
+
+### Multi-select
+- A checkbox per row, plus a header checkbox for "select all".
+- **"All" must mean all matching rows, not just the loaded page.** The tables are
+  paged (`PageInput`, 50 per page), so a header checkbox that only covers the
+  current page is a trap: a user selecting "all" after filtering to 300 rows
+  expects 300. Decide in spec between two honest options: carry the *filter* as
+  the selection ("everything matching these criteria", count shown from
+  `totalCount`), or keep explicit id lists and cap selection at one page with
+  the limit stated in the UI. The filter-as-selection model is preferred — it
+  matches how the backend would apply it anyway.
+- Selection survives paging within the same filter, and clears when the filter
+  changes (silently keeping a stale selection across a filter change is how bulk
+  tools edit the wrong rows).
+- The action bar shows the exact count and is disabled at zero.
+
+### Bulk edit
+- **Categories:** assign one category to the whole selection. Semantics are the
+  same as the single mutation — it writes the user-override layer, so it beats
+  rules and the LLM and survives replays.
+- **Tags: add and remove, not replace.** `setTransactionTags` replaces a
+  transaction's whole tag set, so reusing it across a selection would erase
+  per-transaction tags. Bulk tagging therefore needs *add these tags* and
+  *remove these tags* operations, each read-modify-write per transaction
+  (iteration 3 §2.1).
+- **Backend work is required** — this is the first request here that is not
+  frontend-only. Either new bulk mutations, or the client looping the existing
+  per-transaction ones. Prefer bulk mutations: a loop means N round trips, N
+  partial-failure states and N progress steps in the UI.
+- **Not atomic, and the UI must not pretend otherwise.** Each transaction is its
+  own event on a compacted topic, so a bulk edit is N records, not one. A
+  partial failure must report which transactions were applied, and be safe to
+  retry (the operations are idempotent by `revision`).
+- **Edge cases:**
+  - A category change clears splits (existing semantics) — across a selection
+    that could silently discard several split definitions. Warn, with a count of
+    affected split transactions, before applying.
+  - Transactions held for review: a bulk category assignment resolves them, same
+    as the review queue would.
+  - A selection spanning accounts the user does not own must be impossible; the
+    backend scopes by `scoped_account_ids` regardless of what ids are sent.
+  - Undo is out of scope, but the override layer makes a corrective bulk edit
+    cheap; say so in the UI rather than implying permanence.

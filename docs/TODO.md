@@ -27,12 +27,15 @@ See `docs/runbooks/iteration-1-deploy.md`.
 5. Spending-by-category drill-down: make the `uncategorized` and
    `needs-review` rows clickable (they are inert buttons today) and make the
    drill-down visible. Frontend-only (see requirements).
-6. Admin user management in the UI.
-7. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+6. Transaction table search + multi-select + bulk tag/category edit. Needs
+   backend work: bulk mutations, and tag *add/remove* rather than
+   `setTransactionTags`' whole-set replace (see requirements).
+7. Admin user management in the UI.
+8. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
    decision about credential storage** (security-critical).
-8. C24, PayPal and Scalable Capital integrations. First research the access
+9. C24, PayPal and Scalable Capital integrations. First research the access
    method for each (API vs. CSV fallback).
-9. Sankey cash-flow views.
+10. Sankey cash-flow views.
 
 ## Open debt
 
