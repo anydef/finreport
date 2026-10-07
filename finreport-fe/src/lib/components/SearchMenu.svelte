@@ -21,7 +21,11 @@
 	let root: HTMLElement | undefined = $state();
 	let searchInput: HTMLInputElement | undefined = $state();
 
-	const visibleGroups = $derived(filterOptionGroups(groups, query));
+	// A query that matches nothing falls back to the full list rather than
+	// emptying the menu: an empty dropdown reads as broken, and showing
+	// everything keeps the next keystroke (or a backspace) useful.
+	const matched = $derived(filterOptionGroups(groups, query));
+	const visibleGroups = $derived(matched.length > 0 ? matched : groups);
 	const flat = $derived(visibleGroups.flatMap((g) => g.options));
 	const selectedLabel = $derived(
 		groups.flatMap((g) => g.options).find((o) => o.slug === value)?.label ?? null
@@ -136,7 +140,9 @@
 		</div>
 		<ul id={listId} role="listbox" aria-label={label} class="max-h-60 overflow-y-auto py-1 text-xs">
 			{#if flat.length === 0}
-				<li class="px-3 py-2 text-slate-500" role="presentation">No categories match</li>
+				<!-- Only reachable with no categories at all: a query that matches
+				     nothing falls back to the full list above. -->
+				<li class="px-3 py-2 text-slate-500" role="presentation">No categories available.</li>
 			{/if}
 			{#each visibleGroups as group (group.groupLabel)}
 				<li role="presentation">
