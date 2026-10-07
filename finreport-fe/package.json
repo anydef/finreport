@@ -6,6 +6,7 @@
 	"scripts": {
 		"dev": "vite dev",
 		"dev:tower": "vite dev --mode tower",
+		"dev:mocks": "PUBLIC_USE_MOCKS=1 vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
 		"prepare": "svelte-kit sync || echo ''",

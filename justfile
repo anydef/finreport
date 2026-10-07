@@ -310,6 +310,16 @@ dev-fe:
         npm run dev
 
 # Run the frontend locally, tower profile (talks to the deployed Unraid backend).
+# Every GraphQL operation is served from the fixtures in
+# `finreport-fe/src/lib/graphql/mocks/` via `PUBLIC_USE_MOCKS=1`: no Postgres,
+# no Kafka, no `dev-be`. This is the path a UI change is reviewed through
+# before any backend work starts (see "UI work starts with mocks" in CLAUDE.md).
+# Run the frontend on mocked data only — no backend of any kind.
+dev-fe-mocks:
+    cd finreport-fe && \
+        ( [ node_modules/.package-lock.json -nt package-lock.json ] 2>/dev/null || npm ci ) && \
+        npm run dev:mocks
+
 dev-fe-tower:
     cd finreport-fe && \
         ( [ node_modules/.package-lock.json -nt package-lock.json ] 2>/dev/null || npm ci ) && \
