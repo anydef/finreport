@@ -285,6 +285,13 @@ services:
       # newly projected account links to it automatically (§4), no manual
       # `user-admin link --all` needed.
       APP_projector_default_owner: admin
+      # Replay control: `projection_offset` rows are scoped by this id, so
+      # changing it makes this consumer re-read its topics from the beginning
+      # and rebuild what it projects. Defaults to `default`, which is also the
+      # group the migration backfilled onto existing offsets, so leaving it
+      # unset resumes where the consumer already was. Set both the projector
+      # and the labeler to the same new value to replay the pair together.
+      APP_projection_group: ${APP_projection_group:-default}
       # Same reasoning as finreport-be above: migrations are an explicit
       # runbook step (`finreport-be-migrate`), not an implicit side effect of
       # a container restart.
@@ -320,6 +327,12 @@ services:
       # than in .env.tpl. `anthropic` is picked deliberately: this is the one
       # place the Anthropic key is actually used; everywhere else (including
       # `just dev-demo`) keeps the zero-cost `fake` default.
+      # Replay control, same meaning as on the projector above: changing this
+      # id makes the labeler re-resolve every transaction from the start of
+      # its topics. The labeler's lag guard reads the projector's offsets
+      # under the *same* group, so change both together — otherwise the
+      # labeler waits for a projector that is still on the old id.
+      APP_projection_group: ${APP_projection_group:-default}
       APP_llm_provider: anthropic
       APP_llm_model: claude-sonnet-4-5
       # Secret — sourced from TF_VAR_anthropic_api_key in .env.tpl via
