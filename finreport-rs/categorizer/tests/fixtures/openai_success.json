@@ -1,0 +1,20 @@
+{
+  "id": "chatcmpl-123",
+  "object": "chat.completion",
+  "model": "gpt-4o-mini",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "{\"category_slug\": \"transportation.gas\", \"proposed_path\": null, \"confidence\": 0.93, \"ambiguous\": false, \"reasoning\": \"Shell is a gas station\"}"
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 210,
+    "completion_tokens": 40,
+    "total_tokens": 250
+  }
+}

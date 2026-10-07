@@ -8,6 +8,25 @@ set allow-duplicate-recipes
 build_tools_dir   := ".build/build-tools"
 docker_image_name := "finreport-be"
 
+# Shared cargo target dir across worktrees (docs/specs/iteration-2.md §9.1):
+# every worktree builds into the same directory, sibling to
+# `finreport-worktrees/`, so N parallel agents share one dependency build
+# instead of each paying a cold compile. Cargo locks the directory, so
+# concurrent builds serialize rather than corrupt each other. Computed, not
+# hardcoded, so it resolves correctly whether `just` runs from a worktree
+# (.../finreport-worktrees/<branch>/) or the main checkout (.../finreport/,
+# sibling to finreport-worktrees/) — see "Multi-agent development" in
+# CLAUDE.md for the directory layout this assumes. A `CARGO_TARGET_DIR`
+# already set in the calling shell overrides this.
+export CARGO_TARGET_DIR := env_var_or_default("CARGO_TARGET_DIR", `
+    here="$(pwd)"; parent="$(dirname "$here")"
+    if [ "$(basename "$parent")" = "finreport-worktrees" ]; then
+        echo "$parent/.cargo-target"
+    else
+        echo "$parent/finreport-worktrees/.cargo-target"
+    fi
+`)
+
 # Local-dev config for every recipe that talks to the `dev-up` stack, so no
 # finreport-rs/.env (or 1Password) is needed to run the demo. Each value can
 # still be overridden from the calling shell. These are throwaway localhost
@@ -94,6 +113,29 @@ dev-projector *ARGS:
         {{local_env}} RUST_LOG=info \
         cargo run -p webapp --bin projector -- {{ARGS}}
 
+# Run the labeler locally (docs/specs/iteration-2.md §2.3) against the stack
+# from `dev-up`: consumes finreport.transaction/.user-label/.rule/
+# .label-request and resolves labels into the local Postgres. Pass
+# `--until-caught-up` to exit at the log end (what `dev-demo` uses); omit it
+# to keep tailing like the deployed service. Refuses to start while the
+# projector lags behind the broker by more than APP_labeler_max_projection_lag
+# records (default 0) — run `dev-projector --until-caught-up` first.
+#
+# Config comes from `local_env` (top of this file); no .env needed, no API
+# key needed (APP_llm_provider defaults to the zero-cost `fake` provider).
+dev-labeler *ARGS:
+    cd finreport-rs && \
+        {{local_env}} RUST_LOG=info \
+        cargo run -p webapp --bin labeler -- {{ARGS}}
+
+# Idempotently publish the iteration-2 taxonomy (prompts/taxonomy.json) onto
+# finreport.category, so the labeler has a catalog to resolve against. Safe
+# to re-run: re-publishing an unchanged category is a no-op at the projector.
+seed-categories:
+    cd finreport-rs && \
+        {{local_env}} RUST_LOG=info \
+        cargo run -p webapp --bin category-seed -- ../prompts/taxonomy.json
+
 # Create (or no-op onto) the `dev` user with a known password, so the seeded
 # stack has something to log in with. Password from $FINREPORT_PASSWORD,
 # defaulting to `dev` for local use only — never set that default outside
@@ -111,24 +153,90 @@ seed-events:
         {{local_env}} RUST_LOG=info \
         cargo run -p webapp --bin fixture-replay -- webapp/fixtures
 
-# One command, clean checkout to a logged-in dashboard with seeded data:
-# dev-up -> migrate -> seed-user -> seed-events -> projector (catch up) ->
-# link every seeded account to `dev`. No bank credentials, no central broker.
+# One command, clean checkout to a logged-in dashboard with a populated
+# review queue and at least one learned rule (docs/specs/iteration-2.md §7):
+#
+#   dev-up -> migrate -> seed-user -> seed-events -> seed-categories
+#   -> repeat { projector --until-caught-up ; labeler --until-caught-up }
+#      until a round produces no new records (max 5 rounds, else fail loudly)
+#   -> link accounts -> assert -> print next steps
+#
+# A single projector -> seed-categories -> labeler pass cannot work: the
+# seeded categories are only *published* at that step, so the labeler would
+# start against an empty catalog, and the labels it publishes would never be
+# projected, so the learner (which reads the projection) would see nothing.
+# Each round is cheap — both binaries exit at the high watermark — and it
+# converges: round 1 projects categories and transactions, round 2 labels
+# them and projects the labels, round 3 lets the learner see enough history
+# to emit the learned rule, round 4 projects it.
+#
+# No bank credentials, no central broker, no API key — the fake LLM provider
+# is the default (APP_llm_provider).
 dev-demo: dev-up
     just dev-migrate
     just seed-user
     just seed-events
-    just dev-projector --until-caught-up
+    just seed-categories
+    just _dev-demo-loop
     cd finreport-rs && \
         {{local_env}} cargo run -p webapp --bin user-admin -- link --username dev --all
+    just _dev-demo-assert
     @echo "==> Ready: just dev-be (backend) + just dev-fe (frontend), log in as dev/\${FINREPORT_PASSWORD:-dev}"
+
+# The alternating projector/labeler loop (§7), split out so `dev-demo`'s own
+# body can stay a plain sequence of `just` calls (a shebang script has to be
+# the whole recipe body, not just part of it).
+[private]
+_dev-demo-loop:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd finreport-rs
+    round=0
+    while :; do
+        round=$((round + 1))
+        if [ "$round" -gt 5 ]; then
+            echo "==> dev-demo: 5 rounds of projector/labeler and still not quiescent — failing loudly" >&2
+            exit 1
+        fi
+        before=$(docker compose -f ../docker-compose.local.yml exec -T finreport-be-postgres \
+            psql -U finreport -d finreport -tAc \
+            'SELECT (SELECT count(*) FROM transaction) + (SELECT count(*) FROM transaction_label) + (SELECT count(*) FROM rule);')
+        {{local_env}} RUST_LOG=info cargo run -p webapp --bin projector -- --until-caught-up
+        {{local_env}} RUST_LOG=info cargo run -p webapp --bin labeler -- --until-caught-up
+        after=$(docker compose -f ../docker-compose.local.yml exec -T finreport-be-postgres \
+            psql -U finreport -d finreport -tAc \
+            'SELECT (SELECT count(*) FROM transaction) + (SELECT count(*) FROM transaction_label) + (SELECT count(*) FROM rule);')
+        echo "==> dev-demo: round $round (transaction+transaction_label+rule rows: $before -> $after)"
+        if [ "$before" = "$after" ]; then
+            break
+        fi
+    done
+
+# A silently empty demo is worse than a broken one (§7): fail loudly unless
+# at least one learned rule and at least one held-for-review label exist.
+[private]
+_dev-demo-assert:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    learned=$(docker compose -f docker-compose.local.yml exec -T finreport-be-postgres \
+        psql -U finreport -d finreport -tAc \
+        "SELECT count(*) FROM rule WHERE origin = 'learned';")
+    review=$(docker compose -f docker-compose.local.yml exec -T finreport-be-postgres \
+        psql -U finreport -d finreport -tAc \
+        "SELECT count(*) FROM transaction_label WHERE status = 'needs_review';")
+    if [ "${learned:-0}" -lt 1 ] || [ "${review:-0}" -lt 1 ]; then
+        echo "==> dev-demo: assertion failed — learned rules: ${learned:-0}, needs_review labels: ${review:-0}" >&2
+        exit 1
+    fi
+    echo "==> dev-demo: asserted ${learned} learned rule(s), ${review} needs_review label(s)"
 
 # Apply all migrations to the local `dev-up` Postgres (no .env needed).
 dev-migrate:
     {{local_env}} sh -c 'sea-orm-cli migrate -d finreport-rs/migration -u "$APP_database_url" -s public'
 
-# Wipe the projected read model (transactions, balances, offsets) so the next
-# `dev-projector` run replays the log from the beginning. Deliberately leaves
+# Wipe the projected read model (transactions, balances, offsets, labels,
+# rules, categories) so the next projector/labeler run replays the log from
+# the beginning. Deliberately leaves
 # `account` (and every `user_account`/`app_user` row) in place: accounts are
 # upserted back onto the same deterministic ids by the next replay (§2.3), so
 # this never severs an existing account<->user link the way a `TRUNCATE …
@@ -136,7 +244,7 @@ dev-migrate:
 dev-reset:
     docker compose -f docker-compose.local.yml exec -T finreport-be-postgres \
         psql -U finreport -d finreport \
-        -c 'TRUNCATE TABLE transaction, account_balance, projection_offset;'
+        -c 'TRUNCATE TABLE transaction, account_balance, projection_offset, transaction_label, transaction_user_label, transaction_split, llm_label_cache, rule, category;'
 
 # Run the GraphQL backend locally against the Postgres started by `db-up`.
 # Config comes from `local_env` (top of this file); no .env needed.

@@ -2,9 +2,21 @@
 //! (`scalars.rs`). Field shapes here are the frozen contract; resolver bodies
 //! in `queries.rs`/`mutations.rs` are WP4's to fill in.
 
-use async_graphql::{Enum, InputObject, SimpleObject, ID};
+use async_graphql::{ComplexObject, Enum, ErrorExtensions, InputObject, SimpleObject, ID};
 
-use crate::graphql::scalars::{Date, Decimal, Uuid};
+use crate::graphql::scalars::{Date, Decimal, Json, Uuid};
+
+/// A frozen (WP0) resolver stub's error, shared by every iteration-2 field
+/// that isn't implemented yet. `extensions.code = "NOT_IMPLEMENTED"` so a
+/// client (or an integration test) can tell this apart from a real failure;
+/// `wp` names the work package that owns the real implementation.
+#[allow(dead_code)]
+pub(crate) fn not_implemented(field: &str, wp: u8) -> async_graphql::Error {
+    async_graphql::Error::new(format!(
+        "{field} is not implemented yet (WP{wp}, see docs/specs/iteration-2.md)"
+    ))
+    .extend_with(|_, e| e.set("code", "NOT_IMPLEMENTED"))
+}
 
 // ---------------------------------------------------------------------------
 // Auth
@@ -56,6 +68,7 @@ pub struct Balance {
 // ---------------------------------------------------------------------------
 
 #[derive(SimpleObject)]
+#[graphql(complex)]
 pub struct Transaction {
     pub id: Uuid,
     pub account_id: Uuid,
@@ -72,6 +85,31 @@ pub struct Transaction {
     pub transaction_type: Option<String>,
 }
 
+/// Iteration 2 (§5): `label`/`splits` are resolver-computed, not eagerly
+/// loaded with the rest of `Transaction`'s fields, since they live in
+/// separate projections (§3) that may not exist for every transaction (a
+/// `null` label means "not labelled yet", distinct from `needsReview`).
+#[ComplexObject]
+impl Transaction {
+    async fn label(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<Option<TransactionLabel>> {
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        let cache = ctx.data::<crate::graphql::labels::LabelSplitCache>().ok();
+        crate::graphql::labels::label_for(db.as_ref(), cache, self.id.0).await
+    }
+
+    async fn splits(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<Vec<TransactionSplit>> {
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        let cache = ctx.data::<crate::graphql::labels::LabelSplitCache>().ok();
+        crate::graphql::labels::splits_for(db.as_ref(), cache, self.id.0).await
+    }
+}
+
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Direction {
     Income,
@@ -85,7 +123,7 @@ pub enum Granularity {
     Month,
 }
 
-#[derive(InputObject)]
+#[derive(InputObject, Default)]
 pub struct TransactionFilter {
     /// Inclusive; `None` = unbounded.
     pub start_date: Option<Date>,
@@ -101,20 +139,12 @@ pub struct TransactionFilter {
     pub counterparty_names: Option<Vec<String>>,
     /// `false` selects the "Unknown" node's rows.
     pub has_counterparty: Option<bool>,
-}
-
-impl Default for TransactionFilter {
-    fn default() -> Self {
-        Self {
-            start_date: None,
-            end_date: None,
-            account_ids: None,
-            search: None,
-            direction: None,
-            counterparty_names: None,
-            has_counterparty: None,
-        }
-    }
+    /// Iteration 2 (§5): OR-ed; includes descendants of each slug.
+    pub category_slugs: Option<Vec<String>>,
+    /// `true` ⇒ no label at all (distinct from `needsReview`).
+    pub uncategorized: Option<bool>,
+    pub needs_review: Option<bool>,
+    pub label_sources: Option<Vec<LabelSource>>,
 }
 
 #[derive(InputObject)]
@@ -271,4 +301,151 @@ pub struct CashflowGraph {
     /// Echoes what the server applied.
     pub dimensions: Vec<CashflowDimension>,
     pub truncated: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Categories, labels, rules (iteration 2, §5)
+// ---------------------------------------------------------------------------
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Hash, Debug)]
+pub enum CategoryKind {
+    Income,
+    Expense,
+    Transfer,
+    Saving,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum LabelSource {
+    User,
+    Rule,
+    LlmCache,
+    Llm,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum LabelStatus {
+    Resolved,
+    NeedsReview,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum ReviewReason {
+    Ambiguous,
+    NewCategory,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum RuleState {
+    Active,
+    InReview,
+    Revoked,
+    Rejected,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum RuleOrigin {
+    User,
+    Learned,
+}
+
+#[derive(SimpleObject, Clone)]
+pub struct Category {
+    pub id: Uuid,
+    pub slug: String,
+    pub name: String,
+    pub kind: CategoryKind,
+    pub parent_id: Option<Uuid>,
+    pub depth: i32,
+    pub archived: bool,
+    /// `"seed"` | `"user"` (§3).
+    pub origin: String,
+}
+
+#[derive(SimpleObject)]
+pub struct TransactionLabel {
+    /// `null` while `status = NEEDS_REVIEW`.
+    pub category: Option<Category>,
+    pub source: LabelSource,
+    pub rule: Option<Rule>,
+    pub confidence: Option<f32>,
+    pub status: LabelStatus,
+    pub review_reason: Option<ReviewReason>,
+    pub proposed_category_path: Option<String>,
+    pub reasoning: Option<String>,
+}
+
+#[derive(SimpleObject)]
+pub struct TransactionSplit {
+    pub index: i32,
+    pub amount: Decimal,
+    pub category: Category,
+}
+
+#[derive(SimpleObject, Clone)]
+pub struct Rule {
+    pub id: Uuid,
+    pub name: String,
+    pub category: Category,
+    pub conditions: Json,
+    pub priority: i32,
+    pub state: RuleState,
+    pub origin: RuleOrigin,
+    pub auto_approved: bool,
+    pub confidence: Option<f32>,
+    pub evidence_count: i32,
+    pub created_at: crate::graphql::scalars::DateTime,
+}
+
+#[derive(SimpleObject)]
+pub struct CategoryBreakdownRow {
+    /// The roll-up level that was requested.
+    pub category: Category,
+    /// Positive magnitude.
+    pub amount: Decimal,
+    pub transaction_count: i32,
+    /// Of the row's `kind` total, `0..1`.
+    pub share: f32,
+}
+
+#[derive(SimpleObject)]
+pub struct CategoryBreakdown {
+    pub rows: Vec<CategoryBreakdownRow>,
+    /// Label missing entirely.
+    pub uncategorized: Option<CategoryBreakdownRow>,
+    /// Held; counted separately, never as spend.
+    pub needs_review: Option<CategoryBreakdownRow>,
+    pub currency: String,
+}
+
+#[derive(SimpleObject)]
+pub struct ReviewQueue {
+    /// `status = NEEDS_REVIEW`.
+    pub transactions: Vec<Transaction>,
+    /// `state = IN_REVIEW`.
+    pub pending_rules: Vec<Rule>,
+    pub total_count: i32,
+}
+
+#[derive(InputObject)]
+pub struct SplitPartInput {
+    pub amount: Decimal,
+    pub category_slug: String,
+}
+
+#[derive(InputObject)]
+pub struct CategoryInput {
+    pub slug: String,
+    pub name: String,
+    pub kind: CategoryKind,
+    pub parent_slug: Option<String>,
+}
+
+#[derive(InputObject)]
+pub struct RuleInput {
+    pub name: String,
+    pub category_slug: String,
+    pub conditions: Json,
+    #[graphql(default = 0)]
+    pub priority: i32,
 }

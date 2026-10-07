@@ -151,6 +151,46 @@ services:
     labels:
       - "net.unraid.docker.managed=composeman"
 
+  # Consumes finreport.transaction/.user-label/.rule/.label-request and
+  # resolves labels (docs/specs/iteration-2.md §2.3). A second, independent
+  # always-on consumer alongside the projector — it refuses to start while
+  # the projector lags (APP_labeler_max_projection_lag), so the compose
+  # ordering here doesn't need to express that dependency itself.
+  finreport-be-labeler:
+    image: ${DOCKER_REGISTRY}/finreport-be:latest
+    pull_policy: always
+    container_name: finreport-be-labeler
+    entrypoint: ["labeler"]
+    restart: always
+    depends_on:
+      finreport-be-postgres:
+        condition: service_healthy
+    environment:
+      RUST_LOG: info
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport
+      APP_kafka_brokers: kafka.lab.anydef.de:9092
+      # Non-secret knobs (§4) — provider, model and the auto-approve
+      # threshold are ordinary config, not secrets, so they live here rather
+      # than in .env.tpl. `anthropic` is picked deliberately: this is the one
+      # place the Anthropic key is actually used; everywhere else (including
+      # `just dev-demo`) keeps the zero-cost `fake` default.
+      APP_llm_provider: anthropic
+      APP_llm_model: claude-sonnet-4-5
+      # Secret — sourced from TF_VAR_anthropic_api_key in .env.tpl via
+      # terraform/variables.tf's `anthropic_api_key` and
+      # terraform/main.tf's `module "portainer_stack"` extra_env (same
+      # mechanism as POSTGRES_PASSWORD there). Resolves empty if that secret
+      # is unset, and the labeler then refuses to build an Anthropic
+      # provider (lazy validation, §4) rather than failing to start.
+      APP_anthropic_api_key: ${APP_anthropic_api_key:-}
+    networks:
+      services-lan:
+        ipv4_address: 192.168.100.37
+    volumes:
+      - /mnt/user/appdata/finreport-be:/app/data
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
 networks:
   services-lan:
     external: true

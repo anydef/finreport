@@ -195,6 +195,9 @@ impl SourceMapper for ComdirectMapper {
             origin: ORIGIN_SOURCE.to_string(),
             imported_at: input.event.imported_at,
             updated_at: input.event.imported_at,
+            // TODO(WP3): call `labeling::normalize` here once it lands (WP2)
+            // and wire the processor to recompute it on every upsert.
+            counterparty_key: None,
         })
     }
 }

@@ -1,6 +1,10 @@
 //! Mutation root (§5). `login`/`logout` call `crate::auth` (WP2's real auth
 //! core) and set/clear the session cookie via `ctx.append_http_header`,
 //! which the actix integration propagates onto the HTTP response (§4).
+//! Every other mutation here follows §2.1's publish-then-upsert: publish to
+//! Kafka first (awaiting the ack), then apply the identical upsert to the
+//! caller's own request so the fresh row reads back correctly without
+//! waiting on WP3's projector.
 
 use async_graphql::{Context, ErrorExtensions, Object, Result as GqlResult};
 use sea_orm::DatabaseConnection;
@@ -10,8 +14,14 @@ use utils::settings::Settings;
 
 use crate::auth;
 use crate::graphql::cookies::{clear_cookie_header, cookie_header};
-use crate::graphql::types::{LoginInput, Me};
+use crate::graphql::current_user::{current_user, scoped_account_ids};
+use crate::graphql::types::{
+    Category, CategoryInput, LoginInput, Me, Rule, RuleInput, RuleState, SplitPartInput,
+    Transaction,
+};
+use crate::graphql::{categories, labels, rules};
 use crate::graphql::RawSessionToken;
+use crate::kafka::producer::EventPublisher;
 
 pub struct MutationRoot;
 
@@ -67,6 +77,128 @@ impl MutationRoot {
         ctx.append_http_header("set-cookie", clear_cookie_header(settings.cookie_secure));
         Ok(true)
     }
+
+    async fn set_transaction_category(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+        category_slug: String,
+    ) -> GqlResult<Transaction> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        labels::set_transaction_category(db, publisher, &scoped_ids, transaction_id.0, category_slug).await
+    }
+
+    async fn clear_transaction_category(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+    ) -> GqlResult<Transaction> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        labels::clear_transaction_category(db, publisher, &scoped_ids, transaction_id.0).await
+    }
+
+    async fn split_transaction(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+        parts: Vec<SplitPartInput>,
+    ) -> GqlResult<Transaction> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        labels::split_transaction(db, publisher, &scoped_ids, transaction_id.0, parts).await
+    }
+
+    async fn unsplit_transaction(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+    ) -> GqlResult<Transaction> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        labels::unsplit_transaction(db, publisher, &scoped_ids, transaction_id.0).await
+    }
+
+    async fn create_category(&self, ctx: &Context<'_>, input: CategoryInput) -> GqlResult<Category> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        categories::create_category(db, publisher, input).await
+    }
+
+    async fn rename_category(
+        &self,
+        ctx: &Context<'_>,
+        id: crate::graphql::scalars::Uuid,
+        name: String,
+    ) -> GqlResult<Category> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        categories::rename_category(db, publisher, id.0, name).await
+    }
+
+    async fn archive_category(&self, ctx: &Context<'_>, id: crate::graphql::scalars::Uuid) -> GqlResult<Category> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        categories::archive_category(db, publisher, id.0).await
+    }
+
+    async fn create_rule(&self, ctx: &Context<'_>, input: RuleInput) -> GqlResult<Rule> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        rules::create_rule(db, publisher, input).await
+    }
+
+    async fn update_rule(
+        &self,
+        ctx: &Context<'_>,
+        id: crate::graphql::scalars::Uuid,
+        input: RuleInput,
+    ) -> GqlResult<Rule> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        rules::update_rule(db, publisher, id.0, input).await
+    }
+
+    async fn set_rule_state(
+        &self,
+        ctx: &Context<'_>,
+        id: crate::graphql::scalars::Uuid,
+        state: RuleState,
+    ) -> GqlResult<Rule> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        rules::set_rule_state(db, publisher, id.0, state).await
+    }
+
+    async fn reapply_rule(&self, ctx: &Context<'_>, id: crate::graphql::scalars::Uuid) -> GqlResult<i32> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        rules::reapply_rule(db, publisher, &scoped_ids, id.0).await
+    }
+}
+
+/// `None` when no broker is configured (`APP_kafka_brokers` unset, e.g.
+/// local `dev-be`) — every mutation function treats that as
+/// `KAFKA_UNAVAILABLE` rather than panicking.
+fn publisher<'a>(ctx: &'a Context<'_>) -> Option<&'a Arc<EventPublisher>> {
+    ctx.data::<Arc<EventPublisher>>().ok()
 }
 
 fn invalid_credentials() -> async_graphql::Error {

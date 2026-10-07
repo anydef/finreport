@@ -96,18 +96,22 @@ async fn replay_over_kafka_projects_the_whole_fixture_corpus() {
     let balance_count = account_balance::Entity::find().all(&conn).await.unwrap().len();
     let tx_count = transaction::Entity::find().all(&conn).await.unwrap().len();
 
-    // The fixture corpus is 57 manifest entries (49 transactions, 6
-    // balances, 2 accounts), minus the two records §2.2 says to skip rather
-    // than apply: `ACC1-MISSING-ACCOUNT-0001` (full headers, no
-    // `source_account_id`) and `ACC1-PHASE1-0001` (a headerless phase-1
-    // record — `source`/`origin`/`schema_version` all take their §2.2
-    // defaults, but `source_account_id` has no default, so §2.2 is explicit
-    // that it is "skip + log" there too) — so transactions land two short of
-    // the manifest's transaction count, and every balance/account record
-    // applies cleanly.
+    // The fixture corpus has 56 transaction manifest entries (49 from
+    // iteration 1, plus 7 §7 labeling-demo transactions added in iteration 2:
+    // ACC1-LABEL-FITNESS-{01,02,03}, ACC1-LABEL-AMAZON-01, ACC1-LABEL-ACME-01,
+    // ACC1-LABEL-OVERRIDDEN-01, ACC1-LABEL-SPLIT-01), 6 balances and 2
+    // accounts, minus the two records §2.2 says to skip rather than apply:
+    // `ACC1-MISSING-ACCOUNT-0001` (full headers, no `source_account_id`) and
+    // `ACC1-PHASE1-0001` (a headerless phase-1 record — `source`/`origin`/
+    // `schema_version` all take their §2.2 defaults, but `source_account_id`
+    // has no default, so §2.2 is explicit that it is "skip + log" there too)
+    // — so transactions land two short of the manifest's transaction count,
+    // and every balance/account record applies cleanly. The two new
+    // `finreport.user-label` fixture entries are not ingest-topic records and
+    // do not affect this count.
     assert_eq!(balance_count, 6, "every balance fixture must project");
     assert_eq!(
-        tx_count, 47,
+        tx_count, 54,
         "every transaction fixture but the two source_account_id-less poison records must project"
     );
     assert!(

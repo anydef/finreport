@@ -142,6 +142,63 @@ type CashflowTotals {
 	transactionCount: Int!
 }
 
+type Category {
+	id: UUID!
+	slug: String!
+	name: String!
+	kind: CategoryKind!
+	parentId: UUID
+	depth: Int!
+	archived: Boolean!
+	"""
+	`"seed"` | `"user"` (§3).
+	"""
+	origin: String!
+}
+
+type CategoryBreakdown {
+	rows: [CategoryBreakdownRow!]!
+	"""
+	Label missing entirely.
+	"""
+	uncategorized: CategoryBreakdownRow
+	"""
+	Held; counted separately, never as spend.
+	"""
+	needsReview: CategoryBreakdownRow
+	currency: String!
+}
+
+type CategoryBreakdownRow {
+	"""
+	The roll-up level that was requested.
+	"""
+	category: Category!
+	"""
+	Positive magnitude.
+	"""
+	amount: Decimal!
+	transactionCount: Int!
+	"""
+	Of the row's `kind` total, `0..1`.
+	"""
+	share: Float!
+}
+
+input CategoryInput {
+	slug: String!
+	name: String!
+	kind: CategoryKind!
+	parentSlug: String
+}
+
+enum CategoryKind {
+	INCOME
+	EXPENSE
+	TRANSFER
+	SAVING
+}
+
 scalar Date
 
 scalar DateTime
@@ -159,6 +216,23 @@ enum Granularity {
 	MONTH
 }
 
+"""
+A scalar that can represent any JSON value.
+"""
+scalar JSON
+
+enum LabelSource {
+	USER
+	RULE
+	LLM_CACHE
+	LLM
+}
+
+enum LabelStatus {
+	RESOLVED
+	NEEDS_REVIEW
+}
+
 input LoginInput {
 	username: String!
 	password: String!
@@ -171,8 +245,71 @@ type Me {
 }
 
 type Mutation {
+	"""
+	`login`/`logout` are the only unauthenticated mutations (§4/§5). A
+	bad username and a bad password return the same
+	`extensions.code = "INVALID_CREDENTIALS"` with the same message — no
+	user enumeration.
+	"""
 	login(input: LoginInput!): Me!
 	logout: Boolean!
+	"""
+	TODO(WP4): publish a `user-label` record setting the category,
+	publish-then-upsert (§2.1), return the fresh row.
+	"""
+	setTransactionCategory(transactionId: UUID!, categorySlug: String!): Transaction!
+	"""
+	TODO(WP4): publish a `user-label` tombstone/clear for this
+	transaction (§2.6).
+	"""
+	clearTransactionCategory(transactionId: UUID!): Transaction!
+	"""
+	TODO(WP4): publish a `user-label` split record; validate the sum
+	against the transaction's amount (`extensions.code =
+	"SPLIT_SUM_MISMATCH"` on mismatch, §5).
+	"""
+	splitTransaction(transactionId: UUID!, parts: [SplitPartInput!]!): Transaction!
+	"""
+	TODO(WP4): publish a `user-label` record clearing the split (§2.6).
+	"""
+	unsplitTransaction(transactionId: UUID!): Transaction!
+	"""
+	TODO(WP4): validate depth/slug-shape/parent-kind/parent-archived
+	(§5), publish a `category` record, return the fresh row.
+	"""
+	createCategory(input: CategoryInput!): Category!
+	"""
+	TODO(WP4): publish a renamed `category` record; `slug` is immutable
+	(§3), only `name` changes.
+	"""
+	renameCategory(id: UUID!, name: String!): Category!
+	"""
+	TODO(WP4): publish a `category` record with `archived = true`;
+	existing labels keep rendering it (§5).
+	"""
+	archiveCategory(id: UUID!): Category!
+	"""
+	TODO(WP4): publish a new user-origin `rule` record (§2.7).
+	"""
+	createRule(input: RuleInput!): Rule!
+	"""
+	TODO(WP4): publish an updated `rule` record; marks `userTouched`
+	(§2.8) so the learner never overwrites it.
+	"""
+	updateRule(id: UUID!, input: RuleInput!): Rule!
+	"""
+	TODO(WP4): publish a `rule` record with the new `state`; a revoke
+	makes the labeler re-resolve every transaction it had labelled
+	(§2.3/§2.7).
+	"""
+	setRuleState(id: UUID!, state: RuleState!): Rule!
+	"""
+	TODO(WP4): publish one `label-request` keyed `reapply:<rule-id>` and
+	return the number of transactions it will cover (§2.3/§5) —
+	re-resolution is asynchronous, this mutation never calls the
+	labeler directly.
+	"""
+	reapplyRule(id: UUID!): Int!
 }
 
 input PageInput {
@@ -185,14 +322,95 @@ input PageInput {
 
 type Query {
 	"""
-	Unauthenticated field (§4/§5): no session support exists yet, so this
-	always returns `null` rather than guessing at a user.
+	Unauthenticated field (§4/§5): returns the caller's own identity, or
+	`null` when there is no valid session. `AuthenticatedUser` (§4) does
+	not carry `display_name` — it's loaded here with one extra query,
+	the only place in the schema that needs it.
 	"""
 	me: Me
 	accounts: [Account!]!
 	transactions(filter: TransactionFilter, page: PageInput): TransactionPage!
 	cashflowSummary(filter: TransactionFilter!, granularity: Granularity!): CashflowSummary!
 	cashflowGraph(filter: TransactionFilter!, grouping: CashflowGraphInput): CashflowGraph!
+	"""
+	TODO(WP4): list categories from the `category` projection (§3),
+	filtered to non-archived unless `includeArchived`.
+	"""
+	categories(includeArchived: Boolean! = false): [Category!]!
+	"""
+	TODO(WP4): roll up `transaction_label`/`transaction_split` by
+	category to `level`, honouring §5's split/transfer/share semantics.
+	"""
+	categoryBreakdown(filter: TransactionFilter!, level: Int! = 1, kind: CategoryKind): CategoryBreakdown!
+	"""
+	TODO(WP4): list rules from the `rule` projection (§2.7), optionally
+	filtered by `state`.
+	"""
+	rules(state: RuleState): [Rule!]!
+	"""
+	TODO(WP4): rules auto-approved recently (§2.8), newest first.
+	"""
+	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
+	"""
+	TODO(WP4): `status = NEEDS_REVIEW` transactions + `state = IN_REVIEW`
+	rules (§5).
+	"""
+	reviewQueue(page: PageInput): ReviewQueue!
+}
+
+type ReviewQueue {
+	"""
+	`status = NEEDS_REVIEW`.
+	"""
+	transactions: [Transaction!]!
+	"""
+	`state = IN_REVIEW`.
+	"""
+	pendingRules: [Rule!]!
+	totalCount: Int!
+}
+
+enum ReviewReason {
+	AMBIGUOUS
+	NEW_CATEGORY
+}
+
+type Rule {
+	id: UUID!
+	name: String!
+	category: Category!
+	conditions: JSON!
+	priority: Int!
+	state: RuleState!
+	origin: RuleOrigin!
+	autoApproved: Boolean!
+	confidence: Float
+	evidenceCount: Int!
+	createdAt: DateTime!
+}
+
+input RuleInput {
+	name: String!
+	categorySlug: String!
+	conditions: JSON!
+	priority: Int! = 0
+}
+
+enum RuleOrigin {
+	USER
+	LEARNED
+}
+
+enum RuleState {
+	ACTIVE
+	IN_REVIEW
+	REVOKED
+	REJECTED
+}
+
+input SplitPartInput {
+	amount: Decimal!
+	categorySlug: String!
 }
 
 type Transaction {
@@ -209,6 +427,8 @@ type Transaction {
 	counterpartyIban: String
 	description: String
 	transactionType: String
+	label: TransactionLabel
+	splits: [TransactionSplit!]!
 }
 
 input TransactionFilter {
@@ -240,6 +460,30 @@ input TransactionFilter {
 	`false` selects the "Unknown" node's rows.
 	"""
 	hasCounterparty: Boolean
+	"""
+	Iteration 2 (§5): OR-ed; includes descendants of each slug.
+	"""
+	categorySlugs: [String!]
+	"""
+	`true` ⇒ no label at all (distinct from `needsReview`).
+	"""
+	uncategorized: Boolean
+	needsReview: Boolean
+	labelSources: [LabelSource!]
+}
+
+type TransactionLabel {
+	"""
+	`null` while `status = NEEDS_REVIEW`.
+	"""
+	category: Category
+	source: LabelSource!
+	rule: Rule
+	confidence: Float
+	status: LabelStatus!
+	reviewReason: ReviewReason
+	proposedCategoryPath: String
+	reasoning: String
 }
 
 type TransactionPage {
@@ -247,6 +491,12 @@ type TransactionPage {
 	totalCount: Int!
 	limit: Int!
 	offset: Int!
+}
+
+type TransactionSplit {
+	index: Int!
+	amount: Decimal!
+	category: Category!
 }
 
 scalar UUID

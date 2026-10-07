@@ -9,7 +9,10 @@
 
 	const tabs = [
 		{ label: 'Dashboard', href: '/' },
-		{ label: 'Transactions', href: '/transactions' }
+		{ label: 'Transactions', href: '/transactions' },
+		// §10: added once here so WP5 (transactions) and WP6 (admin) never both
+		// edit this layout. Route content under /admin/** is WP6's.
+		{ label: 'Admin', href: '/admin' }
 	];
 
 	async function logout() {

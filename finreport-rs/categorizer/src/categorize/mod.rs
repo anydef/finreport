@@ -1,30 +1,14 @@
-use dotenv::dotenv;
+//! Compatibility shim, **not** part of the §2.9 provider rewrite.
+//!
+//! `webapp/src/db/mod.rs` (the legacy sqlite `Persistence`, frozen per the
+//! iteration-2 shared-file protocol) is the one remaining caller of these two
+//! plain data structs. The ad-hoc `dotenv`/`env_logger`/`config` settings
+//! loader that used to live alongside them is gone — iteration-2 providers
+//! read `utils::settings::Settings` instead (§2.9) — but deleting the
+//! structs too would break that frozen file for a reason unrelated to this
+//! work package, so they stay here, trimmed to exactly what it uses.
 use serde::Deserialize;
-use std::error::Error;
 use std::fmt::{Display, Formatter};
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct Settings {
-    pub openai_key: String,
-}
-
-pub async fn settings() -> Result<Settings, Box<dyn Error>> {
-    dotenv().ok();
-    env_logger::init();
-
-    let settings = config::Config::builder()
-        .add_source(
-            config::Environment::with_prefix("APP")
-                .prefix_separator("_")
-                .separator("__"),
-        )
-        .build()?;
-    let client_settings = settings
-        .try_deserialize::<Settings>()
-        .expect("Could not load application settings");
-
-    Ok(client_settings)
-}
 
 #[derive(Deserialize, Debug, Clone)]
 pub struct Category {

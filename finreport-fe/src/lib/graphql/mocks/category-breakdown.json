@@ -1,0 +1,54 @@
+{
+  "query": "query CategoryBreakdown($filter: TransactionFilter!, $level: Int, $kind: CategoryKind) {\n  categoryBreakdown(filter: $filter, level: $level, kind: $kind) {\n    rows {\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      amount\n      transactionCount\n      share\n    }\n    uncategorized {\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      amount\n      transactionCount\n      share\n    }\n    needsReview {\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      amount\n      transactionCount\n      share\n    }\n    currency\n  }\n}",
+  "data": {
+    "categoryBreakdown": {
+      "rows": [
+        {
+          "category": {
+            "id": "7f5a7e2e-7d0a-5f3d-9c8a-2f1b6a0c4d11",
+            "slug": "food",
+            "name": "Food",
+            "kind": "EXPENSE"
+          },
+          "amount": "320.50",
+          "transactionCount": 12,
+          "share": 0.42
+        },
+        {
+          "category": {
+            "id": "9a2c3d4e-5f60-5718-8293-a4b5c6d7e8f9",
+            "slug": "transportation",
+            "name": "Transportation",
+            "kind": "EXPENSE"
+          },
+          "amount": "180.00",
+          "transactionCount": 5,
+          "share": 0.23
+        }
+      ],
+      "uncategorized": {
+        "category": {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "slug": "uncategorized",
+          "name": "Uncategorized",
+          "kind": "EXPENSE"
+        },
+        "amount": "45.00",
+        "transactionCount": 2,
+        "share": 0.06
+      },
+      "needsReview": {
+        "category": {
+          "id": "00000000-0000-0000-0000-000000000000",
+          "slug": "needs-review",
+          "name": "Needs Review",
+          "kind": "EXPENSE"
+        },
+        "amount": "29.90",
+        "transactionCount": 1,
+        "share": 0.04
+      },
+      "currency": "EUR"
+    }
+  }
+}

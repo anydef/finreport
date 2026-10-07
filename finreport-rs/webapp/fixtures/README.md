@@ -18,6 +18,9 @@ the ingest topics, and the basis the frontend's GraphQL mocks
   the shape of the renamed `legacy_account_transactions` columns (§2.8): this
   is our own JSON, not a bank payload, because there is no raw payload to
   forward for pre-dual-write history.
+- `payloads/labels/<key>.json` — our own JSON (not a bank payload) matching
+  `webapp::kafka::labeling::UserLabelRecord` (§2.6): the "already overridden"
+  and "split" iteration-2 demo cases below.
 - `manifest.json` — the ordered list of Kafka records `fixture-replay`
   publishes: `{ topic, key, payload, headers, note }`. `headers` only lists
   headers that are actually set on that record — a key absent from `headers`
@@ -56,6 +59,35 @@ in the `Unknown` node (never dropped — §5).
 - **Legacy-backfill reconstruction** (`LEGACY-0001`): `origin=legacy-backfill`,
   value is the reconstructed JSON from `payloads/legacy/`, not bank bytes —
   `is_bank_verbatim` must be `false` for this record.
+
+## Labeling demo cases (§7, iteration 2)
+
+Five counterparties on `acc-1`, keyed to exactly match `categorizer`'s
+`FakeProvider` keyword/ambiguous/proposed-path tables (§2.9) once
+`labeling::normalize` lowercases a clean `holderName` with no legal-form
+suffix to strip:
+
+- **Learning threshold** (`ACC1-LABEL-FITNESS-{01,02,03}`, `Fitness First`,
+  3 occurrences): `APP_rule_learn_min_observations` defaults to 3, so this is
+  the minimum repeat count that lets the learner (§2.8) propose a rule for
+  `personal.gym` once the fake provider has labelled all three at its
+  committed `0.88` confidence (below the `0.9` auto-approve threshold ⇒
+  `state=in_review`, surfaced in the review queue).
+- **Ambiguous** (`ACC1-LABEL-AMAZON-01`, `Amazon`): the fake provider's
+  `AMBIGUOUS_KEYS` always resolves `review_reason=ambiguous`.
+- **New-category proposal** (`ACC1-LABEL-ACME-01`, `Acme Co-Working`): the
+  fake provider's `PROPOSED_PATH_KEYS` proposes `housing.coworking`, a slug
+  deliberately absent from `prompts/taxonomy.json` — proposals are never
+  auto-created (§2.5).
+- **Already overridden** (`ACC1-LABEL-OVERRIDDEN-01`, `Imbiss Ecke` +
+  `payloads/labels/acc1-label-overridden-01.json` on `finreport.user-label`):
+  a user override published *before* the labeler ever sees the transaction,
+  so the resolution chain's step 2 (§2.5) must leave it alone regardless of
+  what the fake provider would otherwise say about `Imbiss Ecke`.
+- **Split** (`ACC1-LABEL-SPLIT-01`, `Einkaufszentrum Mitte`, `-60.00` +
+  `payloads/labels/acc1-label-split-01.json`): two parts (`-40.00`
+  `household_items_supplies.cleaning`, `-20.00` `personal.cosmetics`) summing
+  exactly to the transaction amount, per §2.6's no-tolerance rule.
 
 ## Regenerating
 

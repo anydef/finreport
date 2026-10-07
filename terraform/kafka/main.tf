@@ -16,7 +16,7 @@
 # lifecycle block first, deliberately, in a reviewed commit.
 #
 # docker-compose.local.yml's finreport-redpanda-init service recreates these
-# same four topics (name, partitions, cleanup.policy/retention.ms) against
+# same topics (name, partitions, cleanup.policy/retention.ms) against
 # the local single-node Redpanda for `just dev-up`. It is not generated from
 # this module — Terraform only ever touches the central broker — so a
 # change here (new topic, different partitions/cleanup policy) needs the
@@ -98,5 +98,111 @@ resource "kafka_topic" "import_watermark" {
 
   lifecycle {
     prevent_destroy = true
+  }
+}
+
+# --- Iteration 2: labeling pipeline topics (docs/specs/iteration-2.md §2.2) ---
+# These carry our own JSON, not a bank's raw payload, versioned by a
+# schema_version field in both the payload and the iteration-1 envelope
+# headers. Keyed by the transaction's own (source, external_id) identity
+# (not the projected UUID), so they read with `rpk` without a Postgres
+# lookup and survive a rebuild that hasn't run yet. Same partitions/RF/
+# prevent_destroy posture as the ingest topics above, except label-request,
+# which is a work queue, not state.
+
+# Labeler output: one label per transaction, keyed `<source>:<external_id>`.
+# Compacted — only the current label matters, never its history.
+resource "kafka_topic" "transaction_label" {
+  name               = "finreport.transaction-label"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# One LLM answer per fingerprint, independent of which transaction asked.
+# Deliberately its own topic rather than derived from transaction-label (see
+# §2.2): that topic compacts per transaction, so a rule or override replacing
+# an LLM label would delete the only copy of the cached answer.
+resource "kafka_topic" "llm_cache" {
+  name               = "finreport.llm-cache"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Human overrides + splits, keyed `<source>:<external_id>`. Compacted: only
+# the current override per transaction matters.
+resource "kafka_topic" "user_label" {
+  name               = "finreport.user-label"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Rule state (active, learned, revoked, ...), keyed by rule UUID. Compacted.
+resource "kafka_topic" "rule" {
+  name               = "finreport.rule"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Category tree nodes, keyed by category UUID. Compacted; categories are
+# archived, never deleted, so a tombstone here is not expected in practice.
+resource "kafka_topic" "category" {
+  name               = "finreport.category"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Re-resolution work queue (`<source>:<external_id>` or `reapply:<rule-id>`),
+# not state: a request is consumed once and has no lasting meaning after
+# that, so unlike every topic above it is time-retained (7 days) rather than
+# compacted, and NOT prevent_destroy — it is safe and expected to recreate
+# this one if its shape ever needs to change.
+resource "kafka_topic" "label_request" {
+  name               = "finreport.label-request"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "delete"
+    "retention.ms"   = "604800000"
   }
 }

@@ -139,6 +139,17 @@ variable "app_account_1_pin" {
   default     = ""
 }
 
+# Anthropic API key for the labeler (docs/specs/iteration-2.md §4). Optional:
+# the default provider is `fake`, which never calls a paid API, so a blank
+# value here just means `APP_llm_provider=anthropic` isn't usable yet — not a
+# broken deploy. Sourced from TF_VAR_anthropic_api_key in .env.tpl.
+variable "anthropic_api_key" {
+  description = "Anthropic API key for the labeler (optional; required only when APP_llm_provider=anthropic)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "kafka_bootstrap_servers" {
   description = "Central homelab Kafka bootstrap servers (not deployed by this repo)"
   type        = list(string)

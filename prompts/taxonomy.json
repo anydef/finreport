@@ -1,0 +1,444 @@
+[
+  {
+    "slug": "housing",
+    "name": "Housing",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "housing.mortgage",
+        "name": "Mortgage",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "housing.property_taxes",
+        "name": "Property Taxes",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "housing.household_repairs",
+        "name": "Household Repairs",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "housing.home_insurance",
+        "name": "Home Insurance",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "transportation",
+    "name": "Transportation",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "transportation.kfz_steuer",
+        "name": "Kfz-Steuer",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "transportation.gas",
+        "name": "Gas",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "transportation.tires",
+        "name": "Tires",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "transportation.maintenance",
+        "name": "Maintenance",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "transportation.parking",
+        "name": "Parking",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "transportation.repairs",
+        "name": "Repairs",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "transportation.car_insurance",
+        "name": "Car Insurance",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "food",
+    "name": "Food",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "food.groceries",
+        "name": "Groceries",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "food.restaurants",
+        "name": "Restaurants",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "utilities",
+    "name": "Utilities",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "utilities.electricity",
+        "name": "Electricity",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "utilities.water",
+        "name": "Water",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "utilities.garbage",
+        "name": "Garbage",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "utilities.phones",
+        "name": "Phones",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "utilities.cable",
+        "name": "Cable",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "utilities.internet",
+        "name": "Internet",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "utilities.rundfunk",
+        "name": "Rundfunkbeitrag",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "clothing",
+    "name": "Clothing",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "clothing.clothing",
+        "name": "Clothing",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "medical",
+    "name": "Medical",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "medical.health_care",
+        "name": "Health Care",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "medical.medications",
+        "name": "Medications",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "insurance",
+    "name": "Insurance",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "insurance.dentist_insurance",
+        "name": "Dentist Insurance",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "insurance.auto_insurance",
+        "name": "Auto Insurance",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "insurance.life_insurance",
+        "name": "Life Insurance",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "household_items_supplies",
+    "name": "Household Items Supplies",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "household_items_supplies.toiletries",
+        "name": "Toiletries",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "household_items_supplies.cleaning",
+        "name": "Cleaning",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "household_items_supplies.tools",
+        "name": "Tools",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "personal",
+    "name": "Personal",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "personal.gym",
+        "name": "Gym",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "personal.haircuts",
+        "name": "Haircuts",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "personal.salon",
+        "name": "Salon",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "personal.cosmetics",
+        "name": "Cosmetics",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "debt",
+    "name": "Debt",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "debt.credit_card",
+        "name": "Credit Card",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "debt.other",
+        "name": "Other Debt",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "education",
+    "name": "Education",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "education.courses",
+        "name": "Courses",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "education.materials_books",
+        "name": "Materials Books",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "savings",
+    "name": "Savings",
+    "kind": "saving",
+    "children": [
+      {
+        "slug": "savings.emergency_fund",
+        "name": "Emergency Fund",
+        "kind": "saving",
+        "children": []
+      },
+      {
+        "slug": "savings.stocks_etfs",
+        "name": "Stocks Etfs",
+        "kind": "saving",
+        "children": []
+      },
+      {
+        "slug": "savings.child_savings",
+        "name": "Child Savings",
+        "kind": "saving",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "gifts_donations",
+    "name": "Gifts Donations",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "gifts_donations.birthday",
+        "name": "Birthday",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "gifts_donations.holiday",
+        "name": "Holiday",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "gifts_donations.charity",
+        "name": "Charity",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "gifts_donations.special_occasion",
+        "name": "Special Occasion",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "entertainment",
+    "name": "Entertainment",
+    "kind": "expense",
+    "children": [
+      {
+        "slug": "entertainment.games",
+        "name": "Games",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "entertainment.movies_concerts",
+        "name": "Movies Concerts",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "entertainment.vacations",
+        "name": "Vacations",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "entertainment.library",
+        "name": "Library",
+        "kind": "expense",
+        "children": []
+      },
+      {
+        "slug": "entertainment.subscriptions",
+        "name": "Subscriptions",
+        "kind": "expense",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "income",
+    "name": "Income",
+    "kind": "income",
+    "children": [
+      {
+        "slug": "income.salary",
+        "name": "Salary",
+        "kind": "income",
+        "children": []
+      },
+      {
+        "slug": "income.freelance",
+        "name": "Freelance",
+        "kind": "income",
+        "children": []
+      },
+      {
+        "slug": "income.interest",
+        "name": "Interest",
+        "kind": "income",
+        "children": []
+      },
+      {
+        "slug": "income.other",
+        "name": "Other",
+        "kind": "income",
+        "children": []
+      }
+    ]
+  },
+  {
+    "slug": "transfer",
+    "name": "Transfer",
+    "kind": "transfer",
+    "children": [
+      {
+        "slug": "transfer.internal",
+        "name": "Internal",
+        "kind": "transfer",
+        "children": []
+      },
+      {
+        "slug": "transfer.credit_card_payment",
+        "name": "Credit Card Payment",
+        "kind": "transfer",
+        "children": []
+      }
+    ]
+  }
+]

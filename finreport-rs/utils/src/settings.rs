@@ -107,6 +107,53 @@ pub struct Settings {
     /// `user-admin link`.
     pub projector_default_owner: Option<String>,
 
+    // --- Iteration 2 §4: LLM labeling configuration -------------------------
+    // Validation is lazy, at the provider factory: `webapp` and the
+    // projector never build a provider, so a missing key must not break
+    // their startup.
+    /// Which `LabelProvider` to construct (§2.9). Defaults to `fake` so
+    /// nothing ever calls a paid API without being told to.
+    #[serde(default = "default_llm_provider")]
+    pub llm_provider: String,
+    /// Required iff `llm_provider == "anthropic"`.
+    pub anthropic_api_key: Option<SecretString>,
+    /// Optional bearer token for an OpenAI-compatible endpoint.
+    pub llm_api_key: Option<SecretString>,
+    /// Ollama / OpenAI-compatible base URL; each provider has its own
+    /// built-in default (§2.9), so this is `None` unless overridden.
+    pub llm_base_url: Option<String>,
+    /// Model name, e.g. `claude-sonnet-4-5` or `llama3.1`; per-provider
+    /// default otherwise (§2.9).
+    pub llm_model: Option<String>,
+    /// Per-request timeout for a real provider call (§2.9).
+    #[serde(default = "default_llm_timeout_ms")]
+    pub llm_timeout_ms: u64,
+    /// Below this confidence an LLM answer becomes `review_reason=ambiguous`
+    /// (§2.5).
+    #[serde(default = "default_llm_min_confidence")]
+    pub llm_min_confidence: f32,
+    /// Cost guard: bounds LLM calls per labeler process run (§2.3).
+    #[serde(default = "default_llm_max_requests_per_run")]
+    pub llm_max_requests_per_run: u32,
+    /// Part of the cache fingerprint (§2.5); bumping it invalidates the
+    /// cache on purpose.
+    #[serde(default = "default_prompt_version")]
+    pub prompt_version: String,
+    /// Minimum same-category observations before a `counterparty_key`
+    /// becomes a learned-rule candidate (§2.8).
+    #[serde(default = "default_rule_learn_min_observations")]
+    pub rule_learn_min_observations: u32,
+    /// Confidence threshold (inclusive) above which a learned rule is
+    /// auto-approved rather than surfaced in the review queue (§2.8).
+    #[serde(default = "default_rule_auto_approve_threshold")]
+    pub rule_auto_approve_threshold: f32,
+    /// Startup guard (§2.3): the labeler refuses to start while
+    /// `projection_offset` for the ingest topics plus `transaction-label` and
+    /// `llm-cache` trails the broker's high watermark by more than this many
+    /// records.
+    #[serde(default)]
+    pub labeler_max_projection_lag: u64,
+
     /// Comdirect logins keyed by the segment in `APP_accounts__<key>__*`.
     /// A `BTreeMap` rather than a `Vec` because config-rs turns numbered env
     /// segments into a table keyed by `"0"`, `"1"`, ... — sorting by key keeps
@@ -452,6 +499,43 @@ fn default_cookie_secure() -> bool {
 /// `APP_session_ttl_days` default (§4).
 fn default_session_ttl_days() -> i64 {
     30
+}
+
+/// `APP_llm_provider` default (§2.9, §4): nothing calls a paid API without
+/// being told to.
+fn default_llm_provider() -> String {
+    "fake".to_string()
+}
+
+/// `APP_llm_timeout_ms` default (§4).
+fn default_llm_timeout_ms() -> u64 {
+    20_000
+}
+
+/// `APP_llm_min_confidence` default (§2.5, §4).
+fn default_llm_min_confidence() -> f32 {
+    0.5
+}
+
+/// `APP_llm_max_requests_per_run` default (§2.3, §4).
+fn default_llm_max_requests_per_run() -> u32 {
+    200
+}
+
+/// `APP_prompt_version` default (§2.9, §4).
+fn default_prompt_version() -> String {
+    "2".to_string()
+}
+
+/// `APP_rule_learn_min_observations` default (§2.8, §4).
+fn default_rule_learn_min_observations() -> u32 {
+    3
+}
+
+/// `APP_rule_auto_approve_threshold` default (§2.8, §4), inclusive at the
+/// boundary.
+fn default_rule_auto_approve_threshold() -> f32 {
+    0.9
 }
 
 fn env_source() -> Environment {

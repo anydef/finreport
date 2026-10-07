@@ -7,6 +7,10 @@ mod m20260718_000001_idx_account_transactions_account_booking;
 mod m20260820_000001_account_name;
 pub mod m20261006_000001_source_agnostic_read_model;
 mod m20261006_000002_users;
+mod m20261101_000001_categories;
+mod m20261101_000002_labels;
+mod m20261101_000003_rules;
+mod m20261101_000004_counterparty_key;
 
 pub struct Migrator;
 
@@ -24,6 +28,14 @@ impl MigratorTrait for Migrator {
             Box::new(m20261006_000001_source_agnostic_read_model::Migration),
             // Depends on the new `account` table above (user_account.account_id).
             Box::new(m20261006_000002_users::Migration),
+            // Iteration 2 §3: categories, labels, rules + the derived
+            // counterparty_key column. Registered in dependency order even
+            // though none of these carry foreign keys (§3 "No foreign keys
+            // on these five tables").
+            Box::new(m20261101_000001_categories::Migration),
+            Box::new(m20261101_000002_labels::Migration),
+            Box::new(m20261101_000003_rules::Migration),
+            Box::new(m20261101_000004_counterparty_key::Migration),
         ]
     }
 }

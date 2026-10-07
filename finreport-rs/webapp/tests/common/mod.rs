@@ -9,15 +9,17 @@
 #![allow(dead_code)]
 
 use chrono::Utc;
-use entity::entities::{account, app_user, transaction, user_account};
+use entity::entities::{account, app_user, category, transaction, transaction_label, user_account};
 use rust_decimal::Decimal;
-use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
 use secrecy::SecretString;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use uuid::Uuid;
 use webapp::auth;
-use webapp::db::seaql;
+
+#[path = "../support/migrate.rs"]
+mod migrate;
 
 const TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/finreport_wp4";
 
@@ -25,14 +27,23 @@ const TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/fi
 /// `sqlx`'s pool ties its background tasks to the Tokio runtime it was
 /// created on, and each `#[tokio::test]` spins up its own runtime, so a
 /// shared pool intermittently hits `ConnectionAcquire(Timeout)` once an
-/// earlier test's runtime has shut down. `Migrator::up` is a fast no-op
-/// once the migrations table is current, so paying it per test is cheap.
+/// earlier test's runtime has shut down.
+///
+/// Migrations run through [`migrate::run_migrations_once`] (§9.2), not
+/// `webapp::db::seaql::init_db` — every test in this binary targets the
+/// same `finreport-wp4-pg` container, and `init_db` ran `Migrator::up`
+/// unconditionally on every call, which raced `sea-orm-migration`'s tracking
+/// table the moment two `#[tokio::test]`s ran concurrently. Memoizing by URL
+/// means only the first caller actually migrates; everyone else awaits that
+/// result.
 pub async fn db() -> Arc<DatabaseConnection> {
-    Arc::new(
-        seaql::init_db(TEST_DATABASE_URL)
-            .await
-            .expect("connect to finreport-wp4-pg on 127.0.0.1:55435 — is the container up?"),
-    )
+    let connection = Database::connect(TEST_DATABASE_URL)
+        .await
+        .expect("connect to finreport-wp4-pg on 127.0.0.1:55435 — is the container up?");
+    migrate::run_migrations_once(TEST_DATABASE_URL, &connection)
+        .await
+        .expect("run migrations against finreport-wp4-pg");
+    Arc::new(connection)
 }
 
 pub fn dummy_settings() -> Arc<utils::settings::Settings> {
@@ -46,6 +57,18 @@ pub fn dummy_settings() -> Arc<utils::settings::Settings> {
         allowed_origins: "http://localhost:5173".to_string(),
         session_ttl_days: 30,
         projector_default_owner: None,
+        llm_provider: "fake".to_string(),
+        anthropic_api_key: None,
+        llm_api_key: None,
+        llm_base_url: None,
+        llm_model: None,
+        llm_timeout_ms: 20_000,
+        llm_min_confidence: 0.5,
+        llm_max_requests_per_run: 200,
+        prompt_version: "2".to_string(),
+        rule_learn_min_observations: 3,
+        rule_auto_approve_threshold: 0.9,
+        labeler_max_projection_lag: 0,
         accounts: BTreeMap::new(),
         account_name: None,
         client_id: None,
@@ -149,9 +172,75 @@ pub async fn seed_transaction(
         origin: Set("test".to_string()),
         imported_at: Set(Utc::now().into()),
         updated_at: Set(Utc::now().into()),
+        counterparty_key: Set(None),
     }
     .insert(db)
     .await
     .expect("insert transaction");
     tx_id
+}
+
+/// Inserts one root-level (no `parent_id`) `category` row with
+/// `depth = 1`, `origin = "seed"`, un-archived. `slug_prefix` is suffixed
+/// with a fresh random id (like [`seed_user`]'s username) so reruns against
+/// a not-yet-cleaned-up database don't collide on `category.slug`'s unique
+/// index; returns the actual stored slug alongside the id.
+pub async fn seed_category(
+    db: &DatabaseConnection,
+    slug_prefix: &str,
+    name: &str,
+    kind: &str,
+) -> (Uuid, String) {
+    let id = Uuid::new_v4();
+    let slug = format!("{slug_prefix}_{}", id.simple());
+    category::ActiveModel {
+        id: Set(id),
+        slug: Set(slug.clone()),
+        parent_id: Set(None),
+        name: Set(name.to_string()),
+        kind: Set(kind.to_string()),
+        depth: Set(1),
+        sort_order: Set(0),
+        archived: Set(false),
+        origin: Set("seed".to_string()),
+        owner_user_id: Set(None),
+        revision: Set(Utc::now().into()),
+    }
+    .insert(db)
+    .await
+    .expect("insert category");
+    (id, slug)
+}
+
+/// Inserts a `transaction_label` row directly, as if WP3's projector had
+/// already applied a `transaction-label` event for it (§3) — the WP3
+/// projections this module reads from aren't implemented on this branch,
+/// so tests seed them directly per the task's instructions.
+pub async fn seed_transaction_label(
+    db: &DatabaseConnection,
+    transaction_id: Uuid,
+    category_id: Option<Uuid>,
+    label_source: &str,
+    status: &str,
+) -> Uuid {
+    transaction_label::ActiveModel {
+        transaction_id: Set(transaction_id),
+        category_id: Set(category_id),
+        label_source: Set(label_source.to_string()),
+        rule_id: Set(None),
+        confidence: Set(None),
+        status: Set(status.to_string()),
+        review_reason: Set(None),
+        proposed_category_path: Set(None),
+        provider: Set(None),
+        model: Set(None),
+        prompt_version: Set(None),
+        fingerprint: Set(None),
+        reasoning: Set(None),
+        labeled_at: Set(Utc::now().into()),
+    }
+    .insert(db)
+    .await
+    .expect("insert transaction_label");
+    transaction_id
 }

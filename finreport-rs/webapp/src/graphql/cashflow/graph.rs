@@ -11,23 +11,39 @@ use uuid::Uuid;
 use crate::graphql::scalars::Decimal as GqlDecimal;
 use crate::graphql::types::{CashflowDimension, CashflowLink, CashflowNode, CashflowNodeKind};
 
-/// The only `dimensions` iteration 1 accepts; `CATEGORY`/`TAG` are reserved
-/// but rejected (§5).
+/// The only `dimensions` iteration 1 accepts.
 pub const SUPPORTED_DIMENSIONS: [CashflowDimension; 3] = [
     CashflowDimension::IncomeSource,
     CashflowDimension::Account,
     CashflowDimension::Outcome,
 ];
 
+/// Iteration 2 (§5) addition: the outcome side grouped by resolved category
+/// instead of counterparty. `TAG` stays rejected either way.
+pub const SUPPORTED_DIMENSIONS_CATEGORY: [CashflowDimension; 3] = [
+    CashflowDimension::IncomeSource,
+    CashflowDimension::Account,
+    CashflowDimension::Category,
+];
+
 pub fn validate_dimensions(dimensions: &[CashflowDimension]) -> async_graphql::Result<()> {
-    if dimensions == SUPPORTED_DIMENSIONS.as_slice() {
+    if dimensions == SUPPORTED_DIMENSIONS.as_slice()
+        || dimensions == SUPPORTED_DIMENSIONS_CATEGORY.as_slice()
+    {
         Ok(())
     } else {
         Err(
-            async_graphql::Error::new("cashflowGraph: only [INCOME_SOURCE, ACCOUNT, OUTCOME] is supported in this iteration")
+            async_graphql::Error::new("cashflowGraph: only [INCOME_SOURCE, ACCOUNT, OUTCOME] or [INCOME_SOURCE, ACCOUNT, CATEGORY] is supported in this iteration")
                 .extend_with(|_, e| e.set("code", "UNSUPPORTED_DIMENSIONS")),
         )
     }
+}
+
+/// Whether the outcome side should group by category (iteration 2, §5)
+/// rather than counterparty — decided once by `fetch_graph` from the
+/// validated `dimensions` and threaded through to `build_graph`.
+pub fn is_category_dimension(dimensions: &[CashflowDimension]) -> bool {
+    dimensions == SUPPORTED_DIMENSIONS_CATEGORY.as_slice()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +94,10 @@ fn deficit_node_id(account_id: Uuid) -> ID {
 /// `Other` + `Unknown`, returning `(nodes, links, this_side_truncated)`.
 /// `link_from_counterparty` / `link_from_account` pick the link direction:
 /// income flows counterparty -> account, outcome flows account ->
-/// counterparty.
+/// counterparty. `node_ref_type` is `Some("category")` for the iteration-2
+/// `CATEGORY` dimension: kept nodes get `refType`/`refId` set to the slug
+/// for drill-down (§5); `unknown_label` names the "no name" bucket
+/// (`"Unknown"` for counterparty mode, `"Uncategorized"` for category mode).
 #[allow(clippy::too_many_arguments)]
 fn fold_side(
     rows: &[&AggregatedFlow],
@@ -87,6 +106,8 @@ fn fold_side(
     depth: i32,
     max_nodes: usize,
     income_side: bool,
+    node_ref_type: Option<&'static str>,
+    unknown_label: &'static str,
 ) -> (Vec<CashflowNode>, Vec<CashflowLink>, bool) {
     // Total per named counterparty, across all accounts, to rank top-N.
     let mut totals: BTreeMap<String, Decimal> = BTreeMap::new();
@@ -116,6 +137,10 @@ fn fold_side(
     let mut per_account: BTreeMap<ID, BTreeMap<Uuid, (Decimal, String)>> = BTreeMap::new();
     let mut node_totals: BTreeMap<ID, Decimal> = BTreeMap::new();
     let mut node_labels: BTreeMap<ID, String> = BTreeMap::new();
+    // Tracks whether a node id is a "kept, named" node (eligible for
+    // `refType`/`refId`) as opposed to the synthetic `Other`/unknown
+    // buckets, which never drill down anywhere.
+    let mut node_ref_ids: BTreeMap<ID, String> = BTreeMap::new();
 
     for row in rows {
         let (id, label) = match &row.counterparty_name {
@@ -123,10 +148,15 @@ fn fold_side(
                 (counterparty_node_id(prefix, name), name.clone())
             }
             Some(_) => (other_node_id(prefix), "Other".to_string()),
-            None => (unknown_node_id(prefix), "Unknown".to_string()),
+            None => (unknown_node_id(prefix), unknown_label.to_string()),
         };
         *node_totals.entry(id.clone()).or_insert(Decimal::ZERO) += row.amount;
-        node_labels.entry(id.clone()).or_insert(label);
+        node_labels.entry(id.clone()).or_insert_with(|| label.clone());
+        if let Some(name) = &row.counterparty_name
+            && kept.contains(name.as_str())
+        {
+            node_ref_ids.entry(id.clone()).or_insert_with(|| name.clone());
+        }
         let entry = per_account
             .entry(id)
             .or_default()
@@ -141,14 +171,15 @@ fn fold_side(
         } else {
             kind
         };
+        let ref_id = node_ref_ids.get(node_id).cloned();
         nodes.push(CashflowNode {
             id: node_id.clone(),
             label: node_labels.get(node_id).cloned().unwrap_or_default(),
             kind: node_kind,
             depth,
             value: GqlDecimal(*total),
-            ref_type: None,
-            ref_id: None,
+            ref_type: ref_id.as_ref().and(node_ref_type).map(str::to_string),
+            ref_id,
         });
         for (account_id, (amount, _label)) in &per_account[node_id] {
             if amount.is_zero() {
@@ -179,7 +210,10 @@ pub struct GraphResult {
 /// Builds the full Sankey graph from pre-aggregated per-account/counterparty
 /// flows. Conservation is per account (§5): each account's total inflow
 /// (income + any `DEFICIT`) equals its total outflow (spending + any `NET`).
-pub fn build_graph(rows: &[AggregatedFlow], max_nodes_per_dimension: i32) -> GraphResult {
+/// `category_mode` selects the iteration-2 `CATEGORY` dimension for the
+/// outcome side (§5) — `rows`' `counterparty_name` then carries the
+/// resolved category slug instead, built by `build_category_graph_sql`.
+pub fn build_graph(rows: &[AggregatedFlow], max_nodes_per_dimension: i32, category_mode: bool) -> GraphResult {
     let max_nodes = max_nodes_per_dimension.max(0) as usize;
 
     let income_rows: Vec<&AggregatedFlow> = rows
@@ -198,14 +232,24 @@ pub fn build_graph(rows: &[AggregatedFlow], max_nodes_per_dimension: i32) -> Gra
         0,
         max_nodes,
         true,
+        None,
+        "Unknown",
     );
+    let (outcome_kind, outcome_prefix, outcome_ref_type, outcome_unknown_label) = if category_mode
+    {
+        (CashflowNodeKind::Category, "category", Some("category"), "Uncategorized")
+    } else {
+        (CashflowNodeKind::Spending, "outcome", None, "Unknown")
+    };
     let (outcome_nodes, outcome_links, outcome_truncated) = fold_side(
         &outcome_rows,
-        "outcome",
-        CashflowNodeKind::Spending,
+        outcome_prefix,
+        outcome_kind,
         2,
         max_nodes,
         false,
+        outcome_ref_type,
+        outcome_unknown_label,
     );
 
     // Per-account income/spending totals, to size the NET/DEFICIT node (§5).
@@ -314,7 +358,7 @@ mod tests {
 
     #[test]
     fn empty_period_yields_no_nodes_or_links() {
-        let result = build_graph(&[], 8);
+        let result = build_graph(&[], 8, false);
         assert!(result.nodes.is_empty());
         assert!(result.links.is_empty());
         assert!(!result.truncated);
@@ -323,7 +367,7 @@ mod tests {
     #[test]
     fn single_transaction_yields_a_valid_two_link_graph() {
         let rows = vec![flow(acc(1), "Checking", Some("Employer"), FlowDirection::Income, "1000.00")];
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
         // income -> account, and since there is no spending, account -> NET.
         assert_eq!(result.links.len(), 2);
         assert!(result
@@ -338,7 +382,7 @@ mod tests {
             flow(acc(1), "Checking", Some("Employer"), FlowDirection::Income, "2000.00"),
             flow(acc(1), "Checking", Some("Landlord"), FlowDirection::Spending, "800.00"),
         ];
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
         let net_link = result
             .links
             .iter()
@@ -353,7 +397,7 @@ mod tests {
             flow(acc(1), "Checking", Some("Employer"), FlowDirection::Income, "500.00"),
             flow(acc(1), "Checking", Some("Landlord"), FlowDirection::Spending, "800.00"),
         ];
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
         let deficit_link = result
             .links
             .iter()
@@ -370,7 +414,7 @@ mod tests {
             flow(acc(2), "Checking", Some("Employer"), FlowDirection::Income, "500.00"),
             flow(acc(2), "Checking", Some("Landlord"), FlowDirection::Spending, "900.00"),
         ];
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
         assert!(result.nodes.iter().any(|n| n.kind == CashflowNodeKind::Net));
         assert!(result.nodes.iter().any(|n| n.kind == CashflowNodeKind::Deficit));
     }
@@ -388,7 +432,7 @@ mod tests {
                 )
             })
             .collect();
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
         assert!(result.truncated);
         assert!(result
             .nodes
@@ -406,7 +450,7 @@ mod tests {
     #[test]
     fn missing_counterparty_lands_in_an_unknown_node_not_dropped() {
         let rows = vec![flow(acc(1), "Checking", None, FlowDirection::Income, "42.00")];
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
         let unknown = result
             .nodes
             .iter()
@@ -423,7 +467,7 @@ mod tests {
             flow(acc(1), "Checking", Some("Landlord"), FlowDirection::Spending, "1200.00"),
             flow(acc(1), "Checking", Some("Groceries"), FlowDirection::Spending, "400.00"),
         ];
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
 
         let mut inflow: BTreeMap<String, Decimal> = BTreeMap::new();
         let mut outflow: BTreeMap<String, Decimal> = BTreeMap::new();
@@ -460,7 +504,7 @@ mod tests {
             .map(|r| r.amount)
             .sum();
 
-        let result = build_graph(&rows, 8);
+        let result = build_graph(&rows, 8, false);
         let income_source_total: Decimal = result
             .links
             .iter()

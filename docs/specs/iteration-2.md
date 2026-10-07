@@ -524,7 +524,7 @@ Validation is **lazy, at the provider factory**: `webapp` and the projector
 never build a provider, so a missing key must not break their startup.
 
 **Anthropic key wiring.** `.env.tpl` gains exactly one line,
-`TF_VAR_anthropic_api_key="op://HomeLab/finreport/anthropic/api_key"` — a single
+`TF_VAR_anthropic_api_key="op://HomeLab/finreport/anthropic api/api_key"` — a single
 `op://` reference, nothing shell-expanded, per the `.env.tpl` rule in
 `CLAUDE.md`. `terraform/variables.tf` declares it `sensitive = true`;
 `docker-compose.yml` passes it to the new `finreport-be-labeler` service as

@@ -65,6 +65,30 @@ query Transactions($filter: TransactionFilter, $page: PageInput) {
 			counterpartyIban
 			description
 			transactionType
+			label {
+				category {
+					id
+					slug
+					name
+					kind
+				}
+				source
+				confidence
+				status
+				reviewReason
+				proposedCategoryPath
+				reasoning
+			}
+			splits {
+				index
+				amount
+				category {
+					id
+					slug
+					name
+					kind
+				}
+			}
 		}
 		totalCount
 		limit
@@ -114,4 +138,231 @@ query CashflowGraph($filter: TransactionFilter!, $grouping: CashflowGraphInput) 
 		dimensions
 		truncated
 	}
+}`;
+
+// ---------------------------------------------------------------------------
+// Categories, labels, rules (iteration 2, §5)
+// ---------------------------------------------------------------------------
+
+export const CATEGORIES_QUERY = `
+query Categories($includeArchived: Boolean) {
+	categories(includeArchived: $includeArchived) {
+		id
+		slug
+		name
+		kind
+		parentId
+		depth
+		archived
+		origin
+	}
+}`;
+
+export const CATEGORY_BREAKDOWN_QUERY = `
+query CategoryBreakdown($filter: TransactionFilter!, $level: Int, $kind: CategoryKind) {
+	categoryBreakdown(filter: $filter, level: $level, kind: $kind) {
+		rows {
+			category {
+				id
+				slug
+				name
+				kind
+			}
+			amount
+			transactionCount
+			share
+		}
+		uncategorized {
+			category {
+				id
+				slug
+				name
+				kind
+			}
+			amount
+			transactionCount
+			share
+		}
+		needsReview {
+			category {
+				id
+				slug
+				name
+				kind
+			}
+			amount
+			transactionCount
+			share
+		}
+		currency
+	}
+}`;
+
+const RULE_FIELDS = `
+	id
+	name
+	category {
+		id
+		slug
+		name
+		kind
+	}
+	conditions
+	priority
+	state
+	origin
+	autoApproved
+	confidence
+	evidenceCount
+	createdAt`;
+
+export const RULES_QUERY = `
+query Rules($state: RuleState) {
+	rules(state: $state) {${RULE_FIELDS}
+	}
+}`;
+
+export const RECENTLY_AUTO_APPROVED_RULES_QUERY = `
+query RecentlyAutoApprovedRules($limit: Int) {
+	recentlyAutoApprovedRules(limit: $limit) {${RULE_FIELDS}
+	}
+}`;
+
+export const REVIEW_QUEUE_QUERY = `
+query ReviewQueue($page: PageInput) {
+	reviewQueue(page: $page) {
+		transactions {
+			id
+			accountId
+			bookingDate
+			amount
+			currency
+			counterpartyName
+			description
+			label {
+				source
+				status
+				reviewReason
+				proposedCategoryPath
+				reasoning
+				confidence
+			}
+		}
+		pendingRules {${RULE_FIELDS}
+		}
+		totalCount
+	}
+}`;
+
+export const SET_TRANSACTION_CATEGORY_MUTATION = `
+mutation SetTransactionCategory($transactionId: UUID!, $categorySlug: String!) {
+	setTransactionCategory(transactionId: $transactionId, categorySlug: $categorySlug) {
+		id
+		label {
+			category {
+				id
+				slug
+				name
+				kind
+			}
+			source
+			status
+		}
+	}
+}`;
+
+export const CLEAR_TRANSACTION_CATEGORY_MUTATION = `
+mutation ClearTransactionCategory($transactionId: UUID!) {
+	clearTransactionCategory(transactionId: $transactionId) {
+		id
+		label {
+			category {
+				id
+				slug
+			}
+			source
+			status
+		}
+	}
+}`;
+
+export const SPLIT_TRANSACTION_MUTATION = `
+mutation SplitTransaction($transactionId: UUID!, $parts: [SplitPartInput!]!) {
+	splitTransaction(transactionId: $transactionId, parts: $parts) {
+		id
+		splits {
+			index
+			amount
+			category {
+				id
+				slug
+				name
+			}
+		}
+	}
+}`;
+
+export const UNSPLIT_TRANSACTION_MUTATION = `
+mutation UnsplitTransaction($transactionId: UUID!) {
+	unsplitTransaction(transactionId: $transactionId) {
+		id
+		splits {
+			index
+		}
+	}
+}`;
+
+export const CREATE_CATEGORY_MUTATION = `
+mutation CreateCategory($input: CategoryInput!) {
+	createCategory(input: $input) {
+		id
+		slug
+		name
+		kind
+		parentId
+		depth
+		archived
+		origin
+	}
+}`;
+
+export const RENAME_CATEGORY_MUTATION = `
+mutation RenameCategory($id: UUID!, $name: String!) {
+	renameCategory(id: $id, name: $name) {
+		id
+		slug
+		name
+	}
+}`;
+
+export const ARCHIVE_CATEGORY_MUTATION = `
+mutation ArchiveCategory($id: UUID!) {
+	archiveCategory(id: $id) {
+		id
+		slug
+		archived
+	}
+}`;
+
+export const CREATE_RULE_MUTATION = `
+mutation CreateRule($input: RuleInput!) {
+	createRule(input: $input) {${RULE_FIELDS}
+	}
+}`;
+
+export const UPDATE_RULE_MUTATION = `
+mutation UpdateRule($id: UUID!, $input: RuleInput!) {
+	updateRule(id: $id, input: $input) {${RULE_FIELDS}
+	}
+}`;
+
+export const SET_RULE_STATE_MUTATION = `
+mutation SetRuleState($id: UUID!, $state: RuleState!) {
+	setRuleState(id: $id, state: $state) {${RULE_FIELDS}
+	}
+}`;
+
+export const REAPPLY_RULE_MUTATION = `
+mutation ReapplyRule($id: UUID!) {
+	reapplyRule(id: $id)
 }`;

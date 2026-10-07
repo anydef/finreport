@@ -177,6 +177,88 @@ fn build_graph_sql(
     (sql, params)
 }
 
+/// Income-side SQL for the `CATEGORY` dimension (§5): identical to
+/// `build_graph_sql` but restricted to `amount > 0`, since the outcome side
+/// is queried separately by category via `build_category_outcome_sql`.
+fn build_category_income_sql(
+    scoped_ids: &[Uuid],
+    filter: &TransactionFilter,
+    range_start: NaiveDate,
+    range_end: NaiveDate,
+) -> (String, Vec<sea_orm::Value>) {
+    let (mut sql, params) = build_graph_sql(scoped_ids, filter, range_start, range_end);
+    sql = sql.replace(
+        "WHERE account_id = ANY($1)",
+        "WHERE amount > 0 AND account_id = ANY($1)",
+    );
+    (sql, params)
+}
+
+/// Outcome side of the `CATEGORY` dimension (§5): groups `amount < 0` rows
+/// by resolved category slug instead of counterparty. Split-aware per
+/// `categoryBreakdown`'s own rule (§5/`breakdown.rs`) — a transaction with a
+/// valid (non-`invalid`) split contributes its parts, one row per category;
+/// otherwise the whole transaction counts once, against its
+/// `transaction_label` category (or `NULL`, folded into "Uncategorized" by
+/// `graph::fold_side`). Same `search`/`counterpartyNames`/`hasCounterparty`
+/// predicates as `build_graph_sql`, applied on the `transaction` alias `t`.
+fn build_category_outcome_sql(
+    scoped_ids: &[Uuid],
+    filter: &TransactionFilter,
+    range_start: NaiveDate,
+    range_end: NaiveDate,
+) -> (String, Vec<sea_orm::Value>) {
+    let mut extra = String::new();
+    let mut params: Vec<sea_orm::Value> = vec![
+        scoped_ids.to_vec().into(),
+        range_start.into(),
+        range_end.into(),
+    ];
+    let mut idx = 4;
+    if let Some(search) = filter.search.as_ref().filter(|s| !s.is_empty()) {
+        extra.push_str(&format!(
+            " AND (t.counterparty_name ILIKE ${idx} OR t.description ILIKE ${idx})"
+        ));
+        params.push(format!("%{search}%").into());
+        idx += 1;
+    }
+    if let Some(names) = filter.counterparty_names.as_ref().filter(|n| !n.is_empty()) {
+        extra.push_str(&format!(" AND t.counterparty_name = ANY(${idx})"));
+        params.push(names.clone().into());
+        idx += 1;
+    }
+    let _ = idx;
+    match filter.has_counterparty {
+        Some(true) => extra.push_str(" AND t.counterparty_name IS NOT NULL"),
+        Some(false) => extra.push_str(" AND t.counterparty_name IS NULL"),
+        None => {}
+    }
+
+    let sql = format!(
+        "SELECT t.account_id AS account_id, c.slug AS counterparty_name, \
+           false AS is_income, SUM(ABS(t.amount)) AS total_amount \
+         FROM transaction t \
+         LEFT JOIN transaction_label tl ON tl.transaction_id = t.id AND tl.status = 'resolved' \
+         LEFT JOIN category c ON c.id = tl.category_id \
+         WHERE t.amount < 0 AND t.account_id = ANY($1) \
+           AND t.booking_date >= $2 AND t.booking_date <= $3 \
+           AND NOT EXISTS (SELECT 1 FROM transaction_split ts WHERE ts.transaction_id = t.id AND ts.invalid = false) \
+           {extra} \
+         GROUP BY t.account_id, c.slug \
+         UNION ALL \
+         SELECT t.account_id AS account_id, c.slug AS counterparty_name, \
+           false AS is_income, SUM(ABS(ts.amount)) AS total_amount \
+         FROM transaction_split ts \
+         JOIN transaction t ON t.id = ts.transaction_id \
+         JOIN category c ON c.id = ts.category_id \
+         WHERE ts.invalid = false AND ts.amount < 0 AND t.account_id = ANY($1) \
+           AND t.booking_date >= $2 AND t.booking_date <= $3 \
+           {extra} \
+         GROUP BY t.account_id, c.slug"
+    );
+    (sql, params)
+}
+
 pub async fn fetch_graph(
     db: &DatabaseConnection,
     scoped_ids: &[Uuid],
@@ -185,6 +267,7 @@ pub async fn fetch_graph(
 ) -> GqlResult<CashflowGraph> {
     let grouping = grouping.unwrap_or_default();
     graph::validate_dimensions(&grouping.dimensions)?;
+    let category_mode = graph::is_category_dimension(&grouping.dimensions);
 
     let (range_start, range_end) = bounded_range(filter)?;
     let currency = first_currency(db, scoped_ids).await?;
@@ -207,18 +290,46 @@ pub async fn fetch_graph(
         .map(|a| (a.id, a.label.unwrap_or_else(|| a.external_id.clone())))
         .collect();
 
-    let (sql, params) = build_graph_sql(scoped_ids, filter, range_start, range_end);
-    let stmt = Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres, sql, params);
-    let rows = db.query_all(stmt).await?;
+    let mut flows: Vec<AggregatedFlow> = Vec::new();
+    if category_mode {
+        let (income_sql, income_params) =
+            build_category_income_sql(scoped_ids, filter, range_start, range_end);
+        let (outcome_sql, outcome_params) =
+            build_category_outcome_sql(scoped_ids, filter, range_start, range_end);
+        for (sql, params) in [(income_sql, income_params), (outcome_sql, outcome_params)] {
+            let stmt = Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres, sql, params);
+            let rows = db.query_all(stmt).await?;
+            flows.extend(rows_to_flows(&rows, &labels)?);
+        }
+    } else {
+        let (sql, params) = build_graph_sql(scoped_ids, filter, range_start, range_end);
+        let stmt = Statement::from_sql_and_values(sea_orm::DatabaseBackend::Postgres, sql, params);
+        let rows = db.query_all(stmt).await?;
+        flows = rows_to_flows(&rows, &labels)?;
+    }
 
-    let flows: Vec<AggregatedFlow> = rows
-        .iter()
+    let result = graph::build_graph(&flows, grouping.max_nodes_per_dimension, category_mode);
+
+    Ok(CashflowGraph {
+        nodes: result.nodes,
+        links: result.links,
+        currency,
+        dimensions: grouping.dimensions,
+        truncated: result.truncated,
+    })
+}
+
+fn rows_to_flows(
+    rows: &[sea_orm::QueryResult],
+    labels: &HashMap<Uuid, String>,
+) -> Result<Vec<AggregatedFlow>, sea_orm::DbErr> {
+    rows.iter()
         .map(|row| {
             let account_id: Uuid = row.try_get("", "account_id")?;
             let counterparty_name: Option<String> = row.try_get("", "counterparty_name")?;
             let is_income: bool = row.try_get("", "is_income")?;
             let total_amount: Decimal = row.try_get("", "total_amount")?;
-            Ok::<_, sea_orm::DbErr>(AggregatedFlow {
+            Ok(AggregatedFlow {
                 account_id,
                 account_label: labels.get(&account_id).cloned().unwrap_or_default(),
                 counterparty_name,
@@ -230,15 +341,5 @@ pub async fn fetch_graph(
                 amount: total_amount,
             })
         })
-        .collect::<Result<_, _>>()?;
-
-    let result = graph::build_graph(&flows, grouping.max_nodes_per_dimension);
-
-    Ok(CashflowGraph {
-        nodes: result.nodes,
-        links: result.links,
-        currency,
-        dimensions: grouping.dimensions,
-        truncated: result.truncated,
-    })
+        .collect()
 }

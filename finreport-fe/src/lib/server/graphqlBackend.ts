@@ -18,6 +18,10 @@ import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
 import cashflowGraphNetDeficitMock from '$lib/graphql/mocks/cashflow-graph-net-deficit.json';
 import cashflowGraphTruncatedMock from '$lib/graphql/mocks/cashflow-graph-truncated.json';
 import transactionsMock from '$lib/graphql/mocks/transactions.json';
+import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
+import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
+import rulesMock from '$lib/graphql/mocks/rules.json';
+import transactionSplitMock from '$lib/graphql/mocks/transaction-split.json';
 
 /** Name of the mock-mode session cookie, mirroring the real `fr_session` cookie's role. */
 const MOCK_SESSION_COOKIE = 'fr_session';
@@ -135,6 +139,18 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return { status: 200, body: { data: cashflowSummaryMock.data }, setCookies: [] };
 		case 'CashflowGraph':
 			return { status: 200, body: { data: mockCashflowGraph(body.variables) }, setCookies: [] };
+		// Iteration-2 (§5) stub operations: the WP0 mocks exist so WP5/WP6 can
+		// build against a stable shape; resolvers on the real backend still
+		// return NOT_IMPLEMENTED until their owning WP lands.
+		case 'CategoryBreakdown':
+			return { status: 200, body: { data: categoryBreakdownMock.data }, setCookies: [] };
+		case 'ReviewQueue':
+			return { status: 200, body: { data: reviewQueueMock.data }, setCookies: [] };
+		case 'Rules':
+		case 'RecentlyAutoApprovedRules':
+			return { status: 200, body: { data: rulesMock.data }, setCookies: [] };
+		case 'SplitTransaction':
+			return { status: 200, body: { data: transactionSplitMock.data }, setCookies: [] };
 		default:
 			return null;
 	}

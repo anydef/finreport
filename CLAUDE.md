@@ -41,11 +41,13 @@ just import-local [--account <key>]   # run the transaction importer against loc
 # Local dev stack: Postgres + Redpanda + topic-init (phase 2, see Kafka section below)
 just dev-up                  # compose up Postgres + Redpanda + topic-init, healthy
 just dev-down                # compose down (drops the Postgres volume too)
-just dev-reset               # truncate the read model + projection_offset so the next projector run replays from scratch
+just dev-reset               # truncate the read model + labeling projections + projection_offset so the next projector/labeler run replays from scratch
 just dev-projector [ARGS]    # cargo run the projector against the local stack; pass --until-caught-up to exit at the log end
+just dev-labeler [ARGS]      # cargo run the labeler (iteration 2) against the local stack; pass --until-caught-up; refuses to start if the projector lags
 just seed-user                # create the demo `dev` user (idempotent)
 just seed-events               # replay the fixture corpus onto the local Redpanda
-just dev-demo                 # the whole demo in order: dev-up → migrate → seed-user → seed-events → projector --until-caught-up → link accounts
+just seed-categories            # publish the taxonomy onto finreport.category (idempotent)
+just dev-demo                 # the whole demo: dev-up → migrate → seed-user → seed-events → seed-categories → alternate projector/labeler until quiescent → link accounts → assert a learned rule + a needs-review label exist
 just redpanda-console [broker] # Redpanda Console UI (http://localhost:8090); defaults to the central broker, pass 127.0.0.1:19092 for the local stack
 
 # DB (run inside finreport-rs/, needs .env with APP_database_url)
@@ -64,7 +66,7 @@ Each component starts independently — no need to bring up the full docker-comp
 
 1. **Postgres + Redpanda**: `just dev-up` brings up Postgres, a single-node Redpanda, and a one-shot topic-init job (the same four topics/configs as `terraform/kafka/main.tf`) under `docker-compose.local.yml`, all with overridable ports (`FINREPORT_PG_PORT`/`FINREPORT_KAFKA_PORT`, defaulting to `5432`/`19092`). Stop with `just dev-down`; `just dev-reset` truncates the read model so a fresh projector run starts over without touching `app_user`/`user_account`/`user_session` (those links survive by design — see §2.3 of the spec). `just db-up`/`just db-down` still work if you only need Postgres (e.g. for `dev-be`, no Kafka).
 2. **Backend**: `just dev-be` — no `.env` needed; local defaults come from `local_env` in the `justfile` (override any `APP_*` from your shell). Runs migrations automatically and serves GraphQL on `:8080`. `dev-be` needs no Comdirect creds at all — it only serves GraphQL against the DB and never calls the Comdirect API. Real imports go through `just import-local` instead, which pulls real creds from 1Password.
-3. **Demo data, no bank needed**: `just dev-demo` seeds a `dev` user, replays the fixture corpus onto the local Redpanda, runs the projector to catch up, and links the seeded accounts to `dev` — the fixtures are synthetic but realistically shaped, spanning ~6 months across 2 accounts. Or drive the steps yourself: `just seed-user`, `just seed-events`, `just dev-projector --until-caught-up`.
+3. **Demo data, no bank needed**: `just dev-demo` seeds a `dev` user, replays the fixture corpus onto the local Redpanda, publishes the category taxonomy, then alternates the projector and labeler until a round produces no new rows (max 5, else it fails loudly), links the seeded accounts to `dev`, and asserts a learned rule and a needs-review label exist — the fixtures are synthetic but realistically shaped, spanning ~6 months across 2 accounts, with a repeated merchant that reaches the rule-learning threshold under the fake LLM provider (no API key needed). Or drive the steps yourself: `just seed-user`, `just seed-events`, `just seed-categories`, `just dev-projector --until-caught-up`, `just dev-labeler --until-caught-up`.
 4. **Frontend**: `just dev-fe` (or `cd finreport-fe && npm run dev` directly) — see `finreport-fe/CLAUDE.md` for the local/tower profile switch.
 
 ## Comdirect logins (importer)
@@ -185,6 +187,59 @@ the full design.
   (one row per topic-partition) in Postgres, so a projector restart or
   `just dev-reset` resumes/replays independently of the importer's watermark.
 
+## Event log (Kafka) — migration phase 3 (labeling pipeline, iteration 2)
+
+A second always-on consumer, `labeler`, joins the projector: it resolves a
+category for every transaction through the precedence chain (user override >
+rule > LLM cache > LLM), publishing its own records rather than writing
+Postgres directly — the labeling read model is a projection like every other
+table. See `docs/specs/iteration-2.md` §2.2–§2.9 for the full design (rules,
+learning, cost guard, compare-before-publish) and `docs/architecture.md` for
+the label-resolution and learned-rule-lifecycle diagrams.
+
+- **New topics**: `finreport.transaction-label`, `.llm-cache`, `.user-label`,
+  `.rule`, `.category` (all compacted, `prevent_destroy`, same posture as the
+  iteration-1 topics) and `finreport.label-request` (delete-cleanup, 7-day
+  retention, **not** `prevent_destroy` — a work queue, not state). Managed by
+  `terraform/kafka/main.tf` for the central broker and mirrored by
+  `docker-compose.local.yml`'s `finreport-redpanda-init` for local dev — keep
+  both in step by hand, as with the iteration-1 topics.
+- **Offsets**: the labeler has no consumer group; like the projector, it
+  keeps its position in Postgres `projection_offset`, under topic keys
+  suffixed `@labeler` — distinct rows, same table, same transactional commit
+  as the labels it publishes.
+- **Startup guard**: the labeler refuses to start (exit non-zero) while the
+  projector's offsets trail the broker's high watermark by more than
+  `APP_labeler_max_projection_lag` records (default 0) — it resolves against
+  the projection, so running ahead of the projector means re-deriving answers
+  for transactions that already have one. Deployed, this is a one-time
+  startup check between two independent always-on services; locally,
+  `just dev-demo` satisfies it by alternating `projector --until-caught-up`
+  and `labeler --until-caught-up` instead of running them concurrently.
+- **LLM provider**: `APP_llm_provider` defaults to `fake` — nothing in the
+  repo calls a paid API unless it's set to `anthropic`, `ollama` or `openai`.
+  An optional `ollama` Docker Compose profile (`finreport-ollama`, off by
+  default) is available for local testing against a real small model; start
+  it with `docker compose -f docker-compose.local.yml --profile ollama up
+  finreport-ollama -d`.
+- **Anthropic key wiring**: `.env.tpl` has exactly one line,
+  `TF_VAR_anthropic_api_key="op://HomeLab/finreport/anthropic api/api_key"` — a
+  single `op://` reference, nothing shell-expanded, per the `.env.tpl` rule
+  above. `terraform/variables.tf` declares `anthropic_api_key` `sensitive =
+  true` (default `""`, since the key is only needed once a deploy actually
+  sets `APP_llm_provider=anthropic`); the deployed `docker-compose.yml` passes
+  it to the new `finreport-be-labeler` service as `APP_anthropic_api_key`.
+  Non-secret knobs (provider, model) live in `docker-compose.yml`, never in
+  `.env.tpl`. **Gap**: `terraform/main.tf`'s `module "portainer_stack"`
+  `extra_env` still needs an `APP_anthropic_api_key = var.anthropic_api_key`
+  entry (the same mechanism `POSTGRES_PASSWORD` already uses there) before the
+  key actually reaches the stack — that file is outside this iteration's
+  dev-stack/docs work package, so it's a deliberate follow-up, not an
+  oversight.
+- **Deployed**: a new `finreport-be-labeler` service alongside
+  `finreport-be-projector` — same image, same Kafka broker, static LAN IP
+  `192.168.100.37`, no new port.
+
 ## Backend database profiles
 
 The backend can run locally against either Postgres:
@@ -212,6 +267,20 @@ Natural parallelization seams:
 - Within `finreport-rs`, individual crates (`comdirect-rs`, `categorizer`, `entity`/`migration`) are reasonably independent, but `webapp` depends on all of them and the GraphQL schema is a shared contract — two agents changing it concurrently will conflict.
 
 Use `git worktree add ../finreport-worktrees/<branch-name> -b <branch-name>` to give a parallel agent its own working copy (worktrees are kept as sibling dirs, not nested — see `docs/multi-agent-setup.md`).
+
+### Shared `CARGO_TARGET_DIR`
+
+The `justfile` exports `CARGO_TARGET_DIR` for every recipe it runs, pointed at
+`finreport-worktrees/.cargo-target` — a single directory shared by every
+worktree *and* the main checkout, computed from the sibling-directory layout
+above rather than hardcoded (so it resolves the same way whether `just` runs
+from `finreport/` or any `finreport-worktrees/<branch>/`). N parallel agents
+then share one dependency build instead of each paying a cold compile; Cargo
+locks the directory itself, so concurrent builds serialize rather than
+corrupt one another. A `CARGO_TARGET_DIR` already set in the calling shell
+takes precedence. `cargo` invocations outside `just` (an editor's rust-analyzer,
+a manual `cargo build`) don't pick this up automatically — export it yourself
+in that shell if you want the same sharing there.
 
 ### Agent working rules
 

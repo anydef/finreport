@@ -39,12 +39,21 @@ base64 = "0.22"
 # Exact-decimal money, shared by sea-orm's NUMERIC(20,4) columns and the
 # GraphQL `Decimal` scalar (§5) — never `f64`.
 rust_decimal = "1"
+# §2.7 rule matching: `description_regex` conditions, compiled with a size
+# limit and rejected (mutation) / skipped-not-panicked (labeler) on failure.
+# Deviation from the WP0-frozen dep list (not pre-populated there) — minimal
+# addition by WP2, already present transitively in Cargo.lock at 1.11.1 so
+# this adds no new resolved version.
+regex = "1"
 
 [dev-dependencies]
 # Projector/backfill/GraphQL integration tests (§8), gated behind the
 # `integration` feature so `just test` stays fast and offline.
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres", "kafka"] }
+# WP3 labeler unit tests implement a panicking `LabelProvider` fake to assert
+# cache/rule hits never call the provider; the trait is `#[async_trait]`.
+async-trait = "0.1.89"
 
 [features]
 # Gates the testcontainers-based integration tests (projector replay
@@ -72,4 +81,12 @@ path = "src/bin/fixture_replay.rs"
 [[bin]]
 name = "legacy-backfill"
 path = "src/bin/legacy_backfill.rs"
+
+[[bin]]
+name = "labeler"
+path = "src/bin/labeler.rs"
+
+[[bin]]
+name = "category-seed"
+path = "src/bin/category_seed.rs"
 

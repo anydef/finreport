@@ -13,6 +13,13 @@ use rust_decimal::Decimal as RustDecimal;
 use std::str::FromStr;
 use uuid::Uuid as RustUuid;
 
+/// Arbitrary JSON (§5) — `rule.conditions` is the only field that uses it
+/// today. `async_graphql::types::Json<T>` already names its scalar `"JSON"`
+/// (see its `InputType`/`OutputType` impls), so this is a type alias, not a
+/// new `#[Scalar]` impl: WP4's validation against the §2.7 condition shape
+/// happens at the resolver boundary, not at the scalar.
+pub type Json = async_graphql::types::Json<serde_json::Value>;
+
 /// `"YYYY-MM-DD"` calendar date (§5).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Date(pub NaiveDate);
