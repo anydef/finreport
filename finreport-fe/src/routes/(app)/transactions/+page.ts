@@ -1,6 +1,7 @@
 import { createGraphqlClient } from '$lib/graphqlClient';
-import { ACCOUNTS_QUERY, TRANSACTIONS_QUERY } from '$lib/graphql/queries';
-import type { Account, TransactionPage } from '$lib/graphql/types';
+import { ACCOUNTS_QUERY, CATEGORIES_QUERY, TRANSACTIONS_QUERY } from '$lib/graphql/queries';
+import type { Account, Category, TransactionPage } from '$lib/graphql/types';
+import { expandSelectedSlugs } from '$lib/categoryTree';
 import {
 	defaultGranularity,
 	presetRange,
@@ -30,19 +31,33 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
 	const accountId = url.searchParams.get('accountId') ?? undefined;
 	const search = url.searchParams.get('search') ?? undefined;
+	const categorySlugs = url.searchParams.get('categorySlugs')?.split(',').filter(Boolean) ?? [];
+	const uncategorized = url.searchParams.get('uncategorized') === 'true';
+	const needsReview = url.searchParams.get('needsReview') === 'true';
 
 	const client = createGraphqlClient(fetch);
+
+	const [accountsResult, categoriesResult] = await Promise.all([
+		client.query(ACCOUNTS_QUERY, {}).toPromise(),
+		client.query(CATEGORIES_QUERY, {}).toPromise()
+	]);
+	const categories = (categoriesResult.data?.categories ?? []) as Category[];
+
 	const filter = {
 		startDate: range.start,
 		endDate: range.end,
 		accountIds: accountId ? [accountId] : undefined,
-		search: search || undefined
+		search: search || undefined,
+		categorySlugs: categorySlugs.length
+			? expandSelectedSlugs(categorySlugs, categories)
+			: undefined,
+		uncategorized: uncategorized || undefined,
+		needsReview: needsReview || undefined
 	};
 
-	const [accountsResult, transactionsResult] = await Promise.all([
-		client.query(ACCOUNTS_QUERY, {}).toPromise(),
-		client.query(TRANSACTIONS_QUERY, { filter, page: { limit: PAGE_LIMIT, offset } }).toPromise()
-	]);
+	const transactionsResult = await client
+		.query(TRANSACTIONS_QUERY, { filter, page: { limit: PAGE_LIMIT, offset } })
+		.toPromise();
 
 	return {
 		preset,
@@ -51,9 +66,13 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		granularity: defaultGranularity(range),
 		accountId,
 		search,
+		categorySlugs,
+		uncategorized,
+		needsReview,
 		offset,
-		error: Boolean(accountsResult.error || transactionsResult.error),
+		error: Boolean(accountsResult.error || categoriesResult.error || transactionsResult.error),
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
+		categories,
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
 		today: toDateInputValue(today)
 	};

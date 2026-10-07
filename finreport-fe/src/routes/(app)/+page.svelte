@@ -7,9 +7,11 @@
 	import TotalsRow from '$lib/components/TotalsRow.svelte';
 	import CashflowBarChart from '$lib/components/CashflowBarChart.svelte';
 	import CashflowSankey from '$lib/components/CashflowSankey.svelte';
+	import CategoryBreakdown from '$lib/components/CategoryBreakdown.svelte';
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import Button from '$lib/components/Button.svelte';
+	import type { BreakdownBar } from '$lib/breakdownShaping';
 	import {
 		drilldownFilterForLink,
 		drilldownFilterForNode,
@@ -41,8 +43,11 @@
 		accountIds?: string[];
 		counterpartyNames?: string[];
 		hasCounterparty?: boolean;
+		categorySlugs?: string[];
+		uncategorized?: boolean;
 		offset?: number;
 		resetDrilldown?: boolean;
+		sankeyDimension?: 'counterparty' | 'category';
 	}
 
 	function navigate(opts: NavOverrides = {}) {
@@ -54,9 +59,12 @@
 					accountIds: data.drilldown.accountIds,
 					counterpartyNames: data.drilldown.counterpartyNames,
 					hasCounterparty: data.drilldown.hasCounterparty,
+					categorySlugs: data.drilldown.categorySlugs,
+					uncategorized: data.drilldown.uncategorized,
 					offset: data.offset
 				};
 		const merged = { ...base, ...opts };
+		const sankeyDimension = opts.sankeyDimension ?? data.sankeyDimension;
 
 		const params = new URLSearchParams();
 		if (preset !== 'this-month') params.set('preset', preset);
@@ -65,12 +73,15 @@
 			params.set('end', end);
 		}
 		if (granularity !== defaultGranularity({ start, end })) params.set('granularity', granularity);
+		if (sankeyDimension !== 'counterparty') params.set('sankey', sankeyDimension);
 		if (merged.txStart && merged.txStart !== start) params.set('txStart', merged.txStart);
 		if (merged.txEnd && merged.txEnd !== end) params.set('txEnd', merged.txEnd);
 		if (merged.accountIds?.length) params.set('accountIds', merged.accountIds.join(','));
 		if (merged.counterpartyNames?.length)
 			params.set('counterpartyNames', merged.counterpartyNames.join(','));
 		if (merged.hasCounterparty === false) params.set('hasCounterparty', 'false');
+		if (merged.categorySlugs?.length) params.set('categorySlugs', merged.categorySlugs.join(','));
+		if (merged.uncategorized) params.set('uncategorized', 'true');
 		if (merged.offset) params.set('offset', String(merged.offset));
 
 		goto(`${page.url.pathname}?${params.toString()}`, { keepFocus: true, noScroll: true });
@@ -91,6 +102,8 @@
 			accountIds: filter.accountIds ?? undefined,
 			counterpartyNames: filter.counterpartyNames ?? undefined,
 			hasCounterparty: filter.hasCounterparty ?? undefined,
+			categorySlugs: filter.categorySlugs ?? undefined,
+			uncategorized: filter.uncategorized ?? undefined,
 			offset: 0,
 			resetDrilldown: true
 		});
@@ -106,6 +119,8 @@
 			accountIds: filter.accountIds ?? undefined,
 			counterpartyNames: filter.counterpartyNames ?? undefined,
 			hasCounterparty: filter.hasCounterparty ?? undefined,
+			categorySlugs: filter.categorySlugs ?? undefined,
+			uncategorized: filter.uncategorized ?? undefined,
 			offset: 0,
 			resetDrilldown: true
 		});
@@ -119,6 +134,15 @@
 		navigate({ offset });
 	}
 
+	function onBreakdownSelect(bar: BreakdownBar) {
+		if (!bar.slug) return;
+		navigate({ categorySlugs: [bar.slug], offset: 0, resetDrilldown: true });
+	}
+
+	function onSankeyDimensionChange(dimension: 'counterparty' | 'category') {
+		navigate({ sankeyDimension: dimension, resetDrilldown: true });
+	}
+
 	const bars = $derived(data.summary ? shapeCashflowBars(data.summary, data.granularity) : []);
 	const graph = $derived(data.graph ? shapeCashflowGraph(data.graph) : undefined);
 	const periodLabel = $derived(`${data.start} to ${data.end}`);
@@ -127,6 +151,8 @@
 			data.drilldown.accountIds?.length ||
 				data.drilldown.counterpartyNames?.length ||
 				data.drilldown.hasCounterparty === false ||
+				data.drilldown.categorySlugs?.length ||
+				data.drilldown.uncategorized ||
 				data.txStart !== data.start ||
 				data.txEnd !== data.end
 		)
@@ -165,11 +191,31 @@
 
 		{#if graph}
 			<Card title="Cash flow">
+				<div class="mb-3 flex justify-end gap-1" role="group" aria-label="Sankey grouping">
+					<Button
+						variant={data.sankeyDimension === 'counterparty' ? 'primary' : 'ghost'}
+						onclick={() => onSankeyDimensionChange('counterparty')}
+					>
+						Counterparty
+					</Button>
+					<Button
+						variant={data.sankeyDimension === 'category' ? 'primary' : 'ghost'}
+						onclick={() => onSankeyDimensionChange('category')}
+					>
+						Category
+					</Button>
+				</div>
 				{#if browser}
 					<CashflowSankey {graph} {periodLabel} {onNodeClick} {onLinkClick} />
 				{:else}
 					<p class="flex h-96 items-center justify-center text-sm text-slate-400">Loading chart…</p>
 				{/if}
+			</Card>
+		{/if}
+
+		{#if data.breakdown}
+			<Card title="Spending by category">
+				<CategoryBreakdown breakdown={data.breakdown} onSelect={onBreakdownSelect} />
 			</Card>
 		{/if}
 
