@@ -366,3 +366,59 @@ export const REAPPLY_RULE_MUTATION = `
 mutation ReapplyRule($id: UUID!) {
 	reapplyRule(id: $id)
 }`;
+
+// ---------------------------------------------------------------------------
+// Tags, internal transfers, recurring costs (iteration 3, §4)
+// ---------------------------------------------------------------------------
+
+export const TAGS_QUERY = `
+query Tags {
+	tags {
+		tag
+		transactionCount
+	}
+}`;
+
+export const RECURRING_SERIES_QUERY = `
+query RecurringSeries($filter: TransactionFilter) {
+	recurringSeries(filter: $filter) {
+		series {
+			id
+			counterpartyKey
+			counterpartyName
+			direction
+			cadence
+			medianAmount
+			monthlyEquivalent
+			occurrenceCount
+			firstDate
+			lastDate
+			nextExpectedDate
+			stale
+		}
+		totalMonthlyEquivalent
+		currency
+	}
+}`;
+
+export const SET_TRANSACTION_TAGS_MUTATION = `
+mutation SetTransactionTags($transactionId: UUID!, $tags: [String!]!) {
+	setTransactionTags(transactionId: $transactionId, tags: $tags) {
+		id
+		tags
+	}
+}`;
+
+export const SET_TRANSACTION_RECURRING_MUTATION = `
+mutation SetTransactionRecurring($transactionId: UUID!, $recurring: Boolean) {
+	setTransactionRecurring(transactionId: $transactionId, recurring: $recurring) {
+		id
+		recurring {
+			isRecurring
+			source
+			seriesId
+			cadence
+			medianAmount
+		}
+	}
+}`;

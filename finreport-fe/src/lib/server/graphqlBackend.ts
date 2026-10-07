@@ -25,6 +25,8 @@ import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
 import clearTransactionCategoryMock from '$lib/graphql/mocks/clear-transaction-category.json';
 import unsplitTransactionMock from '$lib/graphql/mocks/unsplit-transaction.json';
+import tagsMock from '$lib/graphql/mocks/tags.json';
+import recurringOverviewMock from '$lib/graphql/mocks/recurring-overview.json';
 
 /** Name of the mock-mode session cookie, mirroring the real `fr_session` cookie's role. */
 const MOCK_SESSION_COOKIE = 'fr_session';
@@ -192,6 +194,32 @@ function mockSetTransactionCategory(variables: Record<string, unknown> | undefin
 	};
 }
 
+/** `setTransactionTags`/`setTransactionRecurring` (iteration 3 §4): echo
+ * back the requested transaction with the mutation's own arguments applied,
+ * same "visible in mock mode" rationale as `mockSetTransactionCategory`. */
+function mockSetTransactionTags(variables: Record<string, unknown> | undefined): unknown {
+	const transactionId = (variables?.transactionId as string) ?? '';
+	const tags = (variables?.tags as string[] | undefined) ?? [];
+	return { setTransactionTags: { id: transactionId, tags: [...tags].sort() } };
+}
+
+function mockSetTransactionRecurring(variables: Record<string, unknown> | undefined): unknown {
+	const transactionId = (variables?.transactionId as string) ?? '';
+	const recurring = (variables?.recurring as boolean | null | undefined) ?? null;
+	return {
+		setTransactionRecurring: {
+			id: transactionId,
+			recurring: {
+				isRecurring: recurring ?? false,
+				source: recurring === null ? 'AUTO' : 'USER',
+				seriesId: null,
+				cadence: null,
+				medianAmount: null
+			}
+		}
+	};
+}
+
 function mockSplitTransaction(variables: Record<string, unknown> | undefined): unknown {
 	const transactionId = (variables?.transactionId as string) ?? '';
 	const parts = (variables?.parts as { amount: string; categorySlug: string }[] | undefined) ?? [];
@@ -331,6 +359,24 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 						)
 					}
 				},
+				setCookies: []
+			};
+		// Iteration-3 (§4) stub operations: same "WP0 mock, real backend still
+		// NOT_IMPLEMENTED" shape as the iteration-2 block above.
+		case 'Tags':
+			return { status: 200, body: { data: tagsMock.data }, setCookies: [] };
+		case 'RecurringSeries':
+			return { status: 200, body: { data: recurringOverviewMock.data }, setCookies: [] };
+		case 'SetTransactionTags':
+			return {
+				status: 200,
+				body: { data: mockSetTransactionTags(body.variables) },
+				setCookies: []
+			};
+		case 'SetTransactionRecurring':
+			return {
+				status: 200,
+				body: { data: mockSetTransactionRecurring(body.variables) },
 				setCookies: []
 			};
 		case 'SetTransactionCategory':

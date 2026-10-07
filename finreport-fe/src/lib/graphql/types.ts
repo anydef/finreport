@@ -81,6 +81,12 @@ export interface Transaction {
 	label: TransactionLabel | null;
 	/** Empty when not split. */
 	splits: TransactionSplit[];
+	/** Sorted; `[]` when untagged (iteration 3 §4). */
+	tags: string[];
+	/** `null` = not an internal transfer (iteration 3 §4). */
+	transfer: TransferInfo | null;
+	/** Always present; `isRecurring` may be `false` (iteration 3 §4). */
+	recurring: RecurringInfo;
 }
 
 export interface TransactionFilter {
@@ -97,6 +103,12 @@ export interface TransactionFilter {
 	uncategorized?: boolean | null;
 	needsReview?: boolean | null;
 	labelSources?: LabelSource[] | null;
+	/** AND-ed: the transaction carries all of them (iteration 3 §4). */
+	tags?: string[] | null;
+	/** Matches the *effective* flag (iteration 3 §4). */
+	recurring?: boolean | null;
+	/** `true` = only transfers, `false` = only non-transfers (iteration 3 §4). */
+	transfer?: boolean | null;
 }
 
 export interface PageInput {
@@ -255,4 +267,59 @@ export interface RuleInput {
 	categorySlug: string;
 	conditions: Json;
 	priority?: number;
+}
+
+// ---------------------------------------------------------------------------
+// Tags, internal transfers, recurring costs (iteration 3, §4)
+// ---------------------------------------------------------------------------
+
+export type FlagSource = 'AUTO' | 'USER';
+export type RecurringCadence = 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+export type TransferMatchKind = 'IBAN' | 'AMOUNT_DATE';
+
+export interface TransferInfo {
+	/** `null` while the other leg is not projected yet. */
+	counterpartTransactionId: UUID | null;
+	counterpartAccountId: UUID | null;
+	match: TransferMatchKind;
+}
+
+/** `source = 'USER'` when overridden; `seriesId` is `null` when overridden
+ * in or out of a series. */
+export interface RecurringInfo {
+	isRecurring: boolean;
+	source: FlagSource;
+	seriesId: UUID | null;
+	cadence: RecurringCadence | null;
+	medianAmount: Decimal | null;
+}
+
+export interface RecurringSeries {
+	id: UUID;
+	counterpartyKey: string;
+	counterpartyName: string | null;
+	direction: Direction;
+	cadence: RecurringCadence;
+	/** Signed. */
+	medianAmount: Decimal;
+	/** Signed, 4 dp. */
+	monthlyEquivalent: Decimal;
+	occurrenceCount: number;
+	firstDate: DateString;
+	lastDate: DateString;
+	nextExpectedDate: DateString;
+	/** `lastDate` older than cadence + grace. */
+	stale: boolean;
+}
+
+export interface RecurringOverview {
+	series: RecurringSeries[];
+	/** Expense series only, positive magnitude. */
+	totalMonthlyEquivalent: Decimal;
+	currency: string;
+}
+
+export interface TagCount {
+	tag: string;
+	transactionCount: number;
 }
