@@ -1,4 +1,8 @@
-//! Imports balances and transactions for every configured Comdirect login.
+//! Imports balances and transactions for every configured Comdirect login and
+//! publishes them to the event log (§2.6). Kafka is the importer's only
+//! output now — there is no Postgres write to fall back on, so
+//! `APP_kafka_brokers` is required at startup and a publish failure is
+//! logged as data loss rather than swallowed (§2.6/§2.7).
 //!
 //! One process, one task per login: each login runs its own state machine, so
 //! it approves its own push-TAN and re-bootstraps its own stale session without
@@ -10,14 +14,8 @@ use comdirect_rs::comdirect::session::{load_comdirect_session, refresh_comdirect
 use comdirect_rs::comdirect::session_client::Session;
 use comdirect_rs::comdirect::transaction::ImportStop;
 use dotenv::dotenv;
-use entities::{account, account_balance};
-use entity::entities;
-use sea_orm::sea_query::OnConflict;
-use sea_orm::{DbConn, EntityTrait, Set, Unchanged};
-use secrecy::ExposeSecret;
-use std::error::Error;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::error::Error;
 use std::time::{Duration, Instant};
 use tokio::task::JoinSet;
 use tokio::time::sleep;
@@ -25,9 +23,9 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 use tracing_subscriber::EnvFilter;
 use utils::settings::{ComdirectProfile, Settings};
 use webapp::cli::account_arg;
-use webapp::db::seaql;
+use webapp::kafka::envelope::{RecordMeta, CURRENT_SCHEMA_VERSION, ORIGIN_SOURCE, SOURCE_COMDIRECT};
 use webapp::kafka::events::split_account_element;
-use webapp::kafka::producer::{EventPublisher, RecordMeta};
+use webapp::kafka::producer::EventPublisher;
 use webapp::kafka::watermark::{load_watermarks, publish_watermark, Watermark};
 use webapp::kafka::{TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION};
 
@@ -80,18 +78,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     })?;
 
     let client_settings = Settings::from_env()?;
+    // The event log is the only output this binary has; an importer that
+    // cannot publish has nowhere to put what it fetches (§2.6).
+    let brokers = client_settings.require_kafka_brokers()?.to_string();
+
     let profiles = match requested_account.as_deref() {
         Some(key) => vec![client_settings.select_profile(Some(key))?],
         None => client_settings.profiles()?,
     };
 
-    info!("[startup] Connecting to database");
-    let conn: Arc<DbConn> =
-        Arc::new(seaql::init_db(client_settings.database_url.expose_secret()).await?);
-    info!("[startup] Database connected, migrations applied.");
-
     // One task per login. They run concurrently — each approves its own TAN and
-    // keeps its own session file — and the connection pool is shared.
+    // keeps its own session file.
     let mut accounts = JoinSet::new();
     for profile in profiles {
         info!(
@@ -101,9 +98,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "[startup] starting importer for Comdirect account"
         );
         let span = info_span!("account", key = %profile.key);
-        let conn = Arc::clone(&conn);
-        let brokers = client_settings.kafka_brokers.clone();
-        accounts.spawn(async move { run_account(profile, conn, brokers).instrument(span).await });
+        let brokers = brokers.clone();
+        accounts.spawn(async move { run_account(profile, brokers).instrument(span).await });
     }
 
     // Each task only returns once that login has failed for good; the others
@@ -130,44 +126,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// Drives one Comdirect login forever: session bootstrap (including the TAN
 /// approval), periodic token refresh and periodic import. Returns the account
 /// key only when that login has failed for good.
-async fn run_account(
-    profile: ComdirectProfile,
-    conn: Arc<DbConn>,
-    brokers: Option<String>,
-) -> String {
-    // Publishing is an optional side-channel during dual-write: if the broker
-    // is unreachable or unconfigured, this account still imports into Postgres.
-    let publisher = match brokers.as_deref() {
-        None => None,
-        Some(brokers) => match EventPublisher::connect(brokers) {
-            Ok(publisher) => Some(publisher),
-            Err(e) => {
-                error!(%e, "[startup] could not reach the broker; publishing disabled");
-                None
-            }
-        },
+async fn run_account(profile: ComdirectProfile, brokers: String) -> String {
+    let publisher = match EventPublisher::connect(&brokers) {
+        Ok(publisher) => publisher,
+        Err(e) => {
+            error!(%e, "[startup] could not construct the Kafka producer; giving up");
+            return profile.key;
+        }
     };
 
     // Resume points, so an import only publishes what the log lacks. An empty
-    // map means "import everything", which is the first-run and no-Kafka path.
-    let mut watermarks = match (publisher.is_some(), brokers.clone()) {
-        (true, Some(brokers)) => {
-            match tokio::task::spawn_blocking(move || load_watermarks(&brokers)).await {
-                Ok(Ok(watermarks)) => {
-                    info!(accounts = watermarks.len(), "[startup] loaded resume points");
-                    watermarks
-                }
-                Ok(Err(e)) => {
-                    warn!(%e, "[startup] could not read resume points; importing full history");
-                    HashMap::new()
-                }
-                Err(e) => {
-                    warn!(%e, "[startup] resume-point read panicked; importing full history");
-                    HashMap::new()
-                }
+    // map means "import everything", which is the first-run path.
+    let mut watermarks = {
+        let brokers = brokers.clone();
+        match tokio::task::spawn_blocking(move || load_watermarks(&brokers)).await {
+            Ok(Ok(watermarks)) => {
+                info!(accounts = watermarks.len(), "[startup] loaded resume points");
+                watermarks
+            }
+            Ok(Err(e)) => {
+                warn!(%e, "[startup] could not read resume points; importing full history");
+                HashMap::new()
+            }
+            Err(e) => {
+                warn!(%e, "[startup] resume-point read panicked; importing full history");
+                HashMap::new()
             }
         }
-        _ => HashMap::new(),
     };
 
     let mut state = LoopState::Bootstrap { attempt: 0 };
@@ -228,7 +213,7 @@ async fn run_account(
                 let now = Instant::now();
                 if next_import <= now {
                     info!("[import] starting");
-                    match run_import(&session, &profile, &conn, publisher.as_ref(), &mut watermarks).await {
+                    match run_import(&session, &profile, &publisher, &mut watermarks).await {
                         Ok(()) => {
                             let next = Instant::now() + IMPORT_INTERVAL;
                             info!(
@@ -284,17 +269,11 @@ async fn run_account(
 async fn run_import(
     session: &Session,
     profile: &ComdirectProfile,
-    conn: &DbConn,
-    publisher: Option<&EventPublisher>,
+    publisher: &EventPublisher,
     watermarks: &mut HashMap<String, Watermark>,
 ) -> Result<(), Box<dyn Error>> {
     let accounts = get_accounts_raw(session.clone(), profile).await?;
     let imported_at = chrono::Utc::now().to_rfc3339();
-    let meta = RecordMeta {
-        account_key: &profile.key,
-        account_name: profile.name.as_deref(),
-        imported_at: &imported_at,
-    };
     info!(
         account = %profile.key,
         count = accounts.accounts.len(),
@@ -303,115 +282,51 @@ async fn run_import(
 
     for element in accounts.accounts {
         let account = &element.parsed;
+        let account_id = account.account.account_id.clone();
+        // `source_account_id` is sent on every topic, including `account`
+        // (redundant there — the payload already names it — but uniform, §2.2).
+        let meta = RecordMeta {
+            source: SOURCE_COMDIRECT,
+            source_account_id: Some(account_id.as_str()),
+            origin: ORIGIN_SOURCE,
+            schema_version: CURRENT_SCHEMA_VERSION,
+            imported_at: &imported_at,
+            comdirect_account_key: &profile.key,
+            comdirect_account_name: profile.name.as_deref(),
+        };
 
         // Publish the bank's own bytes for this account and its balance. The
         // response bundles both, but they belong on different topics, so they
         // are sliced out of the original payload rather than re-encoded.
-        if let Some(publisher) = publisher {
-            match split_account_element(&element.raw) {
-                Ok((account_json, balance_json)) => {
-                    let key = &account.account.account_id;
-                    publisher
-                        .publish_best_effort(
-                            TOPIC_ACCOUNT,
-                            key,
-                            account_json.get().as_bytes(),
-                            &meta,
-                        )
-                        .await;
-                    publisher
-                        .publish_best_effort(
-                            TOPIC_ACCOUNT_BALANCE,
-                            key,
-                            balance_json.get().as_bytes(),
-                            &meta,
-                        )
-                        .await;
-                }
-                Err(e) => warn!(
-                    display_id = %account.account.display_id,
-                    %e, "could not split account payload; not published"
-                ),
+        // Best-effort: a lost account/balance snapshot is replaced by the
+        // next import cycle, unlike a transaction, which exists exactly once.
+        match split_account_element(&element.raw) {
+            Ok((account_json, balance_json)) => {
+                publisher
+                    .publish_best_effort(
+                        TOPIC_ACCOUNT,
+                        &account_id,
+                        account_json.get().as_bytes(),
+                        &meta,
+                    )
+                    .await;
+                publisher
+                    .publish_best_effort(
+                        TOPIC_ACCOUNT_BALANCE,
+                        &account_id,
+                        balance_json.get().as_bytes(),
+                        &meta,
+                    )
+                    .await;
             }
-        }
-
-        let account_orm = account::ActiveModel {
-            account_id: Unchanged(account.account.account_id.clone()),
-            display_id: Unchanged(account.account.display_id.to_owned()),
-            account_type: Unchanged(account.account.account_type.text.to_owned()),
-            iban: Unchanged(account.account.iban.to_owned()),
-            bic: Unchanged(account.account.bic.to_owned()),
-            institute: Unchanged("COMDIRECT".to_string()),
-            account_name: Set(profile.name.clone()),
-            ..Default::default()
-        };
-
-        match account::Entity::insert(account_orm)
-            .on_conflict(
-                // Only the name is refreshed on re-import, so renaming a login
-                // in the config lands on its accounts the next time it runs.
-                OnConflict::column(account::Column::AccountId)
-                    .update_column(account::Column::AccountName)
-                    .to_owned(),
-            )
-            .exec(conn)
-            .await
-        {
-            Ok(r) => info!(
+            Err(e) => warn!(
                 display_id = %account.account.display_id,
-                account_name = profile.name.as_deref().unwrap_or("<unnamed>"),
-                last_insert_id = ?r.last_insert_id,
-                "inserted account"
-            ),
-            Err(err) => error!(
-                display_id = %account.account.display_id,
-                %err,
-                "failed to insert account"
+                %e, "could not split account payload; not published"
             ),
         }
 
-        let balance_orm = account_balance::ActiveModel {
-            account_id: Set(account.account.account_id.to_owned()),
-            amount: Set(account.balance.value.parse().unwrap_or(0.0)),
-            date: Set(chrono::Local::now().date_naive()),
-            ..Default::default()
-        };
-
-        // One balance per account per day. Re-running the import within the
-        // same day hits DO NOTHING, which returns zero rows — expected, not an
-        // error, so this uses exec_without_returning rather than exec(), whose
-        // RETURNING clause turns a skipped row into `RecordNotInserted`.
-        match account_balance::Entity::insert(balance_orm)
-            .on_conflict(
-                OnConflict::columns([
-                    account_balance::Column::AccountId,
-                    account_balance::Column::Date,
-                ])
-                .do_nothing()
-                .to_owned(),
-            )
-            .exec_without_returning(conn)
-            .await
-        {
-            Ok(0) => debug!(
-                display_id = %account.account.display_id,
-                "balance for today already recorded"
-            ),
-            Ok(_) => info!(
-                display_id = %account.account.display_id,
-                balance = %account.balance.value,
-                "inserted balance"
-            ),
-            Err(e) => error!(
-                display_id = %account.account.display_id,
-                %e,
-                "failed to insert balance"
-            ),
-        }
-
-        // Resume where the log left off. With no watermark (first run, or no
-        // broker configured) this is an unrestricted fetch — today's behaviour.
-        let account_id = account.account.account_id.clone();
+        // Resume where the log left off. With no watermark (first run) this
+        // is an unrestricted fetch.
         let stop = watermarks
             .get(&account_id)
             .map(|w| ImportStop {
@@ -420,7 +335,7 @@ async fn run_import(
             })
             .unwrap_or_default();
         debug!(
-            account_id = %account.account_id,
+            account_id = %account_id,
             resume_from = ?stop.last_booking_date,
             "fetching transactions"
         );
@@ -441,81 +356,42 @@ async fn run_import(
             })
             .max_by(|a, b| a.0.cmp(&b.0));
 
+        // A publish failure here is data loss (there is no DB copy to fall
+        // back on), so every transaction's outcome is tracked: if any fails,
+        // the watermark for this cycle is not advanced — advancing it past an
+        // unpublished transaction would lose it permanently (§2.6/§2.7). The
+        // loop still attempts every remaining transaction rather than
+        // aborting the batch, so a single blip costs one retry next cycle,
+        // not the whole account's progress.
+        let mut all_published = true;
         for raw_transaction in &transactions {
             let transaction = &raw_transaction.parsed;
-            if let Some(publisher) = publisher {
-                publisher
-                    .publish_best_effort(
-                        TOPIC_TRANSACTION,
-                        &transaction.reference,
-                        raw_transaction.raw.get().as_bytes(),
-                        &meta,
-                    )
-                    .await;
-            }
-            let transaction_orm = entities::account_transactions::ActiveModel {
-                reference: Set(transaction.reference.to_owned()),
-                account_id: Set(account.account.account_id.to_owned()),
-                booking_status: Set(transaction.booking_status.clone()),
-                booking_date: Set(transaction.booking_date.parse().unwrap()),
-                amount: Set(transaction.amount.value.parse().unwrap_or(0.0)),
-                remitter: Set(transaction
-                    .remitter
-                    .as_ref()
-                    .map(|remitter| remitter.holder_name.clone())
-                    .unwrap_or_default()),
-                deptor: Set(transaction.deptor.clone().unwrap_or_default()),
-                creditor: Set(transaction
-                    .creditor
-                    .as_ref()
-                    .map(|creditor| creditor.holder_name.clone())
-                    .unwrap_or_default()),
-                creditor_id: Set(transaction
-                    .direct_debit_creditor_id
-                    .clone()
-                    .unwrap_or_default()),
-                creditor_mandate_id: Set(transaction
-                    .direct_debit_mandate_id
-                    .clone()
-                    .unwrap_or_default()),
-                remittance_info: Set(transaction.remittance_info.clone()),
-                transaction_type: Set(transaction.transaction_type.text.clone()),
-                ..Default::default()
-            };
-
-            match entities::account_transactions::Entity::insert(transaction_orm)
-                .on_conflict(
-                    OnConflict::column(entities::account_transactions::Column::Reference)
-                        .update_columns([
-                            entities::account_transactions::Column::BookingStatus,
-                            entities::account_transactions::Column::BookingDate,
-                            entities::account_transactions::Column::Amount,
-                            entities::account_transactions::Column::Remitter,
-                            entities::account_transactions::Column::Deptor,
-                            entities::account_transactions::Column::Creditor,
-                            entities::account_transactions::Column::CreditorId,
-                            entities::account_transactions::Column::CreditorMandateId,
-                            entities::account_transactions::Column::RemittanceInfo,
-                            entities::account_transactions::Column::TransactionType,
-                        ])
-                        .to_owned(),
+            match publisher
+                .publish(
+                    TOPIC_TRANSACTION,
+                    &transaction.reference,
+                    raw_transaction.raw.get().as_bytes(),
+                    &meta,
                 )
-                .exec(conn)
                 .await
             {
-                Ok(_) => debug!(reference = %transaction.reference, "inserted transaction"),
-                Err(e) => error!(
-                    reference = %transaction.reference,
-                    %e,
-                    "failed to insert transaction"
-                ),
+                Ok(()) => debug!(reference = %transaction.reference, "published transaction"),
+                Err(e) => {
+                    error!(
+                        reference = %transaction.reference,
+                        %e,
+                        "failed to publish transaction; watermark will not advance this cycle"
+                    );
+                    all_published = false;
+                }
             }
         }
 
-        // Advance the resume point only when this pass actually saw something
-        // newer. An empty fetch means the log is already current, and moving
-        // the watermark backwards would re-publish history next run.
-        if let (Some(publisher), Some((booking_date, reference))) = (publisher, newest) {
+        // Advance the resume point only when every transaction in this batch
+        // published successfully and this pass actually saw something newer.
+        // An empty fetch means the log is already current, and moving the
+        // watermark backwards would re-publish history next run.
+        if let (true, Some((booking_date, reference))) = (all_published, newest) {
             let already_current = watermarks
                 .get(&account_id)
                 .and_then(|w| w.last_booking_date)

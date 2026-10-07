@@ -1,0 +1,26 @@
+{
+  "reference": "ACC2-SPEND-08",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-03-23",
+  "amount": {
+    "value": "-35.00",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "Blumenladen Rose",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-03-23",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Überweisung",
+  "transactionType": {
+    "key": "TRANSFER",
+    "text": "Überweisung"
+  }
+}

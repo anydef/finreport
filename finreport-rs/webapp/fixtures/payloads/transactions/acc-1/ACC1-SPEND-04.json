@@ -1,0 +1,26 @@
+{
+  "reference": "ACC1-SPEND-04",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-05-14",
+  "amount": {
+    "value": "-48.52",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "Netflix International BV",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-05-14",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Kartenzahlung",
+  "transactionType": {
+    "key": "CARD_PAYMENT",
+    "text": "Kartenzahlung"
+  }
+}

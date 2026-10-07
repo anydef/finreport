@@ -1,0 +1,154 @@
+{
+  "query": "query CashflowGraph($filter: TransactionFilter!, $grouping: CashflowGraphInput) {\n  cashflowGraph(filter: $filter, grouping: $grouping) {\n    nodes {\n      id\n      label\n      kind\n      depth\n      value\n      refType\n      refId\n    }\n    links {\n      sourceId\n      targetId\n      value\n    }\n    currency\n    dimensions\n    truncated\n  }\n}",
+  "variables": {
+    "filter": {
+      "accountIds": [
+        "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d"
+      ],
+      "startDate": "2024-01-01",
+      "endDate": "2024-06-30"
+    },
+    "grouping": {
+      "dimensions": [
+        "ACCOUNT",
+        "OUTCOME"
+      ],
+      "maxNodesPerDimension": 8
+    }
+  },
+  "data": {
+    "cashflowGraph": {
+      "nodes": [
+        {
+          "id": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "label": "Main",
+          "kind": "NET",
+          "depth": 0,
+          "value": "15000.00",
+          "refType": "account",
+          "refId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d"
+        },
+        {
+          "id": "outcome:hausverwaltung-mustermann",
+          "label": "Hausverwaltung Mustermann",
+          "kind": "SPENDING",
+          "depth": 1,
+          "value": "5700.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:rewe-sagt-danke",
+          "label": "REWE SAGT DANKE",
+          "kind": "SPENDING",
+          "depth": 1,
+          "value": "20.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:edeka-markt",
+          "label": "EDEKA MARKT",
+          "kind": "SPENDING",
+          "depth": 1,
+          "value": "27.13",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:aldi-sued",
+          "label": "ALDI SUED",
+          "kind": "SPENDING",
+          "depth": 1,
+          "value": "34.26",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:dm-drogerie-markt",
+          "label": "DM DROGERIE MARKT",
+          "kind": "SPENDING",
+          "depth": 1,
+          "value": "41.39",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:netflix-international-bv",
+          "label": "Netflix International BV",
+          "kind": "SPENDING",
+          "depth": 1,
+          "value": "48.52",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:unknown",
+          "label": "Unknown",
+          "kind": "SPENDING",
+          "depth": 1,
+          "value": "160.00",
+          "refType": null,
+          "refId": null
+        },
+        {
+          "id": "outcome:other",
+          "label": "Other",
+          "kind": "OTHER",
+          "depth": 1,
+          "value": "368.70",
+          "refType": null,
+          "refId": null
+        }
+      ],
+      "links": [
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:hausverwaltung-mustermann",
+          "value": "5700.00"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:rewe-sagt-danke",
+          "value": "20.00"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:edeka-markt",
+          "value": "27.13"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:aldi-sued",
+          "value": "34.26"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:dm-drogerie-markt",
+          "value": "41.39"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:netflix-international-bv",
+          "value": "48.52"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:unknown",
+          "value": "160.00"
+        },
+        {
+          "sourceId": "account:2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "targetId": "outcome:other",
+          "value": "368.70"
+        }
+      ],
+      "currency": "EUR",
+      "dimensions": [
+        "ACCOUNT",
+        "OUTCOME"
+      ],
+      "truncated": true
+    }
+  }
+}

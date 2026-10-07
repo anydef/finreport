@@ -14,6 +14,13 @@
 # silently dropping the log. Ordinary in-place config changes (cleanup.policy,
 # retention.ms) are unaffected. Removing a topic on purpose means deleting its
 # lifecycle block first, deliberately, in a reviewed commit.
+#
+# docker-compose.local.yml's finreport-redpanda-init service recreates these
+# same four topics (name, partitions, cleanup.policy/retention.ms) against
+# the local single-node Redpanda for `just dev-up`. It is not generated from
+# this module — Terraform only ever touches the central broker — so a
+# change here (new topic, different partitions/cleanup policy) needs the
+# matching `rpk topic create` line there kept in step by hand.
 
 # Entity snapshot: current state of a Comdirect account, one record per
 # account_id. Raw Comdirect API JSON, byte-for-byte. Compacted (not

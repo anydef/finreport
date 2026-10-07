@@ -2,8 +2,15 @@
 
 pub use super::account::Entity as Account;
 pub use super::account_balance::Entity as AccountBalance;
-pub use super::account_transactions::Entity as AccountTransactions;
+pub use super::app_user::Entity as AppUser;
 pub use super::categories::Entity as Categories;
+pub use super::legacy_account::Entity as LegacyAccount;
+pub use super::legacy_account_balance::Entity as LegacyAccountBalance;
+pub use super::legacy_account_transactions::Entity as LegacyAccountTransactions;
 pub use super::mandate_categories::Entity as MandateCategories;
+pub use super::projection_offset::Entity as ProjectionOffset;
+pub use super::transaction::Entity as Transaction;
 pub use super::transaction_categories::Entity as TransactionCategories;
 pub use super::transactions::Entity as Transactions;
+pub use super::user_account::Entity as UserAccount;
+pub use super::user_session::Entity as UserSession;

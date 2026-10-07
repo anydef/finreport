@@ -1,0 +1,41 @@
+{
+  "query": "query Accounts {\n  accounts {\n    id\n    source\n    externalId\n    displayId\n    accountType\n    iban\n    bic\n    institute\n    label\n    currency\n    latestBalance {\n      date\n      amount\n      currency\n    }\n  }\n}",
+  "data": {
+    "accounts": [
+      {
+        "id": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "DE1053820100A1",
+        "displayId": "1053820100",
+        "accountType": "Girokonto",
+        "iban": "DE11500105171234567890",
+        "bic": "COBADEFFXXX",
+        "institute": null,
+        "label": "Main",
+        "currency": "EUR",
+        "latestBalance": {
+          "date": "2024-06-30",
+          "amount": "2600.00",
+          "currency": "EUR"
+        }
+      },
+      {
+        "id": "dada8a91-51aa-5243-bcf6-12ff5423b400",
+        "source": "comdirect",
+        "externalId": "DE1053820200A1",
+        "displayId": "1053820200",
+        "accountType": "Tagesgeld",
+        "iban": "DE22500105171234567891",
+        "bic": "COBADEFFXXX",
+        "institute": null,
+        "label": "Joint",
+        "currency": "EUR",
+        "latestBalance": {
+          "date": "2024-06-30",
+          "amount": "3100.00",
+          "currency": "EUR"
+        }
+      }
+    ]
+  }
+}

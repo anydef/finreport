@@ -132,13 +132,15 @@ pub fn load_watermarks(brokers: &str) -> Result<HashMap<String, Watermark>, Kafk
 /// Publishes an account's resume point. Keyed by `account_id` so compaction
 /// keeps exactly the newest one per account.
 ///
-/// Best-effort like the rest of the dual-write: losing this costs a re-import
-/// of already-published transactions next run, which is idempotent, not a data
-/// loss.
+/// Best-effort: losing this costs a re-import of already-published
+/// transactions next run, which is idempotent (compacted topics, upserts
+/// downstream), not a data loss — unlike a transaction publish itself, which
+/// is why only this and the account/balance snapshots use the best-effort
+/// path (§2.6/§2.7).
 pub async fn publish_watermark(
     publisher: &super::producer::EventPublisher,
     watermark: &Watermark,
-    meta: &super::producer::RecordMeta<'_>,
+    meta: &super::envelope::RecordMeta<'_>,
 ) {
     match serde_json::to_vec(watermark) {
         Ok(payload) => {

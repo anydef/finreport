@@ -1,0 +1,14 @@
+{
+  "reference": "LEGACY-0001",
+  "account_id": "DE1053820100A1",
+  "booking_status": "BOOKED",
+  "booking_date": "2023-11-15",
+  "amount": -54.3,
+  "remitter": "",
+  "deptor": "",
+  "creditor": "Alte Apotheke",
+  "creditor_id": "",
+  "creditor_mandate_id": "",
+  "remittance_info": "Rezept",
+  "transaction_type": "CARD_PAYMENT"
+}

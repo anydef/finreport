@@ -1,0 +1,26 @@
+{
+  "reference": "ACC1-SPEND-09",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-04-19",
+  "amount": {
+    "value": "-83.17",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "Restaurant Lotus",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-04-19",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Kartenzahlung",
+  "transactionType": {
+    "key": "CARD_PAYMENT",
+    "text": "Kartenzahlung"
+  }
+}

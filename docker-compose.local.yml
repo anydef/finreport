@@ -7,7 +7,7 @@ services:
       POSTGRES_USER: finreport
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finreport}
     ports:
-      - "5432:5432"
+      - "${FINREPORT_PG_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -15,6 +15,58 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  # Single-node Redpanda for local/offline dev (§7). Advertises on the
+  # host-reachable port so `cargo run` binaries on the host (projector,
+  # fixture-replay, import-local) and in-container services agree on the same
+  # address — not kafka.lab.anydef.de, no network access to the bank or the
+  # central broker needed.
+  finreport-redpanda:
+    image: redpandadata/redpanda:v24.2.18
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://finreport-redpanda:9092,external://127.0.0.1:${FINREPORT_KAFKA_PORT:-19092}
+    ports:
+      - "${FINREPORT_KAFKA_PORT:-19092}:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # One-shot: (re-)creates the four topics with the same partitions/cleanup
+  # policies as terraform/kafka/main.tf. Keep both in step — drift means local
+  # dev behaves unlike the deployed broker.
+  finreport-redpanda-init:
+    image: redpandadata/redpanda:v24.2.18
+    restart: "no"
+    depends_on:
+      finreport-redpanda:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        RPK="rpk --brokers finreport-redpanda:9092"
+        $$RPK topic create finreport.account \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.account-balance \
+          --partitions 1 --replicas 1 \
+          --topic-config cleanup.policy=delete --topic-config retention.ms=-1 || true
+        $$RPK topic create finreport.transaction \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.import-watermark \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic list
 
   finreport-be:
     build:
@@ -45,18 +97,45 @@ services:
     entrypoint: ["finreport-be-importer"]
     restart: always
     depends_on:
-      finreport-be-postgres:
+      finreport-redpanda:
         condition: service_healthy
     environment:
       RUST_LOG: info
-      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
+      # No APP_database_url (§2.6): the importer only publishes to Kafka now,
+      # it never writes Postgres.
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
+      # Required (§2.6): a missing broker is a startup error for the importer.
+      APP_kafka_brokers: finreport-redpanda:9092
       APP_client_id: ${APP_client_id:-}
       APP_client_secret: ${APP_client_secret:-}
       APP_zugangsnummer: ${APP_zugangsnummer:-}
       APP_pin: ${APP_pin:-}
+    volumes:
+      - finreport-data:/app/data
+
+  # Consumes the ingest topics and builds the read model (§2.3). Separate
+  # service/profile from `finreport-be` because it is a long-running consumer,
+  # not an HTTP server — mirrors the deployed `finreport-be-projector`.
+  finreport-be-projector:
+    build:
+      context: .
+    profiles: ["projector"]
+    entrypoint: ["projector"]
+    restart: unless-stopped
+    depends_on:
+      finreport-be-postgres:
+        condition: service_healthy
+      finreport-redpanda-init:
+        condition: service_completed_successfully
+    environment:
+      RUST_LOG: info
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD:-finreport}@finreport-be-postgres:5432/finreport
+      APP_kafka_brokers: finreport-redpanda:9092
+      APP_oauth_url: https://api.comdirect.de
+      APP_url: https://api.comdirect.de/api
+      APP_save_file_path: /app/data/.session.json
     volumes:
       - finreport-data:/app/data
 

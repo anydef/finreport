@@ -1,0 +1,9 @@
+{
+  "iban": "DE11500105171234567890",
+  "bic": "COBADEFFXXX",
+  "accountId": "DE1053820100A1",
+  "accountDisplayId": "1053820100",
+  "accountType": {
+    "text": "Girokonto"
+  }
+}

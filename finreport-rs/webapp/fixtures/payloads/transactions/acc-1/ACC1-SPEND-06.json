@@ -1,0 +1,26 @@
+{
+  "reference": "ACC1-SPEND-06",
+  "bookingStatus": "BOOKED",
+  "bookingDate": "2024-01-16",
+  "amount": {
+    "value": "-62.78",
+    "unit": "EUR"
+  },
+  "remitter": null,
+  "deptor": null,
+  "creditor": {
+    "holderName": "Deutsche Bahn AG",
+    "iban": "",
+    "bic": ""
+  },
+  "valutaDate": "2024-01-16",
+  "directDebitCreditorId": null,
+  "directDebitMandateId": null,
+  "endToEndReference": null,
+  "newTransaction": false,
+  "remittanceInfo": "Kartenzahlung",
+  "transactionType": {
+    "key": "CARD_PAYMENT",
+    "text": "Kartenzahlung"
+  }
+}

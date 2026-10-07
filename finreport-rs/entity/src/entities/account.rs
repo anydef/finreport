@@ -5,25 +5,42 @@ use sea_orm::entity::prelude::*;
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
 #[sea_orm(table_name = "account")]
 pub struct Model {
-    #[sea_orm(primary_key)]
-    pub id: i32,
-    #[sea_orm(unique)]
-    pub account_id: String,
-    pub display_id: String,
-    pub account_type: String,
-    #[sea_orm(unique)]
-    pub iban: String,
-    pub bic: String,
-    pub institute: String,
-    pub account_name: Option<String>,
+    #[sea_orm(primary_key, auto_increment = false)]
+    pub id: Uuid,
+    #[sea_orm(column_type = "Text")]
+    pub source: String,
+    #[sea_orm(column_type = "Text")]
+    pub external_id: String,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub display_id: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub account_type: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub iban: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub bic: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub institute: Option<String>,
+    #[sea_orm(column_type = "Text", nullable)]
+    pub label: Option<String>,
+    #[sea_orm(column_type = "Text")]
+    pub currency: String,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub raw_payload: Option<Json>,
+    #[sea_orm(column_type = "Text")]
+    pub origin: String,
+    pub first_seen_at: DateTimeWithTimeZone,
+    pub updated_at: DateTimeWithTimeZone,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
     #[sea_orm(has_many = "super::account_balance::Entity")]
     AccountBalance,
-    #[sea_orm(has_many = "super::account_transactions::Entity")]
-    AccountTransactions,
+    #[sea_orm(has_many = "super::transaction::Entity")]
+    Transaction,
+    #[sea_orm(has_many = "super::user_account::Entity")]
+    UserAccount,
 }
 
 impl Related<super::account_balance::Entity> for Entity {
@@ -32,9 +49,24 @@ impl Related<super::account_balance::Entity> for Entity {
     }
 }
 
-impl Related<super::account_transactions::Entity> for Entity {
+impl Related<super::transaction::Entity> for Entity {
     fn to() -> RelationDef {
-        Relation::AccountTransactions.def()
+        Relation::Transaction.def()
+    }
+}
+
+impl Related<super::user_account::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::UserAccount.def()
+    }
+}
+
+impl Related<super::app_user::Entity> for Entity {
+    fn to() -> RelationDef {
+        super::user_account::Relation::AppUser.def()
+    }
+    fn via() -> Option<RelationDef> {
+        Some(super::user_account::Relation::Account.def().rev())
     }
 }
 

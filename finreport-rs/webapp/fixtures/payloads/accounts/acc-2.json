@@ -1,0 +1,9 @@
+{
+  "iban": "DE22500105171234567891",
+  "bic": "COBADEFFXXX",
+  "accountId": "DE1053820200A1",
+  "accountDisplayId": "1053820200",
+  "accountType": {
+    "text": "Tagesgeld"
+  }
+}

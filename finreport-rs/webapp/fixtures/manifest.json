@@ -1,0 +1,850 @@
+[
+  {
+    "topic": "finreport.account",
+    "key": "DE1053820100A1",
+    "payload": "payloads/accounts/acc-1.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-30T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style account snapshot"
+  },
+  {
+    "topic": "finreport.account",
+    "key": "DE1053820200A1",
+    "payload": "payloads/accounts/acc-2.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-30T06:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style account snapshot"
+  },
+  {
+    "topic": "finreport.account-balance",
+    "key": "DE1053820100A1",
+    "payload": "payloads/balances/acc-1-2024-01-31.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-31T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "balance observed 2024-01-31"
+  },
+  {
+    "topic": "finreport.account-balance",
+    "key": "DE1053820100A1",
+    "payload": "payloads/balances/acc-1-2024-03-31.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-31T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "balance observed 2024-03-31"
+  },
+  {
+    "topic": "finreport.account-balance",
+    "key": "DE1053820100A1",
+    "payload": "payloads/balances/acc-1-2024-06-30.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-30T06:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "balance observed 2024-06-30"
+  },
+  {
+    "topic": "finreport.account-balance",
+    "key": "DE1053820200A1",
+    "payload": "payloads/balances/acc-2-2024-01-31.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-31T06:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "balance observed 2024-01-31"
+  },
+  {
+    "topic": "finreport.account-balance",
+    "key": "DE1053820200A1",
+    "payload": "payloads/balances/acc-2-2024-03-31.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-31T06:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "balance observed 2024-03-31"
+  },
+  {
+    "topic": "finreport.account-balance",
+    "key": "DE1053820200A1",
+    "payload": "payloads/balances/acc-2-2024-06-30.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-30T06:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "balance observed 2024-06-30"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-01-SALARY",
+    "payload": "payloads/transactions/acc-1/ACC1-01-SALARY.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-02T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-01-RENT",
+    "payload": "payloads/transactions/acc-1/ACC1-01-RENT.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-03T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-02-SALARY",
+    "payload": "payloads/transactions/acc-1/ACC1-02-SALARY.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-02T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-02-RENT",
+    "payload": "payloads/transactions/acc-1/ACC1-02-RENT.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-03T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-03-SALARY",
+    "payload": "payloads/transactions/acc-1/ACC1-03-SALARY.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-02T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-03-RENT",
+    "payload": "payloads/transactions/acc-1/ACC1-03-RENT.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-03T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-04-SALARY",
+    "payload": "payloads/transactions/acc-1/ACC1-04-SALARY.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-02T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-04-RENT",
+    "payload": "payloads/transactions/acc-1/ACC1-04-RENT.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-03T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-05-SALARY",
+    "payload": "payloads/transactions/acc-1/ACC1-05-SALARY.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-02T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-05-RENT",
+    "payload": "payloads/transactions/acc-1/ACC1-05-RENT.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-03T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-06-SALARY",
+    "payload": "payloads/transactions/acc-1/ACC1-06-SALARY.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-02T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-06-RENT",
+    "payload": "payloads/transactions/acc-1/ACC1-06-RENT.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-03T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-00",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-00.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-10T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-01",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-11T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-02",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-02.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-12T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-03",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-03.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-13T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-04",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-04.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-14T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-05",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-05.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-15T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-06",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-06.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-16T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-07",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-07.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-17T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-08",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-08.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-18T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-SPEND-09",
+    "payload": "payloads/transactions/acc-1/ACC1-SPEND-09.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-19T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-CASH-01",
+    "payload": "payloads/transactions/acc-1/ACC1-CASH-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-20T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-CASH-02",
+    "payload": "payloads/transactions/acc-1/ACC1-CASH-02.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-18T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-01-INTEREST",
+    "payload": "payloads/transactions/acc-2/ACC2-01-INTEREST.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-01T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-01-INSURANCE",
+    "payload": "payloads/transactions/acc-2/ACC2-01-INSURANCE.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-05T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-02-INTEREST",
+    "payload": "payloads/transactions/acc-2/ACC2-02-INTEREST.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-01T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-02-INSURANCE",
+    "payload": "payloads/transactions/acc-2/ACC2-02-INSURANCE.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-05T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-03-INTEREST",
+    "payload": "payloads/transactions/acc-2/ACC2-03-INTEREST.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-01T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-03-INSURANCE",
+    "payload": "payloads/transactions/acc-2/ACC2-03-INSURANCE.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-05T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-04-INTEREST",
+    "payload": "payloads/transactions/acc-2/ACC2-04-INTEREST.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-01T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-04-INSURANCE",
+    "payload": "payloads/transactions/acc-2/ACC2-04-INSURANCE.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-05T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-05-INTEREST",
+    "payload": "payloads/transactions/acc-2/ACC2-05-INTEREST.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-01T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-05-INSURANCE",
+    "payload": "payloads/transactions/acc-2/ACC2-05-INSURANCE.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-05T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-06-INTEREST",
+    "payload": "payloads/transactions/acc-2/ACC2-06-INTEREST.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-01T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-06-INSURANCE",
+    "payload": "payloads/transactions/acc-2/ACC2-06-INSURANCE.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-05T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-00",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-00.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-15T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-01",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-16T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-02",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-02.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-17T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-03",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-03.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-18T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-04",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-04.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-05-19T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-05",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-05.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-06-20T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-06",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-06.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-01-21T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-07",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-07.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-22T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-SPEND-08",
+    "payload": "payloads/transactions/acc-2/ACC2-SPEND-08.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-03-23T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC2-CASH-01",
+    "payload": "payloads/transactions/acc-2/ACC2-CASH-01.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820200A1",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-04-22T20:00:00Z",
+      "comdirect_account_key": "1",
+      "comdirect_account_name": "Joint"
+    },
+    "note": "current-style transaction"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-PHASE1-0001",
+    "payload": "payloads/transactions/acc-1/ACC1-01-SALARY.json",
+    "headers": {
+      "imported_at": "2024-01-02T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "phase-1-style record predating the envelope contract (§2.2): no source/origin/schema_version/source_account_id headers at all"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "ACC1-MISSING-ACCOUNT-0001",
+    "payload": "payloads/transactions/acc-1/ACC1-02-RENT.json",
+    "headers": {
+      "source": "comdirect",
+      "origin": "source",
+      "schema_version": 1,
+      "imported_at": "2024-02-03T20:00:00Z",
+      "comdirect_account_key": "0",
+      "comdirect_account_name": "Main"
+    },
+    "note": "missing source_account_id: exercises the projector's skip+log path (§2.2)"
+  },
+  {
+    "topic": "finreport.transaction",
+    "key": "LEGACY-0001",
+    "payload": "payloads/legacy/transaction-0001.json",
+    "headers": {
+      "source": "comdirect",
+      "source_account_id": "DE1053820100A1",
+      "origin": "legacy-backfill",
+      "schema_version": 1,
+      "imported_at": "2023-11-15T20:00:00Z"
+    },
+    "note": "legacy-backfill reconstruction (§2.8): value is our own JSON, not bank bytes — is_bank_verbatim must be false for this record"
+  }
+]

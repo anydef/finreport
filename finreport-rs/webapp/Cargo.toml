@@ -20,7 +20,7 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 sqlx = { version = "0.8", features = [ "runtime-tokio", "sqlite" ] }
 tokio = { version = "1.44.2", features = ["full"]}
-uuid = { version = "1.16.0", features = ["v4"] }
+uuid = { version = "1.16.0", features = ["v4", "v5", "serde"] }
 actix-web = "4.11.0"
 actix-files = "0.6.6"
 utils = {path = "../utils"}
@@ -31,8 +31,45 @@ sea-orm = { version = "1.1.12", features = ["runtime-tokio", "sqlx-postgres", "m
 chrono = "0.4.41"
 rdkafka = { version = "0.39.0", default-features = false, features = ["tokio"] }
 
+# Auth (WP2): Argon2id hashing + session token generation/hashing.
+argon2 = "0.5"
+rand_core = { version = "0.6", features = ["std"] }
+sha2 = "0.10"
+base64 = "0.22"
+# Exact-decimal money, shared by sea-orm's NUMERIC(20,4) columns and the
+# GraphQL `Decimal` scalar (§5) — never `f64`.
+rust_decimal = "1"
+
+[dev-dependencies]
+# Projector/backfill/GraphQL integration tests (§8), gated behind the
+# `integration` feature so `just test` stays fast and offline.
+testcontainers = "0.23"
+testcontainers-modules = { version = "0.11", features = ["postgres", "kafka"] }
+
+[features]
+# Gates the testcontainers-based integration tests (projector replay
+# determinism, precedence, backfill idempotency, real-schema GraphQL). Run
+# with `just test-integration`; `just test` / `cargo test --workspace` never
+# enables it, so CI and local dev stay broker/DB-free by default.
+integration = []
 
 [[bin]]
 name = "import-transactions"
 path = "src/bin/import_transactions.rs"
+
+[[bin]]
+name = "projector"
+path = "src/bin/projector.rs"
+
+[[bin]]
+name = "user-admin"
+path = "src/bin/user_admin.rs"
+
+[[bin]]
+name = "fixture-replay"
+path = "src/bin/fixture_replay.rs"
+
+[[bin]]
+name = "legacy-backfill"
+path = "src/bin/legacy_backfill.rs"
 

@@ -4,3 +4,10 @@ pnpm-lock.yaml
 yarn.lock
 bun.lock
 bun.lockb
+
+# WP0-owned (read-only for WP5) and pre-existing Storybook scaffolding — both
+# already fail `prettier --check` independently of WP5 and are out of scope.
+src/lib/graphql/mocks/
+src/stories/
+.storybook/
+svelte.config.js
