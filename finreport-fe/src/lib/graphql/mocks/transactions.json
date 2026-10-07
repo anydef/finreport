@@ -1,5 +1,5 @@
 {
-  "query": "query Transactions($filter: TransactionFilter, $page: PageInput) {\n  transactions(filter: $filter, page: $page) {\n    items {\n      id\n      accountId\n      source\n      externalId\n      bookingDate\n      valutaDate\n      bookingStatus\n      amount\n      currency\n      counterpartyName\n      counterpartyIban\n      description\n      transactionType\n      label {\n        category {\n          id\n          slug\n          name\n          kind\n        }\n        source\n        confidence\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n      }\n      splits {\n        index\n        amount\n        category {\n          id\n          slug\n          name\n          kind\n        }\n      }\n    }\n    totalCount\n    limit\n    offset\n  }\n}",
+  "query": "query Transactions($filter: TransactionFilter, $page: PageInput) {\n  transactions(filter: $filter, page: $page) {\n    items {\n      id\n      accountId\n      source\n      externalId\n      bookingDate\n      valutaDate\n      bookingStatus\n      amount\n      currency\n      counterpartyName\n      counterpartyIban\n      description\n      transactionType\n      label {\n        category {\n          id\n          slug\n          name\n          kind\n        }\n        source\n        confidence\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n      }\n      splits {\n        index\n        amount\n        category {\n          id\n          slug\n          name\n          kind\n        }\n      }\n      tags\n      transfer {\n        counterpartTransactionId\n        counterpartAccountId\n        match\n      }\n      recurring {\n        isRecurring\n        source\n        seriesId\n        cadence\n        medianAmount\n      }\n    }\n    totalCount\n    limit\n    offset\n  }\n}",
   "variables": {
     "filter": {
       "accountIds": [
@@ -29,9 +29,18 @@
           "counterpartyName": "ACME GmbH",
           "counterpartyIban": null,
           "description": "Gehalt",
-          "transactionType": "\u00dcberweisungsgutschrift",
+          "transactionType": "Überweisungsgutschrift",
           "label": null,
-          "splits": []
+          "splits": [],
+          "tags": [],
+          "transfer": null,
+          "recurring": {
+            "isRecurring": false,
+            "source": "AUTO",
+            "seriesId": null,
+            "cadence": null,
+            "medianAmount": null
+          }
         },
         {
           "id": "28c22a97-bb87-5656-bbfb-9e2137ac51e0",
@@ -61,7 +70,18 @@
             "proposedCategoryPath": null,
             "reasoning": null
           },
-          "splits": []
+          "splits": [],
+          "tags": [
+            "housing"
+          ],
+          "transfer": null,
+          "recurring": {
+            "isRecurring": true,
+            "source": "AUTO",
+            "seriesId": "8a1b2c3d-4e5f-4061-8273-849506a7b8c0",
+            "cadence": "MONTHLY",
+            "medianAmount": "-950.0000"
+          }
         },
         {
           "id": "936fcf84-237d-5ed6-96e9-8c0bf7458a64",
@@ -91,7 +111,20 @@
             "proposedCategoryPath": null,
             "reasoning": null
           },
-          "splits": []
+          "splits": [],
+          "tags": [],
+          "transfer": {
+            "counterpartTransactionId": null,
+            "counterpartAccountId": "3c1fe9c2-2f4b-5753-95ad-133501e3bd5e",
+            "match": "AMOUNT_DATE"
+          },
+          "recurring": {
+            "isRecurring": false,
+            "source": "AUTO",
+            "seriesId": null,
+            "cadence": null,
+            "medianAmount": null
+          }
         },
         {
           "id": "6a9c1d2e-4b3f-5a6d-8c7e-9f0a1b2c3d41",
@@ -121,7 +154,18 @@
             "proposedCategoryPath": null,
             "reasoning": null
           },
-          "splits": []
+          "splits": [],
+          "tags": [
+            "subscriptions"
+          ],
+          "transfer": null,
+          "recurring": {
+            "isRecurring": true,
+            "source": "USER",
+            "seriesId": null,
+            "cadence": "MONTHLY",
+            "medianAmount": "-9.9900"
+          }
         },
         {
           "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
@@ -146,7 +190,19 @@
             "proposedCategoryPath": null,
             "reasoning": "fake provider: multiple plausible categories"
           },
-          "splits": []
+          "splits": [],
+          "tags": [
+            "shopping",
+            "italy-2026"
+          ],
+          "transfer": null,
+          "recurring": {
+            "isRecurring": false,
+            "source": "AUTO",
+            "seriesId": null,
+            "cadence": null,
+            "medianAmount": null
+          }
         }
       ],
       "totalCount": 5,

@@ -1,11 +1,16 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import Card from '$lib/components/Card.svelte';
 	import Field from '$lib/components/Field.svelte';
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import CategoryFilter from '$lib/components/CategoryFilter.svelte';
+	import { createGraphqlClient } from '$lib/graphqlClient';
+	import {
+		SET_TRANSACTION_RECURRING_MUTATION,
+		SET_TRANSACTION_TAGS_MUTATION
+	} from '$lib/graphql/queries';
 	import { PERIOD_PRESETS, type PeriodPresetId } from '$lib/period';
 	import type { PageData } from './$types';
 
@@ -17,6 +22,14 @@
 	let categorySlugs = $state(data.categorySlugs);
 	let uncategorized = $state(data.uncategorized);
 	let needsReview = $state(data.needsReview);
+	let selectedTags = $state(data.tags);
+	// Tri-state as a string so a <select> can represent "either" alongside true/false.
+	let recurringFilter = $state(
+		data.recurring === true ? 'true' : data.recurring === false ? 'false' : ''
+	);
+	let transferFilter = $state(
+		data.transfer === true ? 'true' : data.transfer === false ? 'false' : ''
+	);
 
 	$effect(() => {
 		preset = data.preset;
@@ -25,6 +38,9 @@
 		categorySlugs = data.categorySlugs;
 		uncategorized = data.uncategorized;
 		needsReview = data.needsReview;
+		selectedTags = data.tags;
+		recurringFilter = data.recurring === true ? 'true' : data.recurring === false ? 'false' : '';
+		transferFilter = data.transfer === true ? 'true' : data.transfer === false ? 'false' : '';
 	});
 
 	function applyFilters() {
@@ -35,7 +51,17 @@
 		if (categorySlugs.length) params.set('categorySlugs', categorySlugs.join(','));
 		if (uncategorized) params.set('uncategorized', 'true');
 		if (needsReview) params.set('needsReview', 'true');
+		if (selectedTags.length) params.set('tags', selectedTags.join(','));
+		if (recurringFilter) params.set('recurring', recurringFilter);
+		if (transferFilter) params.set('transfer', transferFilter);
 		goto(`${page.url.pathname}?${params.toString()}`, { keepFocus: true, noScroll: true });
+	}
+
+	function toggleTag(tag: string) {
+		selectedTags = selectedTags.includes(tag)
+			? selectedTags.filter((t) => t !== tag)
+			: [...selectedTags, tag];
+		applyFilters();
 	}
 
 	function onPageChange(offset: number) {
@@ -43,6 +69,22 @@
 		if (offset) params.set('offset', String(offset));
 		else params.delete('offset');
 		goto(`${page.url.pathname}?${params.toString()}`, { keepFocus: true, noScroll: true });
+	}
+
+	function client() {
+		return createGraphqlClient(fetch);
+	}
+
+	async function setTags(transactionId: string, tags: string[]) {
+		await client().mutation(SET_TRANSACTION_TAGS_MUTATION, { transactionId, tags }).toPromise();
+		await invalidateAll();
+	}
+
+	async function setRecurring(transactionId: string, recurring: boolean | null) {
+		await client()
+			.mutation(SET_TRANSACTION_RECURRING_MUTATION, { transactionId, recurring })
+			.toPromise();
+		await invalidateAll();
 	}
 </script>
 
@@ -106,6 +148,54 @@
 		/>
 	</Card>
 
+	<Card title="Filter by tag, recurring, transfer">
+		<div class="flex flex-wrap items-start gap-6">
+			<div class="flex flex-col gap-2">
+				<p class="text-xs font-medium text-slate-500">Tags</p>
+				{#if data.allTags.length === 0}
+					<p class="text-sm text-slate-400">No tags yet.</p>
+				{:else}
+					<div class="flex flex-wrap gap-2">
+						{#each data.allTags as tagCount (tagCount.tag)}
+							<label class="flex items-center gap-1 text-sm">
+								<input
+									type="checkbox"
+									checked={selectedTags.includes(tagCount.tag)}
+									onchange={() => toggleTag(tagCount.tag)}
+								/>
+								{tagCount.tag} ({tagCount.transactionCount})
+							</label>
+						{/each}
+					</div>
+				{/if}
+			</div>
+			<Field label="Recurring" for="tx-recurring">
+				<select
+					id="tx-recurring"
+					bind:value={recurringFilter}
+					onchange={applyFilters}
+					class="rounded-md border-slate-300 text-sm"
+				>
+					<option value="">Any</option>
+					<option value="true">Recurring only</option>
+					<option value="false">Non-recurring only</option>
+				</select>
+			</Field>
+			<Field label="Transfer" for="tx-transfer">
+				<select
+					id="tx-transfer"
+					bind:value={transferFilter}
+					onchange={applyFilters}
+					class="rounded-md border-slate-300 text-sm"
+				>
+					<option value="">Any</option>
+					<option value="true">Transfers only</option>
+					<option value="false">Non-transfers only</option>
+				</select>
+			</Field>
+		</div>
+	</Card>
+
 	{#if data.error}
 		<p role="alert" class="text-sm text-[var(--color-spending)]">
 			Failed to load transactions from the GraphQL API.
@@ -115,6 +205,8 @@
 			<TransactionTable
 				transactions={data.transactions.items}
 				currency={data.accounts[0]?.currency ?? 'EUR'}
+				onSetTags={setTags}
+				onSetRecurring={setRecurring}
 			/>
 			<Pagination
 				offset={data.transactions.offset}

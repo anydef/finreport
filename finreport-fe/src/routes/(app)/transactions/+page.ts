@@ -1,6 +1,11 @@
 import { createGraphqlClient } from '$lib/graphqlClient';
-import { ACCOUNTS_QUERY, CATEGORIES_QUERY, TRANSACTIONS_QUERY } from '$lib/graphql/queries';
-import type { Account, Category, TransactionPage } from '$lib/graphql/types';
+import {
+	ACCOUNTS_QUERY,
+	CATEGORIES_QUERY,
+	TAGS_QUERY,
+	TRANSACTIONS_QUERY
+} from '$lib/graphql/queries';
+import type { Account, Category, TagCount, TransactionPage } from '$lib/graphql/types';
 import { expandSelectedSlugs } from '$lib/categoryTree';
 import {
 	defaultGranularity,
@@ -34,12 +39,20 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const categorySlugs = url.searchParams.get('categorySlugs')?.split(',').filter(Boolean) ?? [];
 	const uncategorized = url.searchParams.get('uncategorized') === 'true';
 	const needsReview = url.searchParams.get('needsReview') === 'true';
+	// Tri-state filters (§5): param absent = either, 'true'/'false' = that value.
+	const tags = url.searchParams.get('tags')?.split(',').filter(Boolean) ?? [];
+	const recurringParam = url.searchParams.get('recurring');
+	const recurring =
+		recurringParam === 'true' ? true : recurringParam === 'false' ? false : undefined;
+	const transferParam = url.searchParams.get('transfer');
+	const transfer = transferParam === 'true' ? true : transferParam === 'false' ? false : undefined;
 
 	const client = createGraphqlClient(fetch);
 
-	const [accountsResult, categoriesResult] = await Promise.all([
+	const [accountsResult, categoriesResult, tagsResult] = await Promise.all([
 		client.query(ACCOUNTS_QUERY, {}).toPromise(),
-		client.query(CATEGORIES_QUERY, {}).toPromise()
+		client.query(CATEGORIES_QUERY, {}).toPromise(),
+		client.query(TAGS_QUERY, {}).toPromise()
 	]);
 	const categories = (categoriesResult.data?.categories ?? []) as Category[];
 
@@ -52,7 +65,10 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			? expandSelectedSlugs(categorySlugs, categories)
 			: undefined,
 		uncategorized: uncategorized || undefined,
-		needsReview: needsReview || undefined
+		needsReview: needsReview || undefined,
+		tags: tags.length ? tags : undefined,
+		recurring,
+		transfer
 	};
 
 	const transactionsResult = await client
@@ -69,10 +85,16 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		categorySlugs,
 		uncategorized,
 		needsReview,
+		tags,
+		recurring,
+		transfer,
 		offset,
-		error: Boolean(accountsResult.error || categoriesResult.error || transactionsResult.error),
+		error: Boolean(
+			accountsResult.error || categoriesResult.error || tagsResult.error || transactionsResult.error
+		),
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
 		categories,
+		allTags: (tagsResult.data?.tags ?? []) as TagCount[],
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
 		today: toDateInputValue(today)
 	};

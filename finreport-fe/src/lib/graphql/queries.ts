@@ -50,6 +50,9 @@ query Accounts {
 	}
 }`;
 
+// `tags`/`transfer`/`recurring` (iteration 3 §4) were deliberately left off
+// this query by WP0 until WP-B's resolvers were real (§9 WP0 addendum #5);
+// WP-C adds them here now that the mocks model them.
 export const TRANSACTIONS_QUERY = `
 query Transactions($filter: TransactionFilter, $page: PageInput) {
 	transactions(filter: $filter, page: $page) {
@@ -90,6 +93,19 @@ query Transactions($filter: TransactionFilter, $page: PageInput) {
 					name
 					kind
 				}
+			}
+			tags
+			transfer {
+				counterpartTransactionId
+				counterpartAccountId
+				match
+			}
+			recurring {
+				isRecurring
+				source
+				seriesId
+				cadence
+				medianAmount
 			}
 		}
 		totalCount
