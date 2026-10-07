@@ -428,3 +428,70 @@ test-integration`, run once at the end of a WP (iter 2 §9.3).
    UUIDv5 id, so replays and re-runs converge.
 6. Totals exclude transfers unless the caller explicitly filters for them.
 7. Tags are user-set only; nothing auto-tags in this iteration.
+
+## 9. WP0 decisions (addendum)
+
+WP0 froze the contracts layer. Where the spec left a mechanical choice
+unstated, these decisions were made — later WPs should treat them as settled
+unless they prove unworkable:
+
+1. **Stub-resolver convention**: a new `not_implemented_iter3(field: &str, wp:
+   &str)` helper was added alongside iteration-2's `not_implemented(field,
+   wp: u8)` (hardcoded to numeric WPs/iteration-2.md) rather than generalizing
+   the existing one, to avoid touching iteration-2 call sites. Used by all 5
+   new stub resolvers (`Transaction.tags/transfer/recurring`,
+   `Query.tags/recurringSeries`, `Mutation.setTransactionTags/
+   setTransactionRecurring`).
+2. **`projection/insights.rs`**: WP0 created a minimal stub (`project_insight`
+   returning `Ok(())`) so the dispatch in `projection/mod.rs` compiles. The
+   spec lists this file under WP-A's owned files for the real implementation
+   — WP-A fills in this same file rather than creating a new one.
+3. **`UserLabelRecord` schema versioning**: `CURRENT_SCHEMA_VERSION` stays `1`;
+   the new `tags`/`recurring` fields use `#[serde(default)]` so v1 wire
+   records still parse (`tags: []`, `recurring: None`). A
+   `USER_LABEL_SCHEMA_VERSION_V2 = 2` constant is defined but not wired into
+   any producer — bumping the wire version on actual v2 writes is left to
+   WP-B, which owns the mutations that will produce them.
+4. **Settings defaults**: all 5 new keys (`transfer_match_days`,
+   `recurring_min_occurrences`, `recurring_amount_tolerance`,
+   `recurring_window_months`, `max_tags_per_transaction`) use the values from
+   the spec's table verbatim, no deviation.
+5. **FE `TRANSACTIONS_QUERY`/`mocks/transactions.json`**: deliberately left
+   untouched. `Transaction.tags/transfer/recurring` resolvers currently error
+   with `NOT_IMPLEMENTED`; requesting them in every transaction fetch would
+   error the whole query against a live `dev-be`/`dev-be-tower` backend before
+   WP-B lands. WP-C should extend this query (and regenerate the mock) once
+   the resolvers are real.
+6. **`transaction_user_label.recurring` column wiring**: wired directly into
+   `project_user_label`'s upsert in `projection/labeling.rs` by WP0 (not left
+   dead), since the migration adding the column made it a compile-time
+   requirement on the `ActiveModel` literal. This is WP0 touching existing
+   projector logic rather than only adding new files — flagged here as the
+   one exception to "disjoint files."
+7. **Existing `UserLabelRecord{}` construction sites** in
+   `webapp/src/graphql/labels.rs` (category-change mutations) got
+   `tags: Vec::new(), recurring: None` to compile, each with a `// TODO(WP-B)`
+   comment: these mutations currently drop any existing tags/recurring on
+   every category change, a real bug WP-B must fix via read-modify-write
+   (§2.1), now explicitly flagged rather than silently left.
+8. **Detection call-site wiring**: `detect::processor::run_detection_pass` is
+   invoked inside `labeling::processor::run()`, immediately after both of its
+   existing `run_sweep(...)` call sites (the startup sweep and the
+   catch-up-exit sweep), rather than after `run()` returns in
+   `bin/labeler.rs` (impossible — `run()` consumes `db`/`publisher` by value
+   and only returns in the `--until-caught-up` path). Since `run_sweep`
+   internally calls the rule learner, this satisfies "invoked after the rule
+   learner" and reuses the existing cadence without changing `run_sweep`'s
+   signature (it has a third call site in `webapp/tests/labeler_postgres.rs`).
+9. **Demo fixtures** (`webapp/fixtures/`): added a transfer pair
+   (`ACC1-TRANSFER-OUT-01` / `ACC2-TRANSFER-IN-01`, -300.00/+300.00,
+   2024-07-15, IBAN-confirmed via the outgoing leg's `creditor.iban` = acc-2's
+   real IBAN — `Remitter` has no `iban` field so the incoming leg can only be
+   matched by counterparty name/amount/date), a 4-occurrence flat monthly
+   series (`ACC1-RECURRING-MONTHLY-0{1..4}`, Fitnessstudio PowerGym, -39.90),
+   a 3-occurrence quarterly series (`ACC1-RECURRING-QUARTERLY-0{1..3}`,
+   KFZ-Versicherung HUK, -187.43), and (beyond the minimum ask, to exercise
+   the tolerance config) a 4-occurrence amount-drifting monthly series
+   (`ACC1-RECURRING-DRIFT-0{1..4}`, Stromanbieter E.ON, -65.00 -> -70.00
+   partway through). All use 2024 dates consistent with existing fixtures and
+   reference keys that don't collide with the existing set.
