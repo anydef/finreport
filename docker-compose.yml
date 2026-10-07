@@ -183,6 +183,8 @@ services:
       # is unset, and the labeler then refuses to build an Anthropic
       # provider (lazy validation, §4) rather than failing to start.
       APP_anthropic_api_key: ${APP_anthropic_api_key:-}
+      # Migrations are the explicit `finreport-be-migrate` runbook step.
+      APP_run_migrations: "false"
     networks:
       services-lan:
         ipv4_address: 192.168.100.37
