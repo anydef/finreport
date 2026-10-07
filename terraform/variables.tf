@@ -56,7 +56,7 @@ variable "opnsense_api_secret" {
 variable "app_host" {
   description = "Host/IP where the application is reachable on services-lan"
   type        = string
-  default     = "192.168.100.32"
+  default     = "192.168.100.45"
 }
 
 variable "app_port" {

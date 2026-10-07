@@ -238,14 +238,14 @@ the label-resolution and learned-rule-lifecycle diagrams.
   oversight.
 - **Deployed**: a new `finreport-be-labeler` service alongside
   `finreport-be-projector` — same image, same Kafka broker, static LAN IP
-  `192.168.100.37`, no new port.
+  `192.168.100.49`, no new port.
 
 ## Backend database profiles
 
 The backend can run locally against either Postgres:
 
 - `just dev-be` → the local Postgres from `just db-up` (`127.0.0.1:5432`), config from `finreport-rs/.env`.
-- `just dev-be-tower` → the **real, deployed** tower Postgres (`192.168.100.33:5432`, same LAN-reachable host the deployed `finreport-be` container uses). Everything except `APP_database_url` still comes from `finreport-rs/.env`; the real DB password is pulled live from 1Password via `op read` and never written to disk.
+- `just dev-be-tower` → the **real, deployed** tower Postgres (`192.168.100.46:5432`, same LAN-reachable host the deployed `finreport-be` container uses). Everything except `APP_database_url` still comes from `finreport-rs/.env`; the real DB password is pulled live from 1Password via `op read` and never written to disk.
 
   **Be deliberate with this one.** `webapp`'s startup (`db/seaql.rs::init_db`) runs `Migrator::up()` unconditionally — pointing the local binary at tower means any migration that exists locally but isn't deployed yet gets applied to the live database the moment you run it. Don't run `dev-be-tower` with unreviewed/WIP migrations sitting in `finreport-rs/migration/`.
 

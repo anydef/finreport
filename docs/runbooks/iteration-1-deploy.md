@@ -7,9 +7,9 @@ model, old tables survive renamed as `legacy_*`. Run every step from the repo
 root unless noted. The user runs this manually — nothing here pushes or
 deploys automatically.
 
-Postgres is `192.168.100.33:5432` (`finreport-be-postgres`). Kafka is the
+Postgres is `192.168.100.46:5432` (`finreport-be-postgres`). Kafka is the
 central broker `kafka.lab.anydef.de:9092`. The new projector container binds
-`192.168.100.39` on `services-lan` (`.36` was already taken on Tower).
+`192.168.100.48` on `services-lan`.
 Before deploying, confirm none of the stack's static IPs is in use:
 
 ```bash
@@ -24,11 +24,11 @@ that service's `ipv4_address` in `docker-compose.yml`.
 
 ## 1. Prerequisites
 
-**Network.** `192.168.100.39` must reach both:
+**Network.** `192.168.100.48` must reach both:
 
 ```bash
 # From a host on services-lan (or exec into any container already on it):
-nc -zv 192.168.100.33 5432
+nc -zv 192.168.100.46 5432
 nc -zv kafka.lab.anydef.de 9092
 ```
 
@@ -81,7 +81,7 @@ Dump the tower Postgres in custom format (needed for `pg_restore` in §5):
 
 ```bash
 PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" \
-  pg_dump -h 192.168.100.33 -p 5432 -U finreport -d finreport \
+  pg_dump -h 192.168.100.46 -p 5432 -U finreport -d finreport \
   -Fc -f finreport-pre-iter1-$(date +%Y%m%d%H%M%S).dump
 ```
 
@@ -117,7 +117,7 @@ the stack below can be rolled.
    `APP_database_url`):
    ```bash
    docker run --rm --network finreport-be_services-lan \
-     -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      --entrypoint finreport-be-migrate "${DOCKER_REGISTRY}/finreport-be:latest" up -s public
    ```
    This renames `account`/`account_balance`/`account_transactions` to
@@ -128,7 +128,7 @@ the stack below can be rolled.
    requiring a local checkout:
    ```bash
    docker run --rm --network finreport-be_services-lan \
-     -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
      --entrypoint legacy-backfill "${DOCKER_REGISTRY}/finreport-be:latest"
    ```
@@ -156,7 +156,7 @@ the stack below can be rolled.
    also passes `APP_run_migrations=false`:
    ```bash
    docker run --rm --network finreport-be_services-lan \
-     -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     -e APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      -e APP_kafka_brokers="kafka.lab.anydef.de:9092" \
      -e APP_run_migrations=false \
      --entrypoint projector "${DOCKER_REGISTRY}/finreport-be:latest" --until-caught-up
@@ -167,7 +167,7 @@ the stack below can be rolled.
    now built into the runtime image):
    ```bash
    FINREPORT_PASSWORD='<choose one>' \
-     APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      docker run --rm -i --network finreport-be_services-lan \
      -e APP_database_url -e FINREPORT_PASSWORD \
      --entrypoint user-admin "${DOCKER_REGISTRY}/finreport-be:latest" \
@@ -193,7 +193,7 @@ the stack below can be rolled.
 ```bash
 # Row counts: legacy_* vs projected tables (allow for in-flight transactions
 # published after the dump but before the stop in step 3.1).
-PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" psql -h 192.168.100.33 -U finreport -d finreport -c "
+PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" psql -h 192.168.100.46 -U finreport -d finreport -c "
   select 'legacy_account' , count(*) from legacy_account
   union all select 'account', count(*) from account
   union all select 'legacy_account_balance', count(*) from legacy_account_balance
@@ -203,11 +203,11 @@ PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" psql -h 192.168.1
 
 # projection_offset advancing (re-run after a few seconds; next_offset should grow
 # while the importer's re-walk from step 3.4 is still catching up, then hold steady):
-PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" psql -h 192.168.100.33 -U finreport -d finreport \
+PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" psql -h 192.168.100.46 -U finreport -d finreport \
   -c "select topic, partition, next_offset, updated_at from projection_offset order by topic;"
 
 # GraphQL login
-curl -s -c cookies.txt -X POST http://192.168.100.32:8080/graphql \
+curl -s -c cookies.txt -X POST http://192.168.100.45:8080/graphql \
   -H 'content-type: application/json' \
   -d '{"query":"mutation($u:String!,$p:String!){login(input:{username:$u,password:$p}){username}}","variables":{"u":"<you>","p":"<password>"}}'
 
@@ -234,7 +234,7 @@ Clean up the local dump/cookie files once satisfied (`rm cookies.txt`).
    swapping back to the old image/binary, which doesn't know about them:
    ```bash
    docker run --rm --network finreport-be_services-lan \
-     -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+     -e DATABASE_URL="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
      --entrypoint finreport-be-migrate "${DOCKER_REGISTRY}/finreport-be:latest" down -n 2 -s public
    ```
    This reverses the two migrations this cutover introduced (new tables
@@ -245,7 +245,7 @@ Clean up the local dump/cookie files once satisfied (`rm cookies.txt`).
    you have the right file from §2):
    ```bash
    PGPASSWORD="$(op read 'op://HomeLab/finreport/psql/password')" \
-     pg_restore -h 192.168.100.33 -U finreport -d finreport \
+     pg_restore -h 192.168.100.46 -U finreport -d finreport \
      --clean --if-exists -Fc finreport-pre-iter1-*.dump
    ```
 4. **Redeploy the previous image tags.** Repoint `docker-compose.yml`'s

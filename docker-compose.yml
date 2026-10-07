@@ -15,7 +15,7 @@ services:
       - /mnt/user/appdata/finreport-be/pgdata:/var/lib/postgresql/data
     networks:
       services-lan:
-        ipv4_address: 192.168.100.33
+        ipv4_address: 192.168.100.46
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U finreport"]
       interval: 5s
@@ -34,7 +34,7 @@ services:
         condition: service_healthy
     environment:
       RUST_LOG: info
-      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
       APP_save_file_path: /app/data/.session.json
@@ -61,11 +61,11 @@ services:
     networks:
       finreport-be-net:
       services-lan:
-        ipv4_address: 192.168.100.32
+        ipv4_address: 192.168.100.45
     volumes:
       - /mnt/user/appdata/finreport-be:/app/data
     labels:
-      - "net.unraid.docker.webui=http://192.168.100.32:8080"
+      - "net.unraid.docker.webui=http://192.168.100.45:8080"
       - "net.unraid.docker.managed=composeman"
       - "net.unraid.docker.shell=bash"
       - "net.unraid.docker.icon=https://raw.githubusercontent.com/docker-library/docs/refs/heads/master/mediawiki/logo.svg"
@@ -114,7 +114,7 @@ services:
       APP_accounts__1__pin: ${APP_accounts__1__pin}
     networks:
       services-lan:
-        ipv4_address: 192.168.100.35
+        ipv4_address: 192.168.100.47
     volumes:
       - /mnt/user/appdata/finreport-be:/app/data
     labels:
@@ -134,7 +134,7 @@ services:
         condition: service_healthy
     environment:
       RUST_LOG: info
-      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
       APP_kafka_brokers: kafka.lab.anydef.de:9092
       APP_oauth_url: https://api.comdirect.de
       APP_url: https://api.comdirect.de/api
@@ -145,7 +145,7 @@ services:
       APP_run_migrations: "false"
     networks:
       services-lan:
-        ipv4_address: 192.168.100.39
+        ipv4_address: 192.168.100.48
     volumes:
       - /mnt/user/appdata/finreport-be:/app/data
     labels:
@@ -167,7 +167,7 @@ services:
         condition: service_healthy
     environment:
       RUST_LOG: info
-      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.33:5432/finreport
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
       APP_kafka_brokers: kafka.lab.anydef.de:9092
       # Non-secret knobs (§4) — provider, model and the auto-approve
       # threshold are ordinary config, not secrets, so they live here rather
@@ -187,7 +187,7 @@ services:
       APP_run_migrations: "false"
     networks:
       services-lan:
-        ipv4_address: 192.168.100.37
+        ipv4_address: 192.168.100.49
     volumes:
       - /mnt/user/appdata/finreport-be:/app/data
     labels:

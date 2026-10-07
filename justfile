@@ -262,7 +262,7 @@ dev-be:
 # migrations sitting in finreport-rs/migration/.
 dev-be-tower:
     cd finreport-rs && \
-        APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.33:5432/finreport" \
+        APP_database_url="postgresql://finreport:$(op read 'op://HomeLab/finreport/psql/password')@192.168.100.46:5432/finreport" \
         RUST_LOG=info \
         cargo run -p webapp --bin webapp
 
