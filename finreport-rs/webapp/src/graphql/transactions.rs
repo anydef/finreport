@@ -57,6 +57,113 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
     condition
 }
 
+/// Extends `build_condition` with the iteration-2 `categorySlugs`/
+/// `uncategorized`/`needsReview`/`labelSources` filters (§5). Split into a
+/// separate, `db`-touching function because resolving `categorySlugs`
+/// (which must include descendants) needs a lookup against the `category`
+/// table — the base `build_condition` stays synchronous/pure so
+/// `cashflow`'s hand-rolled SQL can keep mirroring just its predicates.
+pub async fn build_condition_with_category_filters(
+    db: &DatabaseConnection,
+    scoped_ids: &[Uuid],
+    filter: &TransactionFilter,
+) -> async_graphql::Result<Condition> {
+    let mut condition = build_condition(scoped_ids, filter);
+
+    if let Some(slugs) = filter.category_slugs.as_ref().filter(|s| !s.is_empty()) {
+        let ids = category_descendant_ids(db, slugs).await?;
+        condition = condition.add(category_match_condition(&ids));
+    }
+    if filter.uncategorized == Some(true) {
+        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+            "NOT EXISTS (SELECT 1 FROM transaction_label tl WHERE tl.transaction_id = transaction.id)",
+            Vec::<sea_orm::Value>::new(),
+        ));
+    }
+    if filter.needs_review == Some(true) {
+        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM transaction_label tl WHERE tl.transaction_id = transaction.id AND tl.status = 'needs_review')",
+            Vec::<sea_orm::Value>::new(),
+        ));
+    }
+    if let Some(sources) = filter.label_sources.as_ref().filter(|s| !s.is_empty()) {
+        let source_strs: Vec<String> = sources.iter().map(|s| gql_label_source_str(*s).to_string()).collect();
+        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM transaction_label tl WHERE tl.transaction_id = transaction.id AND tl.label_source = ANY($1))",
+            vec![sea_orm::Value::from(source_strs)],
+        ));
+    }
+
+    Ok(condition)
+}
+
+fn gql_label_source_str(source: crate::graphql::types::LabelSource) -> &'static str {
+    match source {
+        crate::graphql::types::LabelSource::User => "user",
+        crate::graphql::types::LabelSource::Rule => "rule",
+        crate::graphql::types::LabelSource::LlmCache => "llm-cache",
+        crate::graphql::types::LabelSource::Llm => "llm",
+    }
+}
+
+/// Every category id matching one of `slugs` or a descendant of one (§5:
+/// "OR-ed; includes descendants"). The category table is small (≤ 3 levels)
+/// so this loads it once and walks the parent chain in memory rather than
+/// building a recursive SQL query.
+async fn category_descendant_ids(
+    db: &DatabaseConnection,
+    slugs: &[String],
+) -> async_graphql::Result<Vec<Uuid>> {
+    let all = entity::entities::category::Entity::find().all(db).await?;
+    let requested_ids: std::collections::HashSet<Uuid> = all
+        .iter()
+        .filter(|c| slugs.iter().any(|s| s == &c.slug))
+        .map(|c| c.id)
+        .collect();
+    if requested_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(all
+        .iter()
+        .filter(|c| {
+            let mut current = Some(c.id);
+            let mut parent_of: std::collections::HashMap<Uuid, Option<Uuid>> = std::collections::HashMap::new();
+            for row in &all {
+                parent_of.insert(row.id, row.parent_id);
+            }
+            while let Some(id) = current {
+                if requested_ids.contains(&id) {
+                    return true;
+                }
+                current = parent_of.get(&id).copied().flatten();
+            }
+            false
+        })
+        .map(|c| c.id)
+        .collect())
+}
+
+/// A transaction matches a category id set when either its whole-transaction
+/// label resolves to one of them, or it has a valid split with a part in
+/// one of them (§5's split-aware semantics, mirrored from
+/// `breakdown.rs::fetch_breakdown`).
+fn category_match_condition(ids: &[Uuid]) -> Condition {
+    if ids.is_empty() {
+        // No category in the tree matched any requested slug: the filter
+        // can never match, same as an empty `IN ()`.
+        return Condition::any().add(transaction::Column::Id.eq(Uuid::nil()));
+    }
+    Condition::any()
+        .add(sea_orm::sea_query::Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM transaction_label tl WHERE tl.transaction_id = transaction.id AND tl.category_id = ANY($1))",
+            vec![sea_orm::Value::from(ids.to_vec())],
+        ))
+        .add(sea_orm::sea_query::Expr::cust_with_values(
+            "EXISTS (SELECT 1 FROM transaction_split ts WHERE ts.transaction_id = transaction.id AND ts.invalid = false AND ts.category_id = ANY($1))",
+            vec![sea_orm::Value::from(ids.to_vec())],
+        ))
+}
+
 pub async fn fetch_transactions(
     db: &DatabaseConnection,
     scoped_ids: &[Uuid],
@@ -76,7 +183,7 @@ pub async fn fetch_transactions(
         });
     }
 
-    let condition = build_condition(scoped_ids, filter);
+    let condition = build_condition_with_category_filters(db, scoped_ids, filter).await?;
     let total_count = transaction::Entity::find()
         .filter(condition.clone())
         .count(db)
