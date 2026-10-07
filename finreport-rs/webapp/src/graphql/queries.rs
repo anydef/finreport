@@ -165,24 +165,28 @@ impl QueryRoot {
         review_queue::fetch_review_queue(db, cache, &scoped_ids, page.limit, page.offset).await
     }
 
-    /// `tags` (§4): all tags, descending count. **Stub**: frozen by WP0,
-    /// real body is WP-B's.
+    /// `tags` (§4): all tags, descending count.
     async fn tags(&self, ctx: &Context<'_>) -> GqlResult<Vec<TagCount>> {
-        current_user(ctx)?;
-        Err(crate::graphql::types::not_implemented_iter3("Query.tags", "WP-B"))
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let scoped_ids = scoped_account_ids(user, None)?;
+        crate::graphql::insights::fetch_tag_counts(db, &scoped_ids).await
     }
 
-    /// `recurringSeries` (§4). **Stub**: frozen by WP0, real body is WP-B's.
+    /// `recurringSeries` (§4).
     async fn recurring_series(
         &self,
         ctx: &Context<'_>,
         filter: Option<TransactionFilter>,
     ) -> GqlResult<RecurringOverview> {
-        current_user(ctx)?;
-        let _ = filter;
-        Err(crate::graphql::types::not_implemented_iter3(
-            "Query.recurringSeries",
-            "WP-B",
-        ))
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let filter = filter.unwrap_or_default();
+        let requested_ids: Option<Vec<uuid::Uuid>> = filter
+            .account_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0).collect());
+        let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
+        crate::graphql::insights::fetch_recurring_overview(db, &scoped_ids, &filter).await
     }
 }

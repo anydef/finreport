@@ -6,6 +6,7 @@ pub mod cookies;
 pub mod current_user;
 mod events;
 pub mod http;
+mod insights;
 mod labels;
 mod loaders;
 mod mutations;

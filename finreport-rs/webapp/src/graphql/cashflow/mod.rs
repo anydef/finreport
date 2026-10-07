@@ -22,6 +22,35 @@ use crate::graphql::types::{
 use graph::{AggregatedFlow, FlowDirection};
 use summary::SparseBucket;
 
+/// §4 "Totals exclude transfers": every aggregation query drops a row whose
+/// effective transfer flag is true, unless the caller explicitly passed
+/// `filter.transfer = true` (then only transfers are wanted). Transfers have
+/// no user-override layer (§2.2), so this reads `transaction_insight`
+/// directly. `id_expr` is the (possibly aliased) `transaction.id` column
+/// reference in the query this is spliced into.
+pub(crate) fn transfer_exclusion_sql(id_expr: &str) -> String {
+    format!(
+        " AND COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = {id_expr}), false) = false"
+    )
+}
+
+/// Same rule, inverted: only transfers, for `filter.transfer = true`.
+pub(crate) fn transfer_inclusion_sql(id_expr: &str) -> String {
+    format!(
+        " AND COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = {id_expr}), false) = true"
+    )
+}
+
+/// Picks [`transfer_exclusion_sql`] or [`transfer_inclusion_sql`] per §4's
+/// rule (default/explicit-false excludes, explicit-true includes only).
+pub(crate) fn transfer_filter_sql(id_expr: &str, filter: &TransactionFilter) -> String {
+    if filter.transfer == Some(true) {
+        transfer_inclusion_sql(id_expr)
+    } else {
+        transfer_exclusion_sql(id_expr)
+    }
+}
+
 fn bounded_range(filter: &TransactionFilter) -> GqlResult<(NaiveDate, NaiveDate)> {
     match (filter.start_date, filter.end_date) {
         (Some(start), Some(end)) if start.0 <= end.0 => Ok((start.0, end.0)),
@@ -172,6 +201,7 @@ fn build_graph_sql(
         Some(false) => sql.push_str(" AND counterparty_name IS NULL"),
         None => {}
     }
+    sql.push_str(&transfer_filter_sql("id", filter));
 
     sql.push_str(" GROUP BY account_id, counterparty_name, is_income");
     (sql, params)
@@ -232,6 +262,19 @@ fn build_category_outcome_sql(
         Some(true) => extra.push_str(" AND t.counterparty_name IS NOT NULL"),
         Some(false) => extra.push_str(" AND t.counterparty_name IS NULL"),
         None => {}
+    }
+    // §4: a row whose effective transfer flag is true *or* whose resolved
+    // category `kind = TRANSFER` is dropped from the aggregation, unless
+    // the caller explicitly asked for transfers (`filter.transfer = true`),
+    // in which case only such rows are kept.
+    if filter.transfer == Some(true) {
+        extra.push_str(
+            " AND (COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = t.id), false) = true OR c.kind = 'transfer')",
+        );
+    } else {
+        extra.push_str(
+            " AND COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = t.id), false) = false AND COALESCE(c.kind, '') != 'transfer'",
+        );
     }
 
     let sql = format!(

@@ -53,6 +53,39 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
         Some(false) => condition = condition.add(transaction::Column::CounterpartyName.is_null()),
         None => {}
     }
+    if let Some(tags) = filter.tags.as_ref().filter(|t| !t.is_empty()) {
+        // AND-ed (§4): the transaction must carry all of them.
+        for tag in tags {
+            condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+                "EXISTS (SELECT 1 FROM transaction_tag tt WHERE tt.transaction_id = transaction.id AND tt.tag = $1)",
+                vec![sea_orm::Value::from(tag.clone())],
+            ));
+        }
+    }
+    if let Some(recurring) = filter.recurring {
+        // Matches the *effective* flag (§2.2, §4): a user override on
+        // `transaction_user_label.recurring` wins over the detector's
+        // `transaction_insight.is_recurring`.
+        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+            "COALESCE(\
+               (SELECT ul.recurring FROM transaction_user_label ul WHERE ul.transaction_id = transaction.id), \
+               (SELECT ti.is_recurring FROM transaction_insight ti WHERE ti.transaction_id = transaction.id), \
+               false\
+             ) = $1",
+            vec![sea_orm::Value::from(recurring)],
+        ));
+    }
+    if let Some(transfer) = filter.transfer {
+        // No override layer for transfers (§2.2): always the detector's
+        // own flag, absent row meaning `false`.
+        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+            "COALESCE(\
+               (SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = transaction.id), \
+               false\
+             ) = $1",
+            vec![sea_orm::Value::from(transfer)],
+        ));
+    }
 
     condition
 }
