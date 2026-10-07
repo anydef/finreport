@@ -443,6 +443,7 @@ async fn default_owner_is_linked_when_configured() {
         display_name: Set(None),
         disabled: Set(false),
         created_at: Set(Utc::now().into()),
+        is_admin: Set(false),
     }
     .insert(db.connection())
     .await
@@ -492,6 +493,7 @@ async fn unlinking_the_default_owner_is_not_undone_by_a_later_record() {
         display_name: Set(None),
         disabled: Set(false),
         created_at: Set(Utc::now().into()),
+        is_admin: Set(false),
     }
     .insert(db.connection())
     .await

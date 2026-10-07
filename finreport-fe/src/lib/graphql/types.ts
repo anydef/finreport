@@ -41,6 +41,7 @@ export interface Me {
 	id: UUID;
 	username: string;
 	displayName: string | null;
+	isAdmin: boolean;
 }
 
 export interface Balance {

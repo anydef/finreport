@@ -25,6 +25,33 @@ data "opnsense_haproxy_frontend" "https" {
   name = "1_HTTPS_frontend"
 }
 
+data "onepassword_vault" "homelab" {
+  name = "HomeLab"
+}
+
+# Generated once and persisted in 1Password (below) — `admin`'s bootstrap
+# (webapp/src/auth/bootstrap.rs) creates/rotates the `app_user` row from
+# APP_admin_password at every startup, so changing this here is how you
+# rotate the production admin password: `terraform apply` regenerates both
+# the 1Password item and the stack's env, and the next `finreport-be` restart
+# picks it up.
+resource "random_password" "admin" {
+  length = 32
+  # Shell/URL-safe: no characters that need escaping in a shell command or a
+  # query string, since this password also has to survive `docker run -e`
+  # and the GraphQL login form without special handling.
+  special = false
+}
+
+resource "onepassword_item" "finreport_admin" {
+  vault    = data.onepassword_vault.homelab.uuid
+  title    = "finreport admin"
+  category = "login"
+  username = "admin"
+  password = random_password.admin.result
+  url      = "https://finreport.lab.anydef.de"
+}
+
 resource "opnsense_haproxy_server" "finreport_be" {
   name        = "FINREPORT_BE_server"
   description = "${local.tag} Server for finreport-be at ${var.app_host}:${var.app_port}"
@@ -135,6 +162,7 @@ module "portainer_stack" {
     {
       POSTGRES_PASSWORD     = var.postgres_password
       APP_anthropic_api_key = var.anthropic_api_key
+      APP_admin_password    = random_password.admin.result
     },
     merge([
       for index, account in local.comdirect_accounts : {

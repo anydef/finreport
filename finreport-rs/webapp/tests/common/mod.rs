@@ -57,6 +57,8 @@ pub fn dummy_settings() -> Arc<utils::settings::Settings> {
         allowed_origins: "http://localhost:5173".to_string(),
         session_ttl_days: 30,
         projector_default_owner: None,
+        admin_username: "admin".to_string(),
+        admin_password: None,
         llm_provider: "fake".to_string(),
         anthropic_api_key: None,
         llm_api_key: None,
@@ -103,6 +105,7 @@ pub async fn seed_user(db: &DatabaseConnection, username: &str, password: &str) 
         display_name: Set(Some(username.to_string())),
         disabled: Set(false),
         created_at: Set(Utc::now().into()),
+        is_admin: Set(false),
     }
     .insert(db)
     .await

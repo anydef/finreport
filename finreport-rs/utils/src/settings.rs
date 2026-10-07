@@ -107,6 +107,18 @@ pub struct Settings {
     /// `user-admin link`.
     pub projector_default_owner: Option<String>,
 
+    /// Username `webapp`'s startup bootstrap (`webapp::auth::bootstrap`)
+    /// creates/maintains as the admin account. Only meaningful alongside
+    /// `admin_password` — bootstrap is a no-op when that is unset.
+    #[serde(default = "default_admin_username")]
+    pub admin_username: String,
+    /// Password for the bootstrap-managed admin user, normally sourced from
+    /// the `TF_VAR`-driven `onepassword_item.finreport_admin` random password
+    /// (terraform/main.tf) via `APP_admin_password`. Unset disables the
+    /// bootstrap entirely — local dev (`just dev-be`) never sets it, so no
+    /// admin user is created there.
+    pub admin_password: Option<SecretString>,
+
     // --- Iteration 2 §4: LLM labeling configuration -------------------------
     // Validation is lazy, at the provider factory: `webapp` and the
     // projector never build a provider, so a missing key must not break
@@ -518,6 +530,11 @@ fn default_cookie_secure() -> bool {
 /// `APP_session_ttl_days` default (§4).
 fn default_session_ttl_days() -> i64 {
     30
+}
+
+/// `APP_admin_username` default (webapp's admin bootstrap).
+fn default_admin_username() -> String {
+    "admin".to_string()
 }
 
 /// `APP_llm_provider` default (§2.9, §4): nothing calls a paid API without

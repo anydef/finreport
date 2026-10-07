@@ -31,14 +31,14 @@ impl QueryRoot {
             None => return Ok(None),
         };
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        let display_name = app_user::Entity::find_by_id(user.user_id)
-            .one(db)
-            .await?
-            .and_then(|row| row.display_name);
+        let row = app_user::Entity::find_by_id(user.user_id).one(db).await?;
+        let display_name = row.as_ref().and_then(|row| row.display_name.clone());
+        let is_admin = row.map(|row| row.is_admin).unwrap_or(false);
         Ok(Some(Me {
             id: user.user_id.into(),
             username: user.username.clone(),
             display_name,
+            is_admin,
         }))
     }
 

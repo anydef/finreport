@@ -119,6 +119,7 @@ pub async fn create_user(
         display_name: Set(display_name.map(str::to_string)),
         disabled: Set(false),
         created_at: Set(Utc::now().fixed_offset()),
+        is_admin: Set(false),
     };
     Ok(model.insert(db).await?)
 }

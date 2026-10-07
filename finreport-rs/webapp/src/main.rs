@@ -4,7 +4,9 @@ use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use dotenv::dotenv;
 use secrecy::ExposeSecret;
 use std::sync::Arc;
+use tracing::error;
 use utils::settings::Settings;
+use webapp::auth::bootstrap_admin;
 use webapp::db::seaql;
 use webapp::graphql::{create_schema, http::cors, http::graphql_resource};
 
@@ -35,6 +37,19 @@ async fn main() -> std::io::Result<()> {
             .await
             .expect("Failed to connect to the database"),
     );
+
+    if let Err(e) = bootstrap_admin(
+        &conn,
+        &app_settings.admin_username,
+        app_settings.admin_password.as_ref(),
+    )
+    .await
+    {
+        // Never fatal: a broken bootstrap must not take an otherwise-healthy
+        // GraphQL server down (the existing `app_user` row, if any, still
+        // logs in fine).
+        error!(%e, "[startup] admin bootstrap failed");
+    }
 
     let schema = create_schema(Arc::clone(&conn), Arc::clone(&app_settings));
     let cors_settings = Arc::clone(&app_settings);

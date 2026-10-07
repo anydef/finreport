@@ -61,6 +61,7 @@ impl MutationRoot {
             id: user.id.into(),
             username: user.username,
             display_name: user.display_name,
+            is_admin: user.is_admin,
         })
     }
 

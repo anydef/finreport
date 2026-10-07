@@ -71,6 +71,8 @@ fn dummy_settings() -> Arc<Settings> {
         allowed_origins: String::new(),
         session_ttl_days: 30,
         projector_default_owner: None,
+        admin_username: "admin".to_string(),
+        admin_password: None,
         llm_provider: "fake".to_string(),
         anthropic_api_key: None,
         llm_api_key: None,

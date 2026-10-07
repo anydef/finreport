@@ -247,6 +247,7 @@ type Me {
 	id: UUID!
 	username: String!
 	displayName: String
+	isAdmin: Boolean!
 }
 
 type Mutation {

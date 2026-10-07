@@ -10,6 +10,7 @@ query Me {
 		id
 		username
 		displayName
+		isAdmin
 	}
 }`;
 
@@ -19,6 +20,7 @@ mutation Login($input: LoginInput!) {
 		id
 		username
 		displayName
+		isAdmin
 	}
 }`;
 

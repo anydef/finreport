@@ -116,7 +116,7 @@ impl MigrationTrait for Migration {
 }
 
 #[derive(DeriveIden)]
-enum AppUser {
+pub enum AppUser {
     Table,
     Id,
     Username,
@@ -124,6 +124,8 @@ enum AppUser {
     DisplayName,
     Disabled,
     CreatedAt,
+    /// Added in m20261101_000005_app_user_is_admin.
+    IsAdmin,
 }
 
 #[derive(DeriveIden)]
