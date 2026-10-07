@@ -1,0 +1,10 @@
+{
+  "query": "mutation UnsplitTransaction($transactionId: UUID!) {\n  unsplitTransaction(transactionId: $transactionId) {\n    id\n    splits {\n      index\n    }\n  }\n}",
+  "variables": { "transactionId": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11" },
+  "data": {
+    "unsplitTransaction": {
+      "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+      "splits": []
+    }
+  }
+}

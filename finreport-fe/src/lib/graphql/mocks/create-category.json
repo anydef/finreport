@@ -1,0 +1,18 @@
+{
+  "query": "mutation CreateCategory($input: CategoryInput!) {\n  createCategory(input: $input) {\n    id\n    slug\n    name\n    kind\n    parentId\n    depth\n    archived\n    origin\n  }\n}",
+  "variables": {
+    "input": { "slug": "housing.coworking", "name": "Coworking", "kind": "EXPENSE", "parentSlug": "housing" }
+  },
+  "data": {
+    "createCategory": {
+      "id": "b6c4a9b1-6e8a-4e3a-9c3d-1a2b3c4d5e6f",
+      "slug": "housing.coworking",
+      "name": "Coworking",
+      "kind": "EXPENSE",
+      "parentId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "depth": 2,
+      "archived": false,
+      "origin": "user"
+    }
+  }
+}

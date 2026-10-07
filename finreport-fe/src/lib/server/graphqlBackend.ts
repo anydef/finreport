@@ -21,7 +21,11 @@ import transactionsMock from '$lib/graphql/mocks/transactions.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
 import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
-import transactionSplitMock from '$lib/graphql/mocks/transaction-split.json';
+import categoriesMock from '$lib/graphql/mocks/categories.json';
+import clearTransactionCategoryMock from '$lib/graphql/mocks/clear-transaction-category.json';
+import unsplitTransactionMock from '$lib/graphql/mocks/unsplit-transaction.json';
+import setRuleStateMock from '$lib/graphql/mocks/set-rule-state.json';
+import createCategoryMock from '$lib/graphql/mocks/create-category.json';
 
 /** Name of the mock-mode session cookie, mirroring the real `fr_session` cookie's role. */
 const MOCK_SESSION_COOKIE = 'fr_session';
@@ -123,6 +127,84 @@ function mockCashflowGraph(variables: Record<string, unknown> | undefined): unkn
 	return cashflowGraphNetDeficitMock.data;
 }
 
+interface MockCategory {
+	id: string;
+	slug: string;
+	name: string;
+	kind: string;
+	parentId: string | null;
+	depth: number;
+	archived: boolean;
+	origin: string;
+}
+
+function findMockCategory(slug: unknown): MockCategory | undefined {
+	return (categoriesMock.data.categories as MockCategory[]).find((c) => c.slug === slug);
+}
+
+/** `setTransactionCategory`/`SPLIT_TRANSACTION`: echo back the requested
+ * transaction/category from `variables` instead of the fixture's fixed
+ * category, so picking a different category in the UI is visible in mock
+ * mode rather than always answering "Groceries". */
+function mockSetTransactionCategory(variables: Record<string, unknown> | undefined): unknown {
+	const transactionId = (variables?.transactionId as string) ?? '';
+	const category = findMockCategory(variables?.categorySlug);
+	return {
+		setTransactionCategory: {
+			id: transactionId,
+			label: {
+				category: category
+					? { id: category.id, slug: category.slug, name: category.name, kind: category.kind }
+					: null,
+				source: 'USER',
+				status: 'RESOLVED'
+			}
+		}
+	};
+}
+
+function mockSplitTransaction(variables: Record<string, unknown> | undefined): unknown {
+	const transactionId = (variables?.transactionId as string) ?? '';
+	const parts = (variables?.parts as { amount: string; categorySlug: string }[] | undefined) ?? [];
+	return {
+		splitTransaction: {
+			id: transactionId,
+			splits: parts.map((part, index) => {
+				const category = findMockCategory(part.categorySlug);
+				return {
+					index,
+					amount: part.amount,
+					category: category
+						? { id: category.id, slug: category.slug, name: category.name }
+						: { id: '', slug: part.categorySlug, name: part.categorySlug }
+				};
+			})
+		}
+	};
+}
+
+function mockCreateCategory(variables: Record<string, unknown> | undefined): unknown {
+	const input = (variables?.input ?? {}) as {
+		slug?: string;
+		name?: string;
+		kind?: string;
+		parentSlug?: string | null;
+	};
+	const parent = input.parentSlug ? findMockCategory(input.parentSlug) : undefined;
+	return {
+		createCategory: {
+			id: createCategoryMock.data.createCategory.id,
+			slug: input.slug ?? '',
+			name: input.name ?? '',
+			kind: input.kind ?? 'EXPENSE',
+			parentId: parent?.id ?? null,
+			depth: parent ? parent.depth + 1 : 1,
+			archived: false,
+			origin: 'user'
+		}
+	};
+}
+
 function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBackendResult | null {
 	switch (operationNameOf(body)) {
 		case 'Me':
@@ -149,8 +231,34 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'Rules':
 		case 'RecentlyAutoApprovedRules':
 			return { status: 200, body: { data: rulesMock.data }, setCookies: [] };
+		case 'Categories':
+			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
+		case 'SetTransactionCategory':
+			return {
+				status: 200,
+				body: { data: mockSetTransactionCategory(body.variables) },
+				setCookies: []
+			};
+		case 'ClearTransactionCategory':
+			return { status: 200, body: { data: clearTransactionCategoryMock.data }, setCookies: [] };
 		case 'SplitTransaction':
-			return { status: 200, body: { data: transactionSplitMock.data }, setCookies: [] };
+			return { status: 200, body: { data: mockSplitTransaction(body.variables) }, setCookies: [] };
+		case 'UnsplitTransaction':
+			return { status: 200, body: { data: unsplitTransactionMock.data }, setCookies: [] };
+		case 'SetRuleState': {
+			const state = (body.variables?.state as string) ?? setRuleStateMock.data.setRuleState.state;
+			return {
+				status: 200,
+				body: {
+					data: {
+						setRuleState: { ...setRuleStateMock.data.setRuleState, state }
+					}
+				},
+				setCookies: []
+			};
+		}
+		case 'CreateCategory':
+			return { status: 200, body: { data: mockCreateCategory(body.variables) }, setCookies: [] };
 		default:
 			return null;
 	}

@@ -1,0 +1,727 @@
+{
+  "query": "query Categories($includeArchived: Boolean) {\n  categories(includeArchived: $includeArchived) {\n    id\n    slug\n    name\n    kind\n    parentId\n    depth\n    archived\n    origin\n  }\n}",
+  "data": {
+    "categories": [
+      {
+        "id": "ceb51bd3-ff89-519e-9ad8-61064e637f20",
+        "slug": "housing",
+        "name": "Housing",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "d5e3ec43-d4ec-599c-98de-dbe89f551073",
+        "slug": "housing.mortgage",
+        "name": "Mortgage",
+        "kind": "EXPENSE",
+        "parentId": "ceb51bd3-ff89-519e-9ad8-61064e637f20",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "1a7757e9-46ee-5722-a622-006b1884ee69",
+        "slug": "housing.property_taxes",
+        "name": "Property Taxes",
+        "kind": "EXPENSE",
+        "parentId": "ceb51bd3-ff89-519e-9ad8-61064e637f20",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "d8109211-3b07-5536-a09f-563ea2fa5c85",
+        "slug": "housing.household_repairs",
+        "name": "Household Repairs",
+        "kind": "EXPENSE",
+        "parentId": "ceb51bd3-ff89-519e-9ad8-61064e637f20",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "09ab318c-bf20-50f1-8956-b6c8d8694ff6",
+        "slug": "housing.home_insurance",
+        "name": "Home Insurance",
+        "kind": "EXPENSE",
+        "parentId": "ceb51bd3-ff89-519e-9ad8-61064e637f20",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "slug": "transportation",
+        "name": "Transportation",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "1ad035cd-971b-5157-991b-53e7d054cb97",
+        "slug": "transportation.kfz_steuer",
+        "name": "Kfz-Steuer",
+        "kind": "EXPENSE",
+        "parentId": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "2122ae8b-99a5-542a-b469-876c7c8cad74",
+        "slug": "transportation.gas",
+        "name": "Gas",
+        "kind": "EXPENSE",
+        "parentId": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "a106e268-8bc3-54e5-9357-fcdf8df899ca",
+        "slug": "transportation.tires",
+        "name": "Tires",
+        "kind": "EXPENSE",
+        "parentId": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "1aefc997-91d3-5b50-9ddb-311bb8aebeb0",
+        "slug": "transportation.maintenance",
+        "name": "Maintenance",
+        "kind": "EXPENSE",
+        "parentId": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "9072ee54-4400-5f30-95a8-ac7de62d28a7",
+        "slug": "transportation.parking",
+        "name": "Parking",
+        "kind": "EXPENSE",
+        "parentId": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "15a1c565-55cb-5d1e-9052-0ae171fae64b",
+        "slug": "transportation.repairs",
+        "name": "Repairs",
+        "kind": "EXPENSE",
+        "parentId": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "cc31b133-4f16-5a07-bfcc-ca44f8125f5c",
+        "slug": "transportation.car_insurance",
+        "name": "Car Insurance",
+        "kind": "EXPENSE",
+        "parentId": "63909a55-9c44-59f8-a83a-06272eab1037",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "6f1fab8c-1077-541b-b4ee-7d7a5e8d2f17",
+        "slug": "food",
+        "name": "Food",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "7f5a7e2e-7d0a-5f3d-9c8a-2f1b6a0c4d11",
+        "slug": "food.groceries",
+        "name": "Groceries",
+        "kind": "EXPENSE",
+        "parentId": "6f1fab8c-1077-541b-b4ee-7d7a5e8d2f17",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "aab3f0b0-819e-5d23-868b-6822e82299be",
+        "slug": "food.restaurants",
+        "name": "Restaurants",
+        "kind": "EXPENSE",
+        "parentId": "6f1fab8c-1077-541b-b4ee-7d7a5e8d2f17",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "slug": "utilities",
+        "name": "Utilities",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "aedab604-6359-5afc-b3ae-4a0315de0160",
+        "slug": "utilities.electricity",
+        "name": "Electricity",
+        "kind": "EXPENSE",
+        "parentId": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "6c28c8a5-9c8d-5bf0-85a6-e68b6758edbb",
+        "slug": "utilities.water",
+        "name": "Water",
+        "kind": "EXPENSE",
+        "parentId": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "f8053f4a-46ce-578b-ad92-85e1b1a71144",
+        "slug": "utilities.garbage",
+        "name": "Garbage",
+        "kind": "EXPENSE",
+        "parentId": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "64f446c9-40a4-5a03-98d7-eb0f1439076f",
+        "slug": "utilities.phones",
+        "name": "Phones",
+        "kind": "EXPENSE",
+        "parentId": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "cb818194-d798-5435-b8be-3d29308d60e5",
+        "slug": "utilities.cable",
+        "name": "Cable",
+        "kind": "EXPENSE",
+        "parentId": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "036e3244-9134-5ac8-a2e4-ace00723ca41",
+        "slug": "utilities.internet",
+        "name": "Internet",
+        "kind": "EXPENSE",
+        "parentId": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "a2c63843-1bbf-55b4-a9cd-e0564fd7d790",
+        "slug": "utilities.rundfunk",
+        "name": "Rundfunkbeitrag",
+        "kind": "EXPENSE",
+        "parentId": "c6a494b2-a956-5689-9ca6-5a9f0da017d2",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "60c4a374-2b4e-5189-b45d-3c0ea7085d00",
+        "slug": "clothing",
+        "name": "Clothing",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "b345ed74-0497-523d-987b-ec75ff1fffcc",
+        "slug": "clothing.clothing",
+        "name": "Clothing",
+        "kind": "EXPENSE",
+        "parentId": "60c4a374-2b4e-5189-b45d-3c0ea7085d00",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "6f17c25b-9ce2-59e6-89eb-1b4d84eaf256",
+        "slug": "medical",
+        "name": "Medical",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "cd8fad06-bc48-5ba5-bd4e-7d58d175eecd",
+        "slug": "medical.health_care",
+        "name": "Health Care",
+        "kind": "EXPENSE",
+        "parentId": "6f17c25b-9ce2-59e6-89eb-1b4d84eaf256",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "51d30c54-ad5d-5f7a-a118-69c8b71b09d2",
+        "slug": "medical.medications",
+        "name": "Medications",
+        "kind": "EXPENSE",
+        "parentId": "6f17c25b-9ce2-59e6-89eb-1b4d84eaf256",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "7d14c648-a8a7-50be-a59d-9d87538e9685",
+        "slug": "insurance",
+        "name": "Insurance",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "5cc6d5d9-bebb-535a-a17a-78d23305539c",
+        "slug": "insurance.dentist_insurance",
+        "name": "Dentist Insurance",
+        "kind": "EXPENSE",
+        "parentId": "7d14c648-a8a7-50be-a59d-9d87538e9685",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "eee50a4b-7d90-5bb7-869d-ae9b0b04b0d1",
+        "slug": "insurance.auto_insurance",
+        "name": "Auto Insurance",
+        "kind": "EXPENSE",
+        "parentId": "7d14c648-a8a7-50be-a59d-9d87538e9685",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "dba4f20e-1eb6-5cd5-a1ce-3a644957b36e",
+        "slug": "insurance.life_insurance",
+        "name": "Life Insurance",
+        "kind": "EXPENSE",
+        "parentId": "7d14c648-a8a7-50be-a59d-9d87538e9685",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "a3527c35-ac67-553a-9b71-a64131c5047a",
+        "slug": "household_items_supplies",
+        "name": "Household Items Supplies",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "92555304-58ea-56f2-88c6-3517e3775b00",
+        "slug": "household_items_supplies.toiletries",
+        "name": "Toiletries",
+        "kind": "EXPENSE",
+        "parentId": "a3527c35-ac67-553a-9b71-a64131c5047a",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "dd293ea5-f810-5b35-b40b-46a83d137a59",
+        "slug": "household_items_supplies.cleaning",
+        "name": "Cleaning",
+        "kind": "EXPENSE",
+        "parentId": "a3527c35-ac67-553a-9b71-a64131c5047a",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "303bc134-1531-57d3-9a4c-7e5d2da5b3ea",
+        "slug": "household_items_supplies.tools",
+        "name": "Tools",
+        "kind": "EXPENSE",
+        "parentId": "a3527c35-ac67-553a-9b71-a64131c5047a",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "128c0dd0-4255-5a48-a44d-f26aaccfda7b",
+        "slug": "personal",
+        "name": "Personal",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+        "slug": "personal.gym",
+        "name": "Gym",
+        "kind": "EXPENSE",
+        "parentId": "128c0dd0-4255-5a48-a44d-f26aaccfda7b",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "aa987bab-8863-57a7-98e3-bec7059bedb5",
+        "slug": "personal.haircuts",
+        "name": "Haircuts",
+        "kind": "EXPENSE",
+        "parentId": "128c0dd0-4255-5a48-a44d-f26aaccfda7b",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "d3b3b73e-1a9d-5828-a1ac-655ad3920d85",
+        "slug": "personal.salon",
+        "name": "Salon",
+        "kind": "EXPENSE",
+        "parentId": "128c0dd0-4255-5a48-a44d-f26aaccfda7b",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "2dfa1738-00d7-5f0d-8401-08932629d8ff",
+        "slug": "personal.cosmetics",
+        "name": "Cosmetics",
+        "kind": "EXPENSE",
+        "parentId": "128c0dd0-4255-5a48-a44d-f26aaccfda7b",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "e0d7d421-eb1c-5e0a-b9b4-d293fa9c645d",
+        "slug": "debt",
+        "name": "Debt",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "2c125307-f0b9-5dc6-a4f5-244baf52df55",
+        "slug": "debt.credit_card",
+        "name": "Credit Card",
+        "kind": "EXPENSE",
+        "parentId": "e0d7d421-eb1c-5e0a-b9b4-d293fa9c645d",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "07ac7889-5ca6-5d10-8d54-11df71decf86",
+        "slug": "debt.other",
+        "name": "Other Debt",
+        "kind": "EXPENSE",
+        "parentId": "e0d7d421-eb1c-5e0a-b9b4-d293fa9c645d",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "5560562b-bc35-5d85-a1d8-ffc6a37bd811",
+        "slug": "education",
+        "name": "Education",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "23a0d840-02f6-5977-b656-f34001118164",
+        "slug": "education.courses",
+        "name": "Courses",
+        "kind": "EXPENSE",
+        "parentId": "5560562b-bc35-5d85-a1d8-ffc6a37bd811",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "ff022fa1-7b23-5263-8146-2bfbf3f3ee85",
+        "slug": "education.materials_books",
+        "name": "Materials Books",
+        "kind": "EXPENSE",
+        "parentId": "5560562b-bc35-5d85-a1d8-ffc6a37bd811",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "6d4c0e59-45c1-5d80-8537-f8cb40638a55",
+        "slug": "savings",
+        "name": "Savings",
+        "kind": "SAVING",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+        "slug": "savings.emergency_fund",
+        "name": "Emergency Fund",
+        "kind": "SAVING",
+        "parentId": "6d4c0e59-45c1-5d80-8537-f8cb40638a55",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "c1141e82-69e8-5ec3-9493-09ed61336d6c",
+        "slug": "savings.stocks_etfs",
+        "name": "Stocks Etfs",
+        "kind": "SAVING",
+        "parentId": "6d4c0e59-45c1-5d80-8537-f8cb40638a55",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "b338fd90-0e2d-510f-a35e-d840caf259fe",
+        "slug": "savings.child_savings",
+        "name": "Child Savings",
+        "kind": "SAVING",
+        "parentId": "6d4c0e59-45c1-5d80-8537-f8cb40638a55",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "c4acb56c-682b-5e68-9f51-9ca7741c6e23",
+        "slug": "gifts_donations",
+        "name": "Gifts Donations",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "e99d0c02-ba33-5a35-ba4a-5da3fe925153",
+        "slug": "gifts_donations.birthday",
+        "name": "Birthday",
+        "kind": "EXPENSE",
+        "parentId": "c4acb56c-682b-5e68-9f51-9ca7741c6e23",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "5754f155-8c8d-59b0-a2af-c9e719017db5",
+        "slug": "gifts_donations.holiday",
+        "name": "Holiday",
+        "kind": "EXPENSE",
+        "parentId": "c4acb56c-682b-5e68-9f51-9ca7741c6e23",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "ff0beaee-66bf-59b0-9e6f-7d5333347149",
+        "slug": "gifts_donations.charity",
+        "name": "Charity",
+        "kind": "EXPENSE",
+        "parentId": "c4acb56c-682b-5e68-9f51-9ca7741c6e23",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "589be3f8-a47e-5779-a03f-06f7fd4ca90e",
+        "slug": "gifts_donations.special_occasion",
+        "name": "Special Occasion",
+        "kind": "EXPENSE",
+        "parentId": "c4acb56c-682b-5e68-9f51-9ca7741c6e23",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "587af350-2b4f-5e40-8874-00f0ced5d581",
+        "slug": "entertainment",
+        "name": "Entertainment",
+        "kind": "EXPENSE",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+        "slug": "entertainment.games",
+        "name": "Games",
+        "kind": "EXPENSE",
+        "parentId": "587af350-2b4f-5e40-8874-00f0ced5d581",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+        "slug": "entertainment.movies_concerts",
+        "name": "Movies Concerts",
+        "kind": "EXPENSE",
+        "parentId": "587af350-2b4f-5e40-8874-00f0ced5d581",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "cec51cd2-1569-5958-bdf0-f7fe3d077e5a",
+        "slug": "entertainment.vacations",
+        "name": "Vacations",
+        "kind": "EXPENSE",
+        "parentId": "587af350-2b4f-5e40-8874-00f0ced5d581",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "e87b93b7-1589-5bed-8616-d5c30db917ab",
+        "slug": "entertainment.library",
+        "name": "Library",
+        "kind": "EXPENSE",
+        "parentId": "587af350-2b4f-5e40-8874-00f0ced5d581",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "048061eb-f44e-59e8-99f3-86a7d16b79d8",
+        "slug": "entertainment.subscriptions",
+        "name": "Subscriptions",
+        "kind": "EXPENSE",
+        "parentId": "587af350-2b4f-5e40-8874-00f0ced5d581",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "91ce18e9-46f7-52f2-84a4-75c72229b8f8",
+        "slug": "income",
+        "name": "Income",
+        "kind": "INCOME",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "4964f0a9-1733-5250-9273-17ea11bb08a9",
+        "slug": "income.salary",
+        "name": "Salary",
+        "kind": "INCOME",
+        "parentId": "91ce18e9-46f7-52f2-84a4-75c72229b8f8",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "c1bffec3-2639-5f24-936d-5fb51ecb91d5",
+        "slug": "income.freelance",
+        "name": "Freelance",
+        "kind": "INCOME",
+        "parentId": "91ce18e9-46f7-52f2-84a4-75c72229b8f8",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "43d58c0b-44ce-532d-999a-35c3cf2937fb",
+        "slug": "income.interest",
+        "name": "Interest",
+        "kind": "INCOME",
+        "parentId": "91ce18e9-46f7-52f2-84a4-75c72229b8f8",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "e2211393-016c-5474-a96e-3d307715e018",
+        "slug": "income.other",
+        "name": "Other",
+        "kind": "INCOME",
+        "parentId": "91ce18e9-46f7-52f2-84a4-75c72229b8f8",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "b3892654-8aec-595e-89dc-998d9117a3a0",
+        "slug": "transfer",
+        "name": "Transfer",
+        "kind": "TRANSFER",
+        "parentId": null,
+        "depth": 1,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "af9a944e-c3f8-5f8c-b7fc-eddd4e5ad847",
+        "slug": "transfer.internal",
+        "name": "Internal",
+        "kind": "TRANSFER",
+        "parentId": "b3892654-8aec-595e-89dc-998d9117a3a0",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "9a5c3b47-a676-541e-95ff-49bd24d23373",
+        "slug": "transfer.credit_card_payment",
+        "name": "Credit Card Payment",
+        "kind": "TRANSFER",
+        "parentId": "b3892654-8aec-595e-89dc-998d9117a3a0",
+        "depth": 2,
+        "archived": false,
+        "origin": "seed"
+      },
+      {
+        "id": "bb0ebfcd-cab5-5de2-95ba-77a226399a57",
+        "slug": "housing.coworking",
+        "name": "Coworking",
+        "kind": "EXPENSE",
+        "parentId": "ceb51bd3-ff89-519e-9ad8-61064e637f20",
+        "depth": 2,
+        "archived": false,
+        "origin": "user"
+      }
+    ]
+  }
+}
