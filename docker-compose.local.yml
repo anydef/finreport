@@ -88,6 +88,10 @@ services:
         # per-entity topics above.
         $$RPK topic create finreport.transaction-insight \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        # Iteration 4 goals (docs/specs/iteration-4.md §2.1): keyed by the
+        # goal's own UUID, same compaction posture as finreport.rule.
+        $$RPK topic create finreport.goal \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 
   finreport-be:

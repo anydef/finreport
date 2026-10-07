@@ -7,6 +7,7 @@
 
 pub mod envelope;
 pub mod events;
+pub mod goals;
 pub mod insights;
 pub mod labeling;
 pub mod producer;

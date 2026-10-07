@@ -50,14 +50,8 @@ query Accounts {
 	}
 }`;
 
-// `tags`/`transfer`/`recurring` (iteration 3 §4) were deliberately left off
-// this query by WP0 until WP-B's resolvers were real (§9 WP0 addendum #5);
-// WP-C adds them here now that the mocks model them.
-export const TRANSACTIONS_QUERY = `
-query Transactions($filter: TransactionFilter, $page: PageInput) {
-	transactions(filter: $filter, page: $page) {
-		items {
-			id
+/** The `Transaction` selection shared by every query that returns a `TransactionPage`. */
+const TRANSACTION_ITEM_FIELDS = `			id
 			accountId
 			source
 			externalId
@@ -106,7 +100,16 @@ query Transactions($filter: TransactionFilter, $page: PageInput) {
 				seriesId
 				cadence
 				medianAmount
-			}
+			}`;
+
+// `tags`/`transfer`/`recurring` (iteration 3 §4) were deliberately left off
+// this query by WP0 until WP-B's resolvers were real (§9 WP0 addendum #5);
+// WP-C adds them here now that the mocks model them.
+export const TRANSACTIONS_QUERY = `
+query Transactions($filter: TransactionFilter, $page: PageInput) {
+	transactions(filter: $filter, page: $page) {
+		items {
+${TRANSACTION_ITEM_FIELDS}
 		}
 		totalCount
 		limit
@@ -438,5 +441,104 @@ mutation SetTransactionRecurring($transactionId: UUID!, $recurring: Boolean) {
 			cadence
 			medianAmount
 		}
+	}
+}`;
+
+// ---------------------------------------------------------------------------
+// Goals (iteration 4, §4)
+//
+// None of these fields are added to an existing query: the goal resolvers
+// return NOT_IMPLEMENTED until WP-B lands, which would fail a whole query
+// against a live backend (iteration 3 §9.5).
+// ---------------------------------------------------------------------------
+
+const GOAL_FIELDS = `
+	id
+	name
+	type
+	amount
+	currency
+	scope {
+		categories {
+			id
+			slug
+			name
+			kind
+			parentId
+			depth
+			archived
+			origin
+		}
+		tags
+		combine
+		tagCombine
+	}
+	periodKind
+	cadence
+	startDate
+	endDate
+	archived`;
+
+export const GOALS_QUERY = `
+query Goals($includeArchived: Boolean! = false) {
+	goals(includeArchived: $includeArchived) {${GOAL_FIELDS}
+	}
+}`;
+
+export const GOAL_QUERY = `
+query Goal($id: UUID!) {
+	goal(id: $id) {${GOAL_FIELDS}
+	}
+}`;
+
+export const GOAL_PROGRESS_QUERY = `
+query GoalProgress($id: UUID!, $startDate: Date, $endDate: Date) {
+	goalProgress(id: $id, startDate: $startDate, endDate: $endDate) {
+		goal {${GOAL_FIELDS}
+		}
+		buckets {
+			start
+			end
+			label
+			total
+			pending
+			remaining
+			met
+			inProgress
+		}
+		total
+		pending
+		averagePerPeriod
+		currency
+	}
+}`;
+
+export const GOAL_TRANSACTIONS_QUERY = `
+query GoalTransactions($id: UUID!, $startDate: Date!, $endDate: Date!, $page: PageInput) {
+	goalTransactions(id: $id, startDate: $startDate, endDate: $endDate, page: $page) {
+		items {
+${TRANSACTION_ITEM_FIELDS}
+		}
+		totalCount
+		limit
+		offset
+	}
+}`;
+
+export const CREATE_GOAL_MUTATION = `
+mutation CreateGoal($input: GoalInput!) {
+	createGoal(input: $input) {${GOAL_FIELDS}
+	}
+}`;
+
+export const UPDATE_GOAL_MUTATION = `
+mutation UpdateGoal($id: UUID!, $input: GoalInput!) {
+	updateGoal(id: $id, input: $input) {${GOAL_FIELDS}
+	}
+}`;
+
+export const ARCHIVE_GOAL_MUTATION = `
+mutation ArchiveGoal($id: UUID!) {
+	archiveGoal(id: $id) {${GOAL_FIELDS}
 	}
 }`;

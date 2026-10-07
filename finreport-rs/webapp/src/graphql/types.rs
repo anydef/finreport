@@ -18,16 +18,22 @@ pub(crate) fn not_implemented(field: &str, wp: u8) -> async_graphql::Error {
     .extend_with(|_, e| e.set("code", "NOT_IMPLEMENTED"))
 }
 
-/// Iteration-3 counterpart of [`not_implemented`]: WP0 froze these resolver
-/// stubs; WP-B has since implemented all five call sites, so nothing
-/// references this anymore — kept (like [`not_implemented`] above) in case
-/// a future iteration adds another stub needing the same shape.
-#[allow(dead_code)]
-pub(crate) fn not_implemented_iter3(field: &str, wp: &str) -> async_graphql::Error {
+/// Iteration-N counterpart of [`not_implemented`]: `iteration` selects which
+/// `docs/specs/iteration-N.md` the error points at, `wp` (a string, since
+/// later iterations name packages `WP-A`, `WP-B`, ...) the owning work
+/// package. Same `extensions.code = "NOT_IMPLEMENTED"`.
+pub(crate) fn not_implemented_in(iteration: u8, field: &str, wp: &str) -> async_graphql::Error {
     async_graphql::Error::new(format!(
-        "{field} is not implemented yet ({wp}, see docs/specs/iteration-3.md)"
+        "{field} is not implemented yet ({wp}, see docs/specs/iteration-{iteration}.md)"
     ))
     .extend_with(|_, e| e.set("code", "NOT_IMPLEMENTED"))
+}
+
+/// Iteration-3 stubs: WP-B has since implemented all five call sites, so
+/// nothing references this anymore — kept in case it is needed again.
+#[allow(dead_code)]
+pub(crate) fn not_implemented_iter3(field: &str, wp: &str) -> async_graphql::Error {
+    not_implemented_in(3, field, wp)
 }
 
 // ---------------------------------------------------------------------------

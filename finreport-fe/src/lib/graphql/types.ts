@@ -324,3 +324,79 @@ export interface TagCount {
 	tag: string;
 	transactionCount: number;
 }
+
+// ---------------------------------------------------------------------------
+// Goals (iteration 4, §4)
+// ---------------------------------------------------------------------------
+
+export type GoalType = 'SPENDING_LIMIT' | 'SAVING_TARGET';
+export type GoalPeriodKind = 'RECURRING' | 'FIXED';
+export type GoalCadence = 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
+export type ScopeCombine = 'ALL' | 'ANY';
+
+export interface GoalScope {
+	/** Resolved from slugs; archived ones are still listed. */
+	categories: Category[];
+	tags: string[];
+	combine: ScopeCombine;
+	tagCombine: ScopeCombine;
+}
+
+export interface Goal {
+	id: UUID;
+	name: string;
+	type: GoalType;
+	amount: Decimal;
+	currency: string;
+	scope: GoalScope;
+	periodKind: GoalPeriodKind;
+	/** `null` for `FIXED`. */
+	cadence: GoalCadence | null;
+	/** `null` for `RECURRING`. */
+	startDate: DateString | null;
+	/** `null` for `RECURRING` or an open-ended `FIXED`. */
+	endDate: DateString | null;
+	archived: boolean;
+}
+
+export interface GoalBucket {
+	start: DateString;
+	end: DateString;
+	label: string;
+	/** Positive magnitude. */
+	total: Decimal;
+	/** Held-for-review, excluded from `total`. */
+	pending: Decimal;
+	/** `amount - total`; negative when over. */
+	remaining: Decimal;
+	/** `<= amount` for a limit, `>= amount` for a target. */
+	met: boolean;
+	inProgress: boolean;
+}
+
+export interface GoalProgress {
+	goal: Goal;
+	buckets: GoalBucket[];
+	/** Across every bucket. */
+	total: Decimal;
+	pending: Decimal;
+	/** Over completed buckets only. */
+	averagePerPeriod: Decimal;
+	currency: string;
+}
+
+/** Mirrors the `GoalInput` SDL input; `RECURRING` needs `cadence`, `FIXED` needs `startDate`. */
+export interface GoalInput {
+	name: string;
+	type: GoalType;
+	amount: Decimal;
+	currency?: string;
+	categorySlugs?: string[];
+	tags?: string[];
+	combine?: ScopeCombine;
+	tagCombine?: ScopeCombine;
+	periodKind: GoalPeriodKind;
+	cadence?: GoalCadence | null;
+	startDate?: DateString | null;
+	endDate?: DateString | null;
+}

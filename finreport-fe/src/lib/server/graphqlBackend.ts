@@ -27,6 +27,10 @@ import clearTransactionCategoryMock from '$lib/graphql/mocks/clear-transaction-c
 import unsplitTransactionMock from '$lib/graphql/mocks/unsplit-transaction.json';
 import tagsMock from '$lib/graphql/mocks/tags.json';
 import recurringOverviewMock from '$lib/graphql/mocks/recurring-overview.json';
+import goalsMock from '$lib/graphql/mocks/goals.json';
+import goalProgressRecurringMock from '$lib/graphql/mocks/goal-progress-recurring.json';
+import goalProgressFixedMock from '$lib/graphql/mocks/goal-progress-fixed.json';
+import goalTransactionsMock from '$lib/graphql/mocks/goal-transactions.json';
 
 /** Name of the mock-mode session cookie, mirroring the real `fr_session` cookie's role. */
 const MOCK_SESSION_COOKIE = 'fr_session';
@@ -369,6 +373,58 @@ function mockArchiveCategory(variables: Record<string, unknown> | undefined): un
 	return { id, slug: existing?.slug ?? '', archived: true };
 }
 
+// ---------------------------------------------------------------------------
+// Goals (iteration 4 §4): the real resolvers are NOT_IMPLEMENTED until WP-B,
+// so WP-C builds against these.
+// ---------------------------------------------------------------------------
+
+interface MockGoal {
+	id: string;
+	scope: { categories: MockCategory[]; tags: string[]; combine: string; tagCombine: string };
+	[key: string]: unknown;
+}
+
+function findMockGoal(id: unknown): MockGoal | undefined {
+	return (goalsMock.data.goals as unknown as MockGoal[]).find((g) => g.id === id);
+}
+
+/** The fixed-range `saving_target` fixture for its own id, the recurring one otherwise. */
+function mockGoalProgress(variables: Record<string, unknown> | undefined): unknown {
+	const fixedId = goalProgressFixedMock.data.goalProgress.goal.id;
+	return variables?.id === fixedId
+		? goalProgressFixedMock.data
+		: goalProgressRecurringMock.data;
+}
+
+/** `createGoal`/`updateGoal`: echo the caller's `GoalInput` back as the stored goal. */
+function mockSaveGoal(variables: Record<string, unknown> | undefined, existingId?: string): unknown {
+	const input = (variables?.input ?? {}) as Record<string, unknown>;
+	const slugs = (input.categorySlugs as string[] | undefined) ?? [];
+	return {
+		id: existingId ?? crypto.randomUUID(),
+		name: input.name ?? '',
+		type: input.type ?? 'SPENDING_LIMIT',
+		amount: input.amount ?? '0.0000',
+		currency: input.currency ?? 'EUR',
+		scope: {
+			categories: slugs.map((slug) => findMockCategory(slug) ?? placeholderCategory(slug)),
+			tags: (input.tags as string[] | undefined) ?? [],
+			combine: input.combine ?? 'ALL',
+			tagCombine: input.tagCombine ?? 'ALL'
+		},
+		periodKind: input.periodKind ?? 'RECURRING',
+		cadence: input.cadence ?? null,
+		startDate: input.startDate ?? null,
+		endDate: input.endDate ?? null,
+		archived: false
+	};
+}
+
+function mockArchiveGoal(variables: Record<string, unknown> | undefined): unknown {
+	const existing = findMockGoal(variables?.id) ?? goalsMock.data.goals[0];
+	return { ...existing, id: variables?.id ?? existing.id, archived: true };
+}
+
 function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBackendResult | null {
 	switch (operationNameOf(body)) {
 		case 'Me':
@@ -416,6 +472,37 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return { status: 200, body: { data: tagsMock.data }, setCookies: [] };
 		case 'RecurringSeries':
 			return { status: 200, body: { data: recurringOverviewMock.data }, setCookies: [] };
+		// Iteration-4 (§4) goal operations, same "WP0 mock" shape as above.
+		case 'Goals':
+			return { status: 200, body: { data: goalsMock.data }, setCookies: [] };
+		case 'Goal':
+			return {
+				status: 200,
+				body: { data: { goal: findMockGoal(body.variables?.id) ?? null } },
+				setCookies: []
+			};
+		case 'GoalProgress':
+			return { status: 200, body: { data: mockGoalProgress(body.variables) }, setCookies: [] };
+		case 'GoalTransactions':
+			return { status: 200, body: { data: goalTransactionsMock.data }, setCookies: [] };
+		case 'CreateGoal':
+			return {
+				status: 200,
+				body: { data: { createGoal: mockSaveGoal(body.variables) } },
+				setCookies: []
+			};
+		case 'UpdateGoal':
+			return {
+				status: 200,
+				body: { data: { updateGoal: mockSaveGoal(body.variables, body.variables?.id as string) } },
+				setCookies: []
+			};
+		case 'ArchiveGoal':
+			return {
+				status: 200,
+				body: { data: { archiveGoal: mockArchiveGoal(body.variables) } },
+				setCookies: []
+			};
 		case 'SetTransactionTags':
 			return {
 				status: 200,

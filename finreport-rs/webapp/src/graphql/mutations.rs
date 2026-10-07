@@ -20,6 +20,7 @@ use crate::graphql::types::{
     Transaction,
 };
 use crate::graphql::{categories, labels, rules};
+use crate::graphql::goals;
 use crate::graphql::RawSessionToken;
 use crate::kafka::producer::EventPublisher;
 
@@ -192,6 +193,24 @@ impl MutationRoot {
         let publisher = publisher(ctx);
         let scoped_ids = scoped_account_ids(user, None)?;
         rules::reapply_rule(db, publisher, &scoped_ids, id.0).await
+    }
+
+    /// `createGoal` (iteration 4 §4).
+    async fn create_goal(&self, input: goals::GoalInput) -> GqlResult<goals::Goal> {
+        goals::create_goal(input).await
+    }
+
+    /// `updateGoal` (iteration 4 §4): read-modify-write on `finreport.goal`.
+    async fn update_goal(
+        &self,
+        id: crate::graphql::scalars::Uuid,
+        input: goals::GoalInput,
+    ) -> GqlResult<goals::Goal> {
+        goals::update_goal(id, input).await
+    }
+
+    async fn archive_goal(&self, id: crate::graphql::scalars::Uuid) -> GqlResult<goals::Goal> {
+        goals::archive_goal(id).await
     }
 
     /// Replaces the whole tag set; `[]` clears (§4).

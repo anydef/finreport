@@ -224,3 +224,20 @@ resource "kafka_topic" "transaction_insight" {
     prevent_destroy = true
   }
 }
+
+# Iteration 4 goals (docs/specs/iteration-4.md §2.1): a user's spending or
+# saving goal, keyed by the goal's own UUID, last-writer-wins like
+# finreport.rule. Compacted; a tombstone deletes the goal.
+resource "kafka_topic" "goal" {
+  name               = "finreport.goal"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

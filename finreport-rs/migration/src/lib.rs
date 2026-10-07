@@ -15,6 +15,7 @@ mod m20261101_000005_app_user_is_admin;
 mod m20261201_000001_tags;
 mod m20261201_000002_insights;
 mod m20261201_000003_projection_offset_group;
+mod m20270101_000001_goals;
 
 pub struct Migrator;
 
@@ -52,6 +53,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261201_000002_insights::Migration),
             // Scopes projection_offset by APP_projection_group so replay is a config change.
             Box::new(m20261201_000003_projection_offset_group::Migration),
+            // Iteration 4 §2.2: the goals projection (progress is derived, not stored).
+            Box::new(m20270101_000001_goals::Migration),
         ]
     }
 }
