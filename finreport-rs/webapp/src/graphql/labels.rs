@@ -404,6 +404,10 @@ pub async fn set_transaction_category(
         external_id: txn.external_id.clone(),
         category_slug: Some(category_slug),
         parts: Vec::new(),
+        // TODO(WP-B): read-modify-write existing tags/recurring here
+        // instead of dropping them (iteration 3 §2.1).
+        tags: Vec::new(),
+        recurring: None,
         revision,
         note: None,
     };
@@ -432,6 +436,10 @@ pub async fn clear_transaction_category(
         external_id: txn.external_id.clone(),
         category_slug: None,
         parts: Vec::new(),
+        // TODO(WP-B): read-modify-write existing tags/recurring here
+        // instead of dropping them (iteration 3 §2.1).
+        tags: Vec::new(),
+        recurring: None,
         revision,
         note: None,
     };
@@ -526,6 +534,10 @@ pub async fn split_transaction(
                 category_slug: category_slug.clone(),
             })
             .collect(),
+        // TODO(WP-B): read-modify-write existing tags/recurring here
+        // instead of dropping them (iteration 3 §2.1).
+        tags: Vec::new(),
+        recurring: None,
         revision,
         note: None,
     };
