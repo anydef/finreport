@@ -643,7 +643,23 @@ pub async fn set_transaction_tags(
     let txn = load_scoped_transaction(db, scoped_ids, transaction_id).await?;
     let normalized = normalize_tags(&tags, max_tags)?;
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
+    apply_tags(db, publisher, &txn, &normalized).await?;
+    Ok(to_graphql_transaction(&txn))
+}
 
+/// The publish-then-upsert core of `setTransactionTags`, shared with the
+/// bulk mutation (`bulk.rs`). `normalized` must already have passed
+/// [`normalize_tags`]. Preserves the category, splits, recurring override
+/// and note by republishing them from the current state (§2.1).
+///
+/// Returns whether the write applied (`false` ⇒ a newer `revision` won).
+pub(crate) async fn apply_tags(
+    db: &DatabaseConnection,
+    publisher: &Arc<EventPublisher>,
+    txn: &transaction::Model,
+    normalized: &[String],
+) -> async_graphql::Result<bool> {
+    let transaction_id = txn.id;
     let current = load_current_state(db, transaction_id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
@@ -652,7 +668,7 @@ pub async fn set_transaction_tags(
         external_id: txn.external_id.clone(),
         category_slug: current.category_slug.clone(),
         parts: current.parts.clone(),
-        tags: normalized.clone(),
+        tags: normalized.to_vec(),
         recurring: current.recurring,
         revision,
         note: current.note.clone(),
@@ -673,9 +689,11 @@ pub async fn set_transaction_tags(
     )
     .await?
     {
-        replace_tags(db, transaction_id, &normalized, revision).await?;
+        replace_tags(db, transaction_id, normalized, revision).await?;
+        Ok(true)
+    } else {
+        Ok(false)
     }
-    Ok(to_graphql_transaction(&txn))
 }
 
 /// `setTransactionRecurring` (§4): `null` clears the override and lets

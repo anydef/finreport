@@ -195,7 +195,10 @@ fn build_graph_sql(
         params.push(names.clone().into());
         idx += 1;
     }
-    let _ = idx;
+    let (id_amount_sql, id_amount_params) =
+        crate::graphql::transactions::id_and_amount_sql("transaction", filter, idx);
+    sql.push_str(&id_amount_sql);
+    params.extend(id_amount_params);
     match filter.has_counterparty {
         Some(true) => sql.push_str(" AND counterparty_name IS NOT NULL"),
         Some(false) => sql.push_str(" AND counterparty_name IS NULL"),
@@ -257,7 +260,10 @@ fn build_category_outcome_sql(
         params.push(names.clone().into());
         idx += 1;
     }
-    let _ = idx;
+    let (id_amount_sql, id_amount_params) =
+        crate::graphql::transactions::id_and_amount_sql("t", filter, idx);
+    extra.push_str(&id_amount_sql);
+    params.extend(id_amount_params);
     match filter.has_counterparty {
         Some(true) => extra.push_str(" AND t.counterparty_name IS NOT NULL"),
         Some(false) => extra.push_str(" AND t.counterparty_name IS NULL"),

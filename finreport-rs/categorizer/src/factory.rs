@@ -114,6 +114,7 @@ mod tests {
             recurring_amount_tolerance: 0.10,
             recurring_window_months: 18,
             max_tags_per_transaction: 10,
+            bulk_edit_max_transactions: 5_000,
             accounts: Default::default(),
             account_name: None,
             client_id: None,

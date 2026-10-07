@@ -403,7 +403,7 @@ pub(crate) async fn load_scoped_transaction(
         .ok_or_else(not_found_error)
 }
 
-fn to_graphql_transaction(row: &transaction::Model) -> Transaction {
+pub(crate) fn to_graphql_transaction(row: &transaction::Model) -> Transaction {
     Transaction {
         id: GqlUuid(row.id),
         account_id: GqlUuid(row.account_id),
@@ -473,12 +473,13 @@ async fn replace_splits(
     Ok(())
 }
 
-async fn clear_splits(db: &DatabaseConnection, transaction_id: Uuid) -> async_graphql::Result<()> {
-    transaction_split::Entity::delete_many()
+/// Deletes the transaction's split rows, returning how many there were.
+async fn clear_splits(db: &DatabaseConnection, transaction_id: Uuid) -> async_graphql::Result<u64> {
+    let result = transaction_split::Entity::delete_many()
         .filter(transaction_split::Column::TransactionId.eq(transaction_id))
         .exec(db)
         .await?;
-    Ok(())
+    Ok(result.rows_affected)
 }
 
 async fn publish_user_label(
@@ -504,19 +505,35 @@ pub async fn set_transaction_category(
         .await?
         .ok_or_else(|| validation_error(format!("category '{category_slug}' does not exist")))?;
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
+    apply_category(db, publisher, &txn, &category).await?;
+    Ok(to_graphql_transaction(&txn))
+}
 
+/// The publish-then-upsert core of `setTransactionCategory`, shared with the
+/// bulk mutation (`bulk.rs`) so there is exactly one implementation of "pin
+/// this transaction to this category".
+///
+/// Returns `Some(n)` when the write applied, `n` being the split rows the
+/// category change discarded, or `None` when a newer `revision` already won
+/// and nothing was touched (§2.1) — which is also what makes a retry safe.
+pub(crate) async fn apply_category(
+    db: &DatabaseConnection,
+    publisher: &Arc<EventPublisher>,
+    txn: &transaction::Model,
+    category: &entity::entities::category::Model,
+) -> async_graphql::Result<Option<u64>> {
     // §2.1 read-modify-write: a category change republishes the whole
     // record, so the current tags/recurring override must ride along
     // unchanged (WP0 addendum §9.7 flagged the previous `Vec::new()`/`None`
     // as a bug WP-B owned fixing).
     let (tags, recurring) =
-        crate::graphql::insights::preserved_tags_and_recurring(db, transaction_id).await?;
+        crate::graphql::insights::preserved_tags_and_recurring(db, txn.id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
         source: txn.source.clone(),
         external_id: txn.external_id.clone(),
-        category_slug: Some(category_slug),
+        category_slug: Some(category.slug.clone()),
         parts: Vec::new(),
         tags,
         recurring,
@@ -524,10 +541,11 @@ pub async fn set_transaction_category(
         note: None,
     };
     publish_user_label(publisher, &record).await?;
-    if upsert_user_label(db, transaction_id, Some(category.id), None, revision).await? {
-        clear_splits(db, transaction_id).await?;
+    if upsert_user_label(db, txn.id, Some(category.id), None, revision).await? {
+        Ok(Some(clear_splits(db, txn.id).await?))
+    } else {
+        Ok(None)
     }
-    Ok(to_graphql_transaction(&txn))
 }
 
 /// `clearTransactionCategory` (§2.6, §5): a real event, not a tombstone —

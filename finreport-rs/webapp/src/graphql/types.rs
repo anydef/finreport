@@ -271,6 +271,15 @@ pub struct TransactionFilter {
     pub recurring: Option<bool>,
     /// `true` = only transfers, `false` = only non-transfers (§4).
     pub transfer: Option<bool>,
+    /// Exact transaction ids, OR-ed among themselves and AND-ed with the
+    /// other conditions.
+    pub transaction_ids: Option<Vec<Uuid>>,
+    /// Inclusive bound on the amount's magnitude (absolute value); `None` =
+    /// unbounded. Use `direction` to pick income or spending.
+    pub amount_min: Option<Decimal>,
+    /// Inclusive bound on the amount's magnitude (absolute value); `None` =
+    /// unbounded. Use `direction` to pick income or spending.
+    pub amount_max: Option<Decimal>,
 }
 
 #[derive(InputObject)]

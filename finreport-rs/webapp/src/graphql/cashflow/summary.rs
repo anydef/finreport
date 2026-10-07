@@ -161,7 +161,10 @@ pub fn build_summary_sql(
         params.push(names.clone().into());
         idx += 1;
     }
-    let _ = idx; // last writer not read further; keeps the counter honest if more predicates are added.
+    let (id_amount_sql, id_amount_params) =
+        crate::graphql::transactions::id_and_amount_sql("transaction", filter, idx);
+    sql.push_str(&id_amount_sql);
+    params.extend(id_amount_params);
     match filter.has_counterparty {
         Some(true) => sql.push_str(" AND counterparty_name IS NOT NULL"),
         Some(false) => sql.push_str(" AND counterparty_name IS NULL"),

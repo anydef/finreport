@@ -24,6 +24,29 @@ type Balance {
 	currency: String!
 }
 
+"""
+Outcome of a bulk edit. Always `matched >= applied + failed`; the
+remainder were already in the requested state.
+"""
+type BulkEditResult {
+	"""
+	How many transactions the filter matched.
+	"""
+	matched: Int!
+	"""
+	How many were actually changed.
+	"""
+	applied: Int!
+	"""
+	How many failed; the operation is not atomic.
+	"""
+	failed: Int!
+	"""
+	How many had splits that this category change discarded.
+	"""
+	splitsCleared: Int!
+}
+
 type CashflowBucket {
 	"""
 	Inclusive.
@@ -366,17 +389,6 @@ type Me {
 	isAdmin: Boolean!
 }
 
-type BulkEditResult {
-	"How many transactions the filter matched."
-	matched: Int!
-	"How many were actually changed."
-	applied: Int!
-	"How many failed; the operation is not atomic."
-	failed: Int!
-	"How many had splits that this category change discarded."
-	splitsCleared: Int!
-}
-
 type Mutation {
 	"""
 	`login`/`logout` are the only unauthenticated mutations (§4/§5). A
@@ -411,13 +423,14 @@ type Mutation {
 	"""
 	setTransactionTags(transactionId: UUID!, tags: [String!]!): Transaction!
 	"""
-	Bulk edit: overrides the category of every transaction the filter matches.
-	Not atomic; discards splits. Mock-only until the backend resolver exists.
+	Overrides the category of every transaction the filter matches (and
+	clears their splits). Restricted to the caller's own accounts; not
+	atomic — see `BulkEditResult`.
 	"""
 	setTransactionsCategory(filter: TransactionFilter!, categorySlug: String!): BulkEditResult!
 	"""
-	Bulk edit: overrides the tag set of every transaction the filter matches.
-	Not atomic. Mock-only until the backend resolver exists.
+	Replaces the tag set of every transaction the filter matches; `[]`
+	clears. Restricted to the caller's own accounts; not atomic.
 	"""
 	setTransactionsTags(filter: TransactionFilter!, tags: [String!]!): BulkEditResult!
 	"""
@@ -682,9 +695,20 @@ input TransactionFilter {
 	"""
 	transfer: Boolean
 	"""
-	Exact transaction ids, OR-ed among themselves and AND-ed with the other conditions.
+	Exact transaction ids, OR-ed among themselves and AND-ed with the
+	other conditions.
 	"""
 	transactionIds: [UUID!]
+	"""
+	Inclusive bound on the amount's magnitude (absolute value); `None` =
+	unbounded. Use `direction` to pick income or spending.
+	"""
+	amountMin: Decimal
+	"""
+	Inclusive bound on the amount's magnitude (absolute value); `None` =
+	unbounded. Use `direction` to pick income or spending.
+	"""
+	amountMax: Decimal
 }
 
 type TransactionLabel {

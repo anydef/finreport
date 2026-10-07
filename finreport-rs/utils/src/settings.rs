@@ -207,6 +207,12 @@ pub struct Settings {
     /// Mutation-side validation cap (§4: `extensions.code = "TOO_MANY_TAGS"`).
     #[serde(default = "default_max_tags_per_transaction")]
     pub max_tags_per_transaction: u32,
+    /// Most transactions one `setTransactionsCategory`/`setTransactionsTags`
+    /// call may touch. A larger match set is rejected up front with
+    /// `extensions.code = "BULK_LIMIT_EXCEEDED"` and nothing is changed (a
+    /// truncated run would leave "all matching" half-applied).
+    #[serde(default = "default_bulk_edit_max_transactions")]
+    pub bulk_edit_max_transactions: u32,
 
     /// Comdirect logins keyed by the segment in `APP_accounts__<key>__*`.
     /// A `BTreeMap` rather than a `Vec` because config-rs turns numbered env
@@ -634,6 +640,11 @@ fn default_recurring_amount_tolerance() -> f32 {
 /// `APP_recurring_window_months` default (iteration 3 §2.4).
 fn default_recurring_window_months() -> u32 {
     18
+}
+
+/// `APP_bulk_edit_max_transactions` default.
+fn default_bulk_edit_max_transactions() -> u32 {
+    5_000
 }
 
 /// `APP_max_tags_per_transaction` default (iteration 3 §2.4).

@@ -1,5 +1,6 @@
 mod accounts;
 mod breakdown;
+mod bulk;
 mod cashflow;
 mod categories;
 pub mod cookies;

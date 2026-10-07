@@ -17,8 +17,9 @@ use crate::graphql::cookies::{clear_cookie_header, cookie_header};
 use crate::graphql::current_user::{current_user, scoped_account_ids};
 use crate::graphql::types::{
     Category, CategoryInput, LoginInput, Me, Rule, RuleInput, RuleState, SplitPartInput,
-    Transaction,
+    Transaction, TransactionFilter,
 };
+use crate::graphql::bulk::{self, BulkEditResult};
 use crate::graphql::{categories, labels, rules};
 use crate::graphql::goals;
 use crate::graphql::RawSessionToken;
@@ -232,6 +233,52 @@ impl MutationRoot {
             transaction_id.0,
             tags,
             settings.max_tags_per_transaction,
+        )
+        .await
+    }
+
+    /// Overrides the category of every transaction the filter matches (and
+    /// clears their splits). Restricted to the caller's own accounts; not
+    /// atomic — see `BulkEditResult`.
+    async fn set_transactions_category(
+        &self,
+        ctx: &Context<'_>,
+        filter: TransactionFilter,
+        category_slug: String,
+    ) -> GqlResult<BulkEditResult> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let settings = ctx.data::<Arc<Settings>>()?;
+        bulk::set_transactions_category(
+            db,
+            publisher(ctx),
+            user,
+            &filter,
+            &category_slug,
+            settings.bulk_edit_max_transactions,
+        )
+        .await
+    }
+
+    /// Replaces the tag set of every transaction the filter matches; `[]`
+    /// clears. Restricted to the caller's own accounts; not atomic.
+    async fn set_transactions_tags(
+        &self,
+        ctx: &Context<'_>,
+        filter: TransactionFilter,
+        tags: Vec<String>,
+    ) -> GqlResult<BulkEditResult> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let settings = ctx.data::<Arc<Settings>>()?;
+        bulk::set_transactions_tags(
+            db,
+            publisher(ctx),
+            user,
+            &filter,
+            &tags,
+            settings.max_tags_per_transaction,
+            settings.bulk_edit_max_transactions,
         )
         .await
     }
