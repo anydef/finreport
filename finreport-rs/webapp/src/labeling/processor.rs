@@ -930,8 +930,6 @@ pub struct LabelerConfig {
 pub enum LabelerError {
     Kafka(rdkafka::error::KafkaError),
     Db(DbErr),
-    /// The `category` table is empty, so no label could resolve to a slug.
-    EmptyCategoryCatalog,
 }
 
 impl From<DbErr> for LabelerError {
@@ -945,10 +943,6 @@ impl std::fmt::Display for LabelerError {
         match self {
             LabelerError::Kafka(e) => write!(f, "kafka error: {e}"),
             LabelerError::Db(e) => write!(f, "database error: {e}"),
-            LabelerError::EmptyCategoryCatalog => write!(
-                f,
-                "the category taxonomy is empty; seed it with `category-seed` before the labeler"
-            ),
         }
     }
 }
@@ -1013,21 +1007,6 @@ pub async fn run(
     consumer.assign(&tpl).map_err(LabelerError::Kafka)?;
 
     let catalog = proj::build_catalog(&db).await?;
-    // An empty `category` table means nothing can be categorized at all: the
-    // chain has no slug to resolve to, every LLM answer fails validation, and
-    // the labeler would otherwise run a full, silent, pointless sweep. The
-    // taxonomy is seeded by `category-seed` (the `finreport-be-category-seed`
-    // one-shot, or `just seed-categories` locally), so this is a deployment
-    // gap rather than a transient state — fail the same way the
-    // projection-lag guard above does instead of burning a pass.
-    if catalog.entries.is_empty() {
-        error!(
-            "[startup] labeler refusing to start: the category taxonomy is empty — \
-             run `category-seed` (deployed: the finreport-be-category-seed one-shot; \
-             locally: `just seed-categories`) before the labeler"
-        );
-        return Err(LabelerError::EmptyCategoryCatalog);
-    }
     let cost_guard = CostGuard::new(config.llm_max_requests_per_run);
 
     // Sweep once at startup, per §2.3 ("at the start of every run").
