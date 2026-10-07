@@ -2,121 +2,2083 @@
   "query": "query GoalTransactions($id: UUID!, $startDate: Date!, $endDate: Date!, $page: PageInput) {\n\tgoalTransactions(id: $id, startDate: $startDate, endDate: $endDate, page: $page) {\n\t\titems {\n\t\t\tid\n\t\t\taccountId\n\t\t\tsource\n\t\t\texternalId\n\t\t\tbookingDate\n\t\t\tvalutaDate\n\t\t\tbookingStatus\n\t\t\tamount\n\t\t\tcurrency\n\t\t\tcounterpartyName\n\t\t\tcounterpartyIban\n\t\t\tdescription\n\t\t\ttransactionType\n\t\t\tlabel {\n\t\t\t\tcategory {\n\t\t\t\t\tid\n\t\t\t\t\tslug\n\t\t\t\t\tname\n\t\t\t\t\tkind\n\t\t\t\t}\n\t\t\t\tsource\n\t\t\t\tconfidence\n\t\t\t\tstatus\n\t\t\t\treviewReason\n\t\t\t\tproposedCategoryPath\n\t\t\t\treasoning\n\t\t\t}\n\t\t\tsplits {\n\t\t\t\tindex\n\t\t\t\tamount\n\t\t\t\tcategory {\n\t\t\t\t\tid\n\t\t\t\t\tslug\n\t\t\t\t\tname\n\t\t\t\t\tkind\n\t\t\t\t}\n\t\t\t}\n\t\t\ttags\n\t\t\ttransfer {\n\t\t\t\tcounterpartTransactionId\n\t\t\t\tcounterpartAccountId\n\t\t\t\tmatch\n\t\t\t}\n\t\t\trecurring {\n\t\t\t\tisRecurring\n\t\t\t\tsource\n\t\t\t\tseriesId\n\t\t\t\tcadence\n\t\t\t\tmedianAmount\n\t\t\t}\n\t\t}\n\t\ttotalCount\n\t\tlimit\n\t\toffset\n\t}\n}",
   "data": {
     "goalTransactions": {
-      "items": [
-        {
-          "id": "966aa3c4-530f-5d92-b1b5-3afd7de55b3b",
-          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
-          "source": "comdirect",
-          "externalId": "ACC1-01-SALARY",
-          "bookingDate": "2024-01-02",
-          "valutaDate": "2024-01-02",
-          "bookingStatus": "BOOKED",
-          "amount": "2500.00",
-          "currency": "EUR",
-          "counterpartyName": "ACME GmbH",
-          "counterpartyIban": null,
-          "description": "Gehalt",
-          "transactionType": "Überweisungsgutschrift",
-          "label": null,
-          "splits": [],
-          "tags": [],
-          "transfer": null,
-          "recurring": {
-            "isRecurring": false,
-            "source": "AUTO",
-            "seriesId": null,
-            "cadence": null,
-            "medianAmount": null
-          }
-        },
-        {
-          "id": "28c22a97-bb87-5656-bbfb-9e2137ac51e0",
-          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
-          "source": "comdirect",
-          "externalId": "ACC1-01-RENT",
-          "bookingDate": "2024-01-03",
-          "valutaDate": "2024-01-03",
-          "bookingStatus": "BOOKED",
-          "amount": "-950.00",
-          "currency": "EUR",
-          "counterpartyName": "Hausverwaltung Mustermann",
-          "counterpartyIban": "DE02500105170123456789",
-          "description": "Miete",
-          "transactionType": "Lastschrift",
-          "label": {
-            "category": {
-              "id": "467a4fec-d8e2-5e38-b5fd-08f6877cd9cc",
-              "slug": "housing.rent",
-              "name": "Rent",
-              "kind": "EXPENSE"
-            },
-            "source": "USER",
-            "confidence": null,
-            "status": "RESOLVED",
-            "reviewReason": null,
-            "proposedCategoryPath": null,
-            "reasoning": null
-          },
-          "splits": [],
-          "tags": [
-            "housing"
-          ],
-          "transfer": null,
-          "recurring": {
-            "isRecurring": true,
-            "source": "AUTO",
-            "seriesId": "8a1b2c3d-4e5f-4061-8273-849506a7b8c0",
-            "cadence": "MONTHLY",
-            "medianAmount": "-950.0000"
-          }
-        },
-        {
-          "id": "936fcf84-237d-5ed6-96e9-8c0bf7458a64",
-          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
-          "source": "comdirect",
-          "externalId": "ACC1-CASH-01",
-          "bookingDate": "2024-02-20",
-          "valutaDate": "2024-02-20",
-          "bookingStatus": "BOOKED",
-          "amount": "-100.00",
-          "currency": "EUR",
-          "counterpartyName": null,
-          "counterpartyIban": null,
-          "description": "Bargeldauszahlung",
-          "transactionType": "Barauszahlung",
-          "label": {
-            "category": {
-              "id": "2b38634e-c189-55e7-8d5e-2f4f002d1e0f",
-              "slug": "other.cash",
-              "name": "Cash withdrawal",
-              "kind": "EXPENSE"
-            },
-            "source": "RULE",
-            "confidence": 0.95,
-            "status": "RESOLVED",
-            "reviewReason": null,
-            "proposedCategoryPath": null,
-            "reasoning": null
-          },
-          "splits": [],
-          "tags": [],
-          "transfer": {
-            "counterpartTransactionId": null,
-            "counterpartAccountId": "3c1fe9c2-2f4b-5753-95ad-133501e3bd5e",
-            "match": "AMOUNT_DATE"
-          },
-          "recurring": {
-            "isRecurring": false,
-            "source": "AUTO",
-            "seriesId": null,
-            "cadence": null,
-            "medianAmount": null
-          }
-        }
-      ],
-      "totalCount": 3,
+      "items": [],
+      "totalCount": 0,
       "limit": 50,
       "offset": 0
     }
+  },
+  "rowsByGoal": {
+    "5b2f0c1e-8a64-4d2b-9a57-3c0e1d7f4a10": [
+      {
+        "id": "00fe0702-b48c-5c90-9190-259d3a53ee0f",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-10-06",
+        "bookingDate": "2026-10-06",
+        "valutaDate": "2026-10-06",
+        "bookingStatus": "BOOKED",
+        "amount": "-18.00",
+        "currency": "EUR",
+        "counterpartyName": "Kino Babylon",
+        "counterpartyIban": null,
+        "description": "Kino Babylon Berlin",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": null,
+          "source": "LLM",
+          "confidence": 0.55,
+          "status": "NEEDS_REVIEW",
+          "reviewReason": "AMBIGUOUS",
+          "proposedCategoryPath": "entertainment.movies_concerts",
+          "reasoning": "Cinema, but the receipt also lists a bar tab"
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "bb6e491f-378c-552e-ae42-d72c2af85618",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-10-05-1",
+        "bookingDate": "2026-10-05",
+        "valutaDate": "2026-10-05",
+        "bookingStatus": "BOOKED",
+        "amount": "-88.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "35613dd4-2f49-55c1-a264-4d5f64f0662a",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-10-02-0",
+        "bookingDate": "2026-10-02",
+        "valutaDate": "2026-10-02",
+        "bookingStatus": "BOOKED",
+        "amount": "-54.50",
+        "currency": "EUR",
+        "counterpartyName": "Nintendo eShop",
+        "counterpartyIban": null,
+        "description": "Nintendo eShop",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "6f613bba-e724-5d29-9c79-269ccf79b96c",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-09-27",
+        "bookingDate": "2026-09-27",
+        "valutaDate": "2026-09-27",
+        "bookingStatus": "BOOKED",
+        "amount": "-24.99",
+        "currency": "EUR",
+        "counterpartyName": "Humble Bundle",
+        "counterpartyIban": null,
+        "description": "Humble Choice Abo",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": null,
+          "source": "LLM",
+          "confidence": 0.55,
+          "status": "NEEDS_REVIEW",
+          "reviewReason": "AMBIGUOUS",
+          "proposedCategoryPath": null,
+          "reasoning": "Could be Games or Subscriptions"
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "1bb6efd9-bcc6-580d-a0c3-b5c481040095",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-09-19-2",
+        "bookingDate": "2026-09-19",
+        "valutaDate": "2026-09-19",
+        "bookingStatus": "BOOKED",
+        "amount": "-75.12",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "e696a608-9b58-5fa1-bfaa-69337ada9fe3",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-09-10-1",
+        "bookingDate": "2026-09-10",
+        "valutaDate": "2026-09-10",
+        "bookingStatus": "BOOKED",
+        "amount": "-69.99",
+        "currency": "EUR",
+        "counterpartyName": "PlayStation Store",
+        "counterpartyIban": null,
+        "description": "PlayStation Store",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "1d3044df-1ed8-5b70-977c-a8095a417f30",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-09-03-0",
+        "bookingDate": "2026-09-03",
+        "valutaDate": "2026-09-03",
+        "bookingStatus": "BOOKED",
+        "amount": "-59.99",
+        "currency": "EUR",
+        "counterpartyName": "Steam",
+        "counterpartyIban": null,
+        "description": "Steam Purchase",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "022ca445-573b-5d2b-a3e6-88118e8aef92",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-08-16-1",
+        "bookingDate": "2026-08-16",
+        "valutaDate": "2026-08-16",
+        "bookingStatus": "BOOKED",
+        "amount": "-120.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "1abfdb88-5704-501d-ae01-4035d792d6d7",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-08-02-0",
+        "bookingDate": "2026-08-02",
+        "valutaDate": "2026-08-02",
+        "bookingStatus": "BOOKED",
+        "amount": "-29.90",
+        "currency": "EUR",
+        "counterpartyName": "CinemaxX",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "85e04c28-b31c-5952-adf2-feccf8ee611f",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-07-23-2",
+        "bookingDate": "2026-07-23",
+        "valutaDate": "2026-07-23",
+        "bookingStatus": "BOOKED",
+        "amount": "-100.00",
+        "currency": "EUR",
+        "counterpartyName": "Epic Games",
+        "counterpartyIban": null,
+        "description": "Epic Games Store",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "aef4f731-4a46-59b4-890a-961c5ab136a9",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-07-15",
+        "bookingDate": "2026-07-15",
+        "valutaDate": "2026-07-15",
+        "bookingStatus": "BOOKED",
+        "amount": "-50.00",
+        "currency": "EUR",
+        "counterpartyName": "Eigenes Tagesgeldkonto",
+        "counterpartyIban": "DE02120300000000202051",
+        "description": "Umbuchung Tagesgeld (interne Umbuchung, zaehlt nicht)",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": {
+          "counterpartTransactionId": "6d8c214c-3c9d-5fcf-8d3f-7f732618797c",
+          "counterpartAccountId": "3c1fe9c2-2f4b-5753-95ad-133501e3bd5e",
+          "match": "AMOUNT_DATE"
+        },
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "e9f51249-441f-547e-ac70-b97666df288d",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-07-12-1",
+        "bookingDate": "2026-07-12",
+        "valutaDate": "2026-07-12",
+        "bookingStatus": "BOOKED",
+        "amount": "-36.00",
+        "currency": "EUR",
+        "counterpartyName": "Kino International",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "8eeb2928-cfc0-5cf8-8cb0-8f4a5cda48d9",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-07-04-0",
+        "bookingDate": "2026-07-04",
+        "valutaDate": "2026-07-04",
+        "bookingStatus": "BOOKED",
+        "amount": "-38.00",
+        "currency": "EUR",
+        "counterpartyName": "Steam",
+        "counterpartyIban": null,
+        "description": "Steam Summer Sale",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "ec23e805-b2fe-5ed5-bd61-7e56fecf0ba3",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-06-20-2",
+        "bookingDate": "2026-06-20",
+        "valutaDate": "2026-06-20",
+        "bookingStatus": "BOOKED",
+        "amount": "-46.81",
+        "currency": "EUR",
+        "counterpartyName": "Nintendo eShop",
+        "counterpartyIban": null,
+        "description": "Nintendo eShop",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "59f28a6e-0f9e-5446-a51f-81d390446fea",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-06-13-1",
+        "bookingDate": "2026-06-13",
+        "valutaDate": "2026-06-13",
+        "bookingStatus": "BOOKED",
+        "amount": "-140.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Festivaltickets",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "dea89bf5-c326-5643-b0ef-0d85d6c15f34",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-06-01-0",
+        "bookingDate": "2026-06-01",
+        "valutaDate": "2026-06-01",
+        "bookingStatus": "BOOKED",
+        "amount": "-69.99",
+        "currency": "EUR",
+        "counterpartyName": "PlayStation Store",
+        "counterpartyIban": null,
+        "description": "PlayStation Store",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "1855d6e8-ec37-56f2-bbc9-61a30342bf71",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-05-24-2",
+        "bookingDate": "2026-05-24",
+        "valutaDate": "2026-05-24",
+        "bookingStatus": "BOOKED",
+        "amount": "-24.00",
+        "currency": "EUR",
+        "counterpartyName": "CinemaxX",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "58a0adab-e076-5695-a326-34c78c06b7bd",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-05-17-1",
+        "bookingDate": "2026-05-17",
+        "valutaDate": "2026-05-17",
+        "bookingStatus": "BOOKED",
+        "amount": "-85.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "0d61ef35-80da-565f-9d10-a8a5b1facf19",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-05-06-0",
+        "bookingDate": "2026-05-06",
+        "valutaDate": "2026-05-06",
+        "bookingStatus": "BOOKED",
+        "amount": "-24.20",
+        "currency": "EUR",
+        "counterpartyName": "Steam",
+        "counterpartyIban": null,
+        "description": "Steam Purchase",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "ccb15886-7e3c-5c1c-aa3a-f39564831b60",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-04-26-3",
+        "bookingDate": "2026-04-26",
+        "valutaDate": "2026-04-26",
+        "bookingStatus": "BOOKED",
+        "amount": "-50.00",
+        "currency": "EUR",
+        "counterpartyName": "Kino International",
+        "counterpartyIban": null,
+        "description": "Kinoabend und Snacks",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "5e7508fe-e662-5cc2-b171-8eb0d3493118",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-04-19-2",
+        "bookingDate": "2026-04-19",
+        "valutaDate": "2026-04-19",
+        "bookingStatus": "BOOKED",
+        "amount": "-74.00",
+        "currency": "EUR",
+        "counterpartyName": "Saturn Elektro",
+        "counterpartyIban": null,
+        "description": "Saturn: Spiel und Blu-ray",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [
+          {
+            "index": 0,
+            "amount": "-52.00",
+            "category": {
+              "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+              "slug": "entertainment.games",
+              "name": "Games",
+              "kind": "EXPENSE"
+            }
+          },
+          {
+            "index": 1,
+            "amount": "-22.00",
+            "category": {
+              "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+              "slug": "entertainment.movies_concerts",
+              "name": "Movies Concerts",
+              "kind": "EXPENSE"
+            }
+          }
+        ],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "c541ae1b-e28f-54b7-b1fa-d7793f50df4a",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-04-11-1",
+        "bookingDate": "2026-04-11",
+        "valutaDate": "2026-04-11",
+        "bookingStatus": "BOOKED",
+        "amount": "-26.01",
+        "currency": "EUR",
+        "counterpartyName": "CinemaxX",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "c5dff507-baff-5d92-923e-3bbe0672242b",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-04-03-0",
+        "bookingDate": "2026-04-03",
+        "valutaDate": "2026-04-03",
+        "bookingStatus": "BOOKED",
+        "amount": "-49.99",
+        "currency": "EUR",
+        "counterpartyName": "Nintendo eShop",
+        "counterpartyIban": null,
+        "description": "Nintendo eShop",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "798e068d-5fed-5e67-bfac-f6dee0cde3b3",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-03-28-3",
+        "bookingDate": "2026-03-28",
+        "valutaDate": "2026-03-28",
+        "bookingStatus": "BOOKED",
+        "amount": "-30.00",
+        "currency": "EUR",
+        "counterpartyName": "Steam",
+        "counterpartyIban": null,
+        "description": "Steam Purchase",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "1c6db3b1-8c88-597d-b588-0ddcb876cd57",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-03-21-2",
+        "bookingDate": "2026-03-21",
+        "valutaDate": "2026-03-21",
+        "bookingStatus": "BOOKED",
+        "amount": "-96.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "40d933e6-7537-5b3f-8cf2-a2895a1a81c2",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-03-08-1",
+        "bookingDate": "2026-03-08",
+        "valutaDate": "2026-03-08",
+        "bookingStatus": "BOOKED",
+        "amount": "-22.00",
+        "currency": "EUR",
+        "counterpartyName": "Kino International",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "de3d02d6-0e18-5862-afdf-162388502356",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-03-02-0",
+        "bookingDate": "2026-03-02",
+        "valutaDate": "2026-03-02",
+        "bookingStatus": "BOOKED",
+        "amount": "-39.50",
+        "currency": "EUR",
+        "counterpartyName": "Epic Games",
+        "counterpartyIban": null,
+        "description": "Epic Games Store",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "27036764-7126-5f0a-af4b-134daad5ed9a",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-02-19-3",
+        "bookingDate": "2026-02-19",
+        "valutaDate": "2026-02-19",
+        "bookingStatus": "BOOKED",
+        "amount": "25.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Erstattung Konzertkarte",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "53868c3f-f6bc-565c-8eae-102a93c75688",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-02-14-2",
+        "bookingDate": "2026-02-14",
+        "valutaDate": "2026-02-14",
+        "bookingStatus": "BOOKED",
+        "amount": "-75.01",
+        "currency": "EUR",
+        "counterpartyName": "PlayStation Store",
+        "counterpartyIban": null,
+        "description": "PlayStation Store",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "d01ba8a9-badc-5630-955f-7e275822edf7",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-02-10-1",
+        "bookingDate": "2026-02-10",
+        "valutaDate": "2026-02-10",
+        "bookingStatus": "BOOKED",
+        "amount": "-120.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "5d15a3df-9e57-5ac4-a5ab-e161ab23e5cc",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-02-04-0",
+        "bookingDate": "2026-02-04",
+        "valutaDate": "2026-02-04",
+        "bookingStatus": "BOOKED",
+        "amount": "-69.99",
+        "currency": "EUR",
+        "counterpartyName": "Steam",
+        "counterpartyIban": null,
+        "description": "Steam Purchase",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "c89b0080-9381-5b35-82ba-1d2af44ebb34",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-01-17-1",
+        "bookingDate": "2026-01-17",
+        "valutaDate": "2026-01-17",
+        "bookingStatus": "BOOKED",
+        "amount": "-35.01",
+        "currency": "EUR",
+        "counterpartyName": "CinemaxX",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "008b0f36-fec5-5cdd-9688-caddff9cc793",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2026-01-09-0",
+        "bookingDate": "2026-01-09",
+        "valutaDate": "2026-01-09",
+        "bookingStatus": "BOOKED",
+        "amount": "-59.99",
+        "currency": "EUR",
+        "counterpartyName": "Nintendo eShop",
+        "counterpartyIban": null,
+        "description": "Nintendo eShop",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "12bcf517-fdcf-5712-b01c-4841e02aeeb2",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-12-27-3",
+        "bookingDate": "2025-12-27",
+        "valutaDate": "2025-12-27",
+        "bookingStatus": "BOOKED",
+        "amount": "-18.92",
+        "currency": "EUR",
+        "counterpartyName": "CinemaxX",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "6743263f-186c-5e00-bb73-6ae8d0472bb9",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-12-20-2",
+        "bookingDate": "2025-12-20",
+        "valutaDate": "2025-12-20",
+        "bookingStatus": "BOOKED",
+        "amount": "-44.99",
+        "currency": "EUR",
+        "counterpartyName": "PlayStation Store",
+        "counterpartyIban": null,
+        "description": "PlayStation Store",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "ae5cd0d0-ac36-5539-985c-de0c5191bc08",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-12-12-1",
+        "bookingDate": "2025-12-12",
+        "valutaDate": "2025-12-12",
+        "bookingStatus": "BOOKED",
+        "amount": "-89.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "d44efc25-5bd8-5f97-ab14-23bc3379efce",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-12-05-0",
+        "bookingDate": "2025-12-05",
+        "valutaDate": "2025-12-05",
+        "bookingStatus": "BOOKED",
+        "amount": "-59.99",
+        "currency": "EUR",
+        "counterpartyName": "Steam",
+        "counterpartyIban": null,
+        "description": "Steam Winter Sale",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "bad54d96-f69b-50b9-b294-a948574f27ef",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-11-22-3",
+        "bookingDate": "2025-11-22",
+        "valutaDate": "2025-11-22",
+        "bookingStatus": "BOOKED",
+        "amount": "-35.91",
+        "currency": "EUR",
+        "counterpartyName": "Nintendo eShop",
+        "counterpartyIban": null,
+        "description": "Nintendo eShop",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "dbb15b08-bc10-5502-85a5-723e7b7fd990",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-11-15-2",
+        "bookingDate": "2025-11-15",
+        "valutaDate": "2025-11-15",
+        "bookingStatus": "BOOKED",
+        "amount": "-78.00",
+        "currency": "EUR",
+        "counterpartyName": "Ticketmaster",
+        "counterpartyIban": null,
+        "description": "Konzertkarten",
+        "transactionType": "Lastschrift",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "concert"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "2a5e6898-0c60-54fa-b9bd-10810712a741",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-11-08-1",
+        "bookingDate": "2025-11-08",
+        "valutaDate": "2025-11-08",
+        "bookingStatus": "BOOKED",
+        "amount": "-24.50",
+        "currency": "EUR",
+        "counterpartyName": "CinemaxX",
+        "counterpartyIban": null,
+        "description": "Kinoticket",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "6ff0ff10-3dd0-513c-8c65-802b53f0cd48",
+            "slug": "entertainment.movies_concerts",
+            "name": "Movies Concerts",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "2717a4a9-4f1b-569e-9779-6c294d1152be",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOB-2025-11-03-0",
+        "bookingDate": "2025-11-03",
+        "valutaDate": "2025-11-03",
+        "bookingStatus": "BOOKED",
+        "amount": "-29.99",
+        "currency": "EUR",
+        "counterpartyName": "Steam",
+        "counterpartyIban": null,
+        "description": "Steam Purchase",
+        "transactionType": "Kartenzahlung",
+        "label": {
+          "category": {
+            "id": "42f3ec0b-1926-5723-a90a-791e1811dca8",
+            "slug": "entertainment.games",
+            "name": "Games",
+            "kind": "EXPENSE"
+          },
+          "source": "RULE",
+          "confidence": 0.95,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "hobby"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      }
+    ],
+    "9d3a7e42-1c5b-4f08-b6a1-2e8c4f0d6b31": [
+      {
+        "id": "675820ef-7440-5d90-b15b-2f7106e320ce",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-10-03",
+        "bookingDate": "2026-10-03",
+        "valutaDate": "2026-10-03",
+        "bookingStatus": "BOOKED",
+        "amount": "-150.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sonderzahlung Urlaub",
+        "transactionType": "Überweisung",
+        "label": {
+          "category": null,
+          "source": "LLM",
+          "confidence": 0.55,
+          "status": "NEEDS_REVIEW",
+          "reviewReason": "NEW_CATEGORY",
+          "proposedCategoryPath": "savings.holiday",
+          "reasoning": "Looks like a saving but no matching category exists"
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "5449bb05-86f1-5bc1-a215-838e1dccb7d0",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-09-14",
+        "bookingDate": "2026-09-14",
+        "valutaDate": "2026-09-14",
+        "bookingStatus": "BOOKED",
+        "amount": "-250.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "e36a8f22-1b86-5d49-ae25-56191e431d2f",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-08-12",
+        "bookingDate": "2026-08-12",
+        "valutaDate": "2026-08-12",
+        "bookingStatus": "BOOKED",
+        "amount": "-150.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "cd8be186-7b4f-5866-9bb2-482bb0743782",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-07-13",
+        "bookingDate": "2026-07-13",
+        "valutaDate": "2026-07-13",
+        "bookingStatus": "BOOKED",
+        "amount": "-250.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "holiday"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "86975e7d-f1c1-593d-8a7d-d71368849808",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-06-12",
+        "bookingDate": "2026-06-12",
+        "valutaDate": "2026-06-12",
+        "bookingStatus": "BOOKED",
+        "amount": "-200.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "98285997-2cca-5ce4-a5dd-0c8205f4e308",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-05-12",
+        "bookingDate": "2026-05-12",
+        "valutaDate": "2026-05-12",
+        "bookingStatus": "BOOKED",
+        "amount": "-100.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "21e120e6-18dd-50de-b7d5-49d66b70e8a5",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-04-14",
+        "bookingDate": "2026-04-14",
+        "valutaDate": "2026-04-14",
+        "bookingStatus": "BOOKED",
+        "amount": "-300.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "holiday"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "1783cb45-a496-5ba6-94ac-8e72c76fcfeb",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-03-13",
+        "bookingDate": "2026-03-13",
+        "valutaDate": "2026-03-13",
+        "bookingStatus": "BOOKED",
+        "amount": "-150.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "1fb65f4e-f823-5064-bc85-275e35f8c1d8",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-02-12",
+        "bookingDate": "2026-02-12",
+        "valutaDate": "2026-02-12",
+        "bookingStatus": "BOOKED",
+        "amount": "-200.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      },
+      {
+        "id": "9f0a61b8-99b7-5c9c-93e5-ffd41dc379e0",
+        "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "source": "comdirect",
+        "externalId": "HOL-2026-01-12",
+        "bookingDate": "2026-01-12",
+        "valutaDate": "2026-01-12",
+        "bookingStatus": "BOOKED",
+        "amount": "-250.00",
+        "currency": "EUR",
+        "counterpartyName": "Urlaubskasse Sparplan",
+        "counterpartyIban": "DE89370400440532013000",
+        "description": "Sparrate Urlaub 2026",
+        "transactionType": "Dauerauftrag",
+        "label": {
+          "category": {
+            "id": "f0b9d0fc-67e3-51d7-907f-12ff45ec7336",
+            "slug": "savings.emergency_fund",
+            "name": "Emergency Fund",
+            "kind": "SAVING"
+          },
+          "source": "USER",
+          "confidence": null,
+          "status": "RESOLVED",
+          "reviewReason": null,
+          "proposedCategoryPath": null,
+          "reasoning": null
+        },
+        "splits": [],
+        "tags": [
+          "holiday"
+        ],
+        "transfer": null,
+        "recurring": {
+          "isRecurring": false,
+          "source": "AUTO",
+          "seriesId": null,
+          "cadence": null,
+          "medianAmount": null
+        }
+      }
+    ]
   }
 }

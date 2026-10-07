@@ -391,13 +391,40 @@ function findMockGoal(id: unknown): MockGoal | undefined {
 /** The fixed-range `saving_target` fixture for its own id, the recurring one otherwise. */
 function mockGoalProgress(variables: Record<string, unknown> | undefined): unknown {
 	const fixedId = goalProgressFixedMock.data.goalProgress.goal.id;
-	return variables?.id === fixedId
-		? goalProgressFixedMock.data
-		: goalProgressRecurringMock.data;
+	return variables?.id === fixedId ? goalProgressFixedMock.data : goalProgressRecurringMock.data;
+}
+
+/**
+ * `goalTransactions`: the goal's own fixture rows, narrowed to the requested
+ * `[startDate, endDate]` (inclusive) and paged by `PageInput`, so a period
+ * click on the goal page visibly shrinks the list. `totalCount` is the count
+ * before paging, as the real resolver reports it.
+ */
+function mockGoalTransactions(variables: Record<string, unknown> | undefined): unknown {
+	const rowsByGoal = goalTransactionsMock.rowsByGoal as Record<string, { bookingDate: string }[]>;
+	const start = String(variables?.startDate ?? '');
+	const end = String(variables?.endDate ?? '');
+	const inRange = (
+		rowsByGoal[String(variables?.id)] ?? goalTransactionsMock.data.goalTransactions.items
+	).filter((row) => (!start || row.bookingDate >= start) && (!end || row.bookingDate <= end));
+	const page = (variables?.page ?? {}) as { limit?: number; offset?: number };
+	const limit = page.limit ?? 50;
+	const offset = page.offset ?? 0;
+	return {
+		goalTransactions: {
+			items: inRange.slice(offset, offset + limit),
+			totalCount: inRange.length,
+			limit,
+			offset
+		}
+	};
 }
 
 /** `createGoal`/`updateGoal`: echo the caller's `GoalInput` back as the stored goal. */
-function mockSaveGoal(variables: Record<string, unknown> | undefined, existingId?: string): unknown {
+function mockSaveGoal(
+	variables: Record<string, unknown> | undefined,
+	existingId?: string
+): unknown {
 	const input = (variables?.input ?? {}) as Record<string, unknown>;
 	const slugs = (input.categorySlugs as string[] | undefined) ?? [];
 	return {
@@ -484,7 +511,7 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'GoalProgress':
 			return { status: 200, body: { data: mockGoalProgress(body.variables) }, setCookies: [] };
 		case 'GoalTransactions':
-			return { status: 200, body: { data: goalTransactionsMock.data }, setCookies: [] };
+			return { status: 200, body: { data: mockGoalTransactions(body.variables) }, setCookies: [] };
 		case 'CreateGoal':
 			return {
 				status: 200,
