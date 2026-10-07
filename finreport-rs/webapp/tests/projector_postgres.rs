@@ -466,3 +466,80 @@ async fn default_owner_is_linked_when_configured() {
     .unwrap();
     assert!(link.is_some(), "account must be linked to the configured default owner");
 }
+
+/// A manual `user-admin unlink` must stick: once the account row already
+/// exists, re-processing a later record for it (replay, or just the next
+/// normal batch) must not re-link the default owner. Covers the SHOULD-FIX
+/// finding — `link_default_owner` used to run unconditionally on every
+/// balance/transaction/account record, undoing the unlink on the very next
+/// one.
+#[tokio::test]
+async fn unlinking_the_default_owner_is_not_undone_by_a_later_record() {
+    use entity::entities::{app_user, user_account};
+    use sea_orm::{ActiveModelTrait, ActiveValue::Set, ModelTrait};
+
+    let db = support::TestPostgres::start().await;
+    let registry = MapperRegistry::with_default_mappers();
+
+    let owner_id = Uuid::new_v4();
+    app_user::ActiveModel {
+        id: Set(owner_id),
+        username: Set("test-owner-2".to_string()),
+        password_hash: Set("unused".to_string()),
+        display_name: Set(None),
+        disabled: Set(false),
+        created_at: Set(Utc::now().into()),
+    }
+    .insert(db.connection())
+    .await
+    .unwrap();
+
+    let account_id = webapp::kafka::envelope::account_uuid("comdirect", "ACC-OWNER-2");
+
+    // First record creates the account row and links the default owner.
+    let account_record =
+        record(ACCOUNT_TOPIC, 0, "ACC-OWNER-2", account_payload("ACC-OWNER-2"), None, "source");
+    process_batch(db.connection(), &registry, Some(owner_id), std::slice::from_ref(&account_record))
+        .await
+        .unwrap();
+
+    let link = user_account::Entity::find_by_id((owner_id, account_id))
+        .one(db.connection())
+        .await
+        .unwrap();
+    assert!(link.is_some(), "the account-creating record must link the default owner");
+
+    // Simulate `user-admin unlink`.
+    link.unwrap().delete(db.connection()).await.unwrap();
+    assert!(
+        user_account::Entity::find_by_id((owner_id, account_id))
+            .one(db.connection())
+            .await
+            .unwrap()
+            .is_none(),
+        "unlink must have removed the row"
+    );
+
+    // A later balance record for the same account (account row already
+    // exists) must not re-link the owner.
+    let balance_record = record(
+        BALANCE_TOPIC,
+        1,
+        "bal-1",
+        balance_payload("100.00"),
+        Some("ACC-OWNER-2"),
+        "source",
+    );
+    process_batch(db.connection(), &registry, Some(owner_id), std::slice::from_ref(&balance_record))
+        .await
+        .unwrap();
+
+    let relinked = user_account::Entity::find_by_id((owner_id, account_id))
+        .one(db.connection())
+        .await
+        .unwrap();
+    assert!(
+        relinked.is_none(),
+        "a manual unlink must not be undone by a later record for the same account"
+    );
+}

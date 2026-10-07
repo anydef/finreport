@@ -27,6 +27,15 @@ fn legacy_guard<E: IntoIden + Copy + 'static, C: ColumnTrait>(entity: E, origin_
     Expr::col((entity, origin_column)).ne(ORIGIN_SOURCE)
 }
 
+/// Whether an `account` row with this id already exists — the caller uses
+/// this to decide whether `link_default_owner` should run (§4): only the
+/// record that first creates the row (real or stub) should (re-)link the
+/// configured default owner, so a manual `user-admin unlink` sticks across
+/// every later record for that account, including a full replay.
+pub async fn account_exists(txn: &impl ConnectionTrait, id: Uuid) -> Result<bool, DbErr> {
+    Ok(account::Entity::find_by_id(id).one(txn).await?.is_some())
+}
+
 /// Upserts one `account` row (§3, §2.8). `first_seen_at` is excluded from the
 /// `DO UPDATE SET` list on purpose — a later observation must not rewrite
 /// when this account was first seen.

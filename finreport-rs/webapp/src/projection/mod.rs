@@ -218,8 +218,15 @@ async fn apply_account(
     default_owner: Option<Uuid>,
 ) -> Result<(), ApplyError> {
     let record = mapper.map_account(input)?;
+    // Checked before the upsert, which is the only way to tell "this record
+    // created the row" from "this record updated an existing row" (§4) — the
+    // upsert itself is one `INSERT ... ON CONFLICT DO UPDATE` statement with
+    // no such signal of its own.
+    let already_existed = upsert::account_exists(txn, record.id).await?;
     upsert::upsert_account(txn, &record).await?;
-    if let Some(owner) = default_owner {
+    if let Some(owner) = default_owner
+        && !already_existed
+    {
         upsert::link_default_owner(txn, owner, record.id, record.updated_at).await?;
     }
     Ok(())
@@ -239,6 +246,7 @@ async fn apply_balance(
         .source_account_id
         .expect("map_balance succeeded, so source_account_id must be present");
 
+    let already_existed = upsert::account_exists(txn, record.account_id).await?;
     upsert::ensure_stub_account(
         txn,
         input.event.source,
@@ -247,7 +255,9 @@ async fn apply_balance(
         record.observed_at,
     )
     .await?;
-    if let Some(owner) = default_owner {
+    if let Some(owner) = default_owner
+        && !already_existed
+    {
         upsert::link_default_owner(txn, owner, record.account_id, record.observed_at).await?;
     }
     upsert::upsert_balance(txn, &record).await?;
@@ -266,6 +276,7 @@ async fn apply_transaction(
         .source_account_id
         .expect("map_transaction succeeded, so source_account_id must be present");
 
+    let already_existed = upsert::account_exists(txn, record.account_id).await?;
     upsert::ensure_stub_account(
         txn,
         input.event.source,
@@ -274,7 +285,9 @@ async fn apply_transaction(
         record.imported_at,
     )
     .await?;
-    if let Some(owner) = default_owner {
+    if let Some(owner) = default_owner
+        && !already_existed
+    {
         upsert::link_default_owner(txn, owner, record.account_id, record.imported_at).await?;
     }
     upsert::upsert_transaction(txn, &record).await?;
@@ -420,22 +433,60 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
             continue;
         }
 
-        match process_batch(&db, &registry, config.default_owner, &batch).await {
-            Ok(stats) => {
-                consecutive_write_failures = 0;
-                info!(applied = stats.applied, skipped = stats.skipped, "projector: batch applied");
-            }
+        let (stats, failures) = retry_batch_write(
+            || process_batch(&db, &registry, config.default_owner, &batch),
+            consecutive_write_failures,
+            config.max_consecutive_write_failures,
+        )
+        .await?;
+        consecutive_write_failures = failures;
+        info!(applied = stats.applied, skipped = stats.skipped, "projector: batch applied");
+    }
+}
+
+/// Calls `write` (a closure that closes over one fixed batch, e.g.
+/// `|| process_batch(&db, &registry, owner, &batch)`), retrying the
+/// **identical** batch with backoff on a DB failure instead of letting the
+/// caller move on to a fresh one.
+///
+/// This is the fix for the data-loss bug `run`'s loop used to have: on a
+/// failed write it previously went straight back to `collect_batch`, which
+/// pulls *new* messages from the live `StreamConsumer` — the failed batch's
+/// records were never retried, never committed, and (since the consumer's
+/// read position had already moved past them) unrecoverable even on restart
+/// within the same run, because `run`'s own `next_offsets`/the committed
+/// Postgres offsets never covered them either. Retrying the same `batch`
+/// value here means nothing is ever skipped: either it eventually succeeds
+/// (and its offsets commit, in the same transaction, exactly once) or the
+/// failure streak reaches `max_failures` and the process exits non-zero
+/// before ever asking the consumer for more messages.
+///
+/// `consecutive_failures` carries the streak across calls (batches) so the
+/// limit is on the number of consecutive failures across the whole run, not
+/// reset to zero by each new batch.
+async fn retry_batch_write<F, Fut>(
+    write: F,
+    mut consecutive_failures: u32,
+    max_failures: u32,
+) -> Result<(BatchStats, u32), ProjectorError>
+where
+    F: Fn() -> Fut,
+    Fut: std::future::Future<Output = Result<BatchStats, DbErr>>,
+{
+    loop {
+        match write().await {
+            Ok(stats) => return Ok((stats, 0)),
             Err(db_err) => {
-                consecutive_write_failures += 1;
+                consecutive_failures += 1;
                 error!(
                     error = %db_err,
-                    attempt = consecutive_write_failures,
-                    "projector: batch write failed, batch not committed"
+                    attempt = consecutive_failures,
+                    "projector: batch write failed, retrying the same batch"
                 );
-                if consecutive_write_failures >= config.max_consecutive_write_failures {
+                if consecutive_failures >= max_failures {
                     return Err(ProjectorError::TooManyConsecutiveWriteFailures);
                 }
-                let backoff_ms = 200u64.saturating_mul(1u64 << consecutive_write_failures.min(5));
+                let backoff_ms = 200u64.saturating_mul(1u64 << consecutive_failures.min(5));
                 tokio::time::sleep(Duration::from_millis(backoff_ms)).await;
             }
         }
@@ -502,4 +553,121 @@ fn is_caught_up(next_offsets: &HashMap<String, i64>, high_watermarks: &HashMap<S
         }
     }
     true
+}
+
+#[cfg(test)]
+mod retry_tests {
+    //! Unit tests for `retry_batch_write` (§2.3 fix): a transient write
+    //! failure must retry the *same* batch, not silently move on to a new
+    //! one, and the retry must stop (process exits non-zero via
+    //! `TooManyConsecutiveWriteFailures`) once the failure streak reaches
+    //! the configured limit. No DB or Kafka involved — `write` here is a
+    //! plain injectable closure standing in for `process_batch`.
+
+    use super::*;
+    use std::cell::RefCell;
+
+    fn fake_record(offset: i64) -> ConsumedRecord {
+        ConsumedRecord {
+            topic: TOPIC_ACCOUNT.to_string(),
+            partition: 0,
+            offset,
+            key: Some("k".to_string()),
+            payload: Vec::new(),
+            envelope: Envelope {
+                source: "comdirect".to_string(),
+                source_account_id: None,
+                origin: "source".to_string(),
+                schema_version: 1,
+                imported_at: Utc::now(),
+                comdirect_account_key: None,
+                comdirect_account_name: None,
+            },
+        }
+    }
+
+    /// A DB write that fails `fail_times` times in a row, then succeeds,
+    /// recording the batch (by its offsets) it was handed on every attempt
+    /// — what proves the retry re-sends the identical batch rather than a
+    /// fresh one.
+    struct FlakyWriter {
+        fail_times: u32,
+        calls: RefCell<Vec<Vec<i64>>>,
+    }
+
+    impl FlakyWriter {
+        fn new(fail_times: u32) -> Self {
+            Self { fail_times, calls: RefCell::new(Vec::new()) }
+        }
+
+        fn call(&self, batch: &[ConsumedRecord]) -> Result<BatchStats, DbErr> {
+            let attempt = self.calls.borrow().len() as u32;
+            self.calls.borrow_mut().push(batch.iter().map(|r| r.offset).collect());
+            if attempt < self.fail_times {
+                Err(DbErr::Custom("simulated transient failure".to_string()))
+            } else {
+                Ok(BatchStats { applied: batch.len(), skipped: 0 })
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn transient_failure_retries_the_same_batch_until_it_succeeds() {
+        let batch = vec![fake_record(10), fake_record(11), fake_record(12)];
+        let writer = FlakyWriter::new(2);
+
+        let (stats, failures) =
+            retry_batch_write(|| std::future::ready(writer.call(&batch)), 0, 5).await.unwrap();
+
+        assert_eq!(stats.applied, 3, "the batch must eventually be written in full");
+        assert_eq!(failures, 0, "a successful write resets the failure streak");
+
+        let calls = writer.calls.borrow();
+        assert_eq!(calls.len(), 3, "two failures then one success = three attempts");
+        for call in calls.iter() {
+            assert_eq!(
+                call,
+                &vec![10, 11, 12],
+                "every retry must carry the identical batch (same offsets) — \
+                 none of the original records may be dropped or swapped for a new poll"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn persistent_failure_stops_after_the_configured_limit_without_skipping_offsets() {
+        let batch = vec![fake_record(0)];
+        // Every call fails -- more than `max_failures` worth.
+        let writer = FlakyWriter::new(u32::MAX);
+
+        let result = retry_batch_write(|| std::future::ready(writer.call(&batch)), 0, 3).await;
+
+        assert!(
+            matches!(result, Err(ProjectorError::TooManyConsecutiveWriteFailures)),
+            "a persistently failing batch must give up, not silently advance past it"
+        );
+        assert_eq!(
+            writer.calls.borrow().len(),
+            3,
+            "exactly `max_failures` attempts, all on the same unwritten batch"
+        );
+    }
+
+    #[tokio::test]
+    async fn failure_streak_carries_across_batches() {
+        // Simulates `run`'s loop calling `retry_batch_write` once per batch:
+        // a streak started on an earlier batch must still count toward the
+        // limit on a later one, not reset just because the batch changed.
+        let batch = vec![fake_record(0)];
+        let writer = FlakyWriter::new(u32::MAX);
+
+        let result = retry_batch_write(|| std::future::ready(writer.call(&batch)), 2, 3).await;
+
+        assert!(matches!(result, Err(ProjectorError::TooManyConsecutiveWriteFailures)));
+        assert_eq!(
+            writer.calls.borrow().len(),
+            1,
+            "starting already at 2 failures, the very next failure (3) must hit the limit"
+        );
+    }
 }
