@@ -95,6 +95,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
 		categories,
 		allTags: (tagsResult.data?.tags ?? []) as TagCount[],
+		transactionFilter: filter,
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
 		today: toDateInputValue(today)
 	};

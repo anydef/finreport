@@ -552,3 +552,23 @@ mutation ArchiveGoal($id: UUID!) {
 	archiveGoal(id: $id) {${GOAL_FIELDS}
 	}
 }`;
+
+export const SET_TRANSACTIONS_CATEGORY_MUTATION = `
+mutation SetTransactionsCategory($filter: TransactionFilter!, $categorySlug: String!) {
+	setTransactionsCategory(filter: $filter, categorySlug: $categorySlug) {
+		matched
+		applied
+		failed
+		splitsCleared
+	}
+}`;
+
+export const SET_TRANSACTIONS_TAGS_MUTATION = `
+mutation SetTransactionsTags($filter: TransactionFilter!, $tags: [String!]!) {
+	setTransactionsTags(filter: $filter, tags: $tags) {
+		matched
+		applied
+		failed
+		splitsCleared
+	}
+}`;

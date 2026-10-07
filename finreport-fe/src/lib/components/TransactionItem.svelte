@@ -15,14 +15,26 @@
 		transaction: Transaction;
 		currency: string;
 		onopen: (transaction: Transaction) => void;
+		/** Bulk-edit mode: render a checkbox cell. Omit `onselect` and there is none. */
+		selected?: boolean;
+		/** Ticked as part of "all matching": shown checked, not individually untickable. */
+		selectLocked?: boolean;
+		onselect?: () => void;
 	}
 
-	let { transaction: tx, currency, onopen }: Props = $props();
+	let {
+		transaction: tx,
+		currency,
+		onopen,
+		selected = false,
+		selectLocked = false,
+		onselect
+	}: Props = $props();
 
 	let opener = $state<HTMLButtonElement | null>(null);
 
 	function onRowClick(event: MouseEvent) {
-		if ((event.target as HTMLElement).closest('a')) return;
+		if ((event.target as HTMLElement).closest('a, input, [data-select-cell]')) return;
 		// Focus first so the modal records this row's button as the element to return to.
 		opener?.focus();
 		onopen(tx);
@@ -38,6 +50,20 @@
 	class="cursor-pointer border-b border-slate-100 last:border-0 focus-within:bg-slate-50 hover:bg-slate-50"
 	onclick={onRowClick}
 >
+	{#if onselect}
+		<td class="py-2 pr-2 pl-1" data-select-cell>
+			<input
+				type="checkbox"
+				checked={selected}
+				disabled={selectLocked}
+				onchange={onselect}
+				aria-label="Select transaction {tx.counterpartyName ?? 'Unknown'} on {formatDisplayDate(
+					tx.bookingDate
+				)}"
+				class="focus-visible:outline-brand h-4 w-4 rounded border-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+			/>
+		</td>
+	{/if}
 	<td class="py-2 pr-4 whitespace-nowrap text-slate-600">{formatDisplayDate(tx.bookingDate)}</td>
 	<td class="py-2 pr-4">
 		<button

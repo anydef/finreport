@@ -126,6 +126,8 @@ function mockLogout(): GraphqlBackendResult {
 }
 
 interface MockTransaction {
+	id: string;
+	splits: unknown[];
 	tags: string[];
 	transfer: unknown;
 	recurring: { isRecurring: boolean };
@@ -158,8 +160,56 @@ function applyInsightFilters(
 	});
 }
 
-function mockTransactions(variables: Record<string, unknown> | undefined): unknown {
+/** The fixture has no split transactions; give one a split at serve time so
+ * the bulk-edit split warning has something to count (fixtures are read-only). */
+const MOCK_SPLIT_INDEX = 1;
+
+function mockFixtureItems(): MockTransaction[] {
 	const items = transactionsMock.data.transactions.items as unknown as MockTransaction[];
+	return items.map((item, i) =>
+		i === MOCK_SPLIT_INDEX && item.splits.length === 0
+			? {
+					...item,
+					splits: [
+						{
+							index: 0,
+							amount: '-600.00',
+							category: findMockCategory('housing') ?? placeholderCategory('housing')
+						},
+						{
+							index: 1,
+							amount: '-250.00',
+							category: findMockCategory('groceries') ?? placeholderCategory('groceries')
+						}
+					]
+				}
+			: item
+	);
+}
+
+/**
+ * `setTransactionsCategory` / `setTransactionsTags`: derive a `BulkEditResult`
+ * from the requested filter (`transactionIds` narrows, otherwise the fixture
+ * list under the other filters). Nothing is written. To make the partial-failure
+ * path reviewable, any edit matching 3 or more rows reports 1 failure; a
+ * category edit reports the matched fixture rows that carry splits.
+ */
+function mockBulkEdit(variables: Record<string, unknown> | undefined, field: string): unknown {
+	const filter = variables?.filter as Record<string, unknown> | undefined;
+	const ids = filter?.transactionIds as string[] | undefined;
+	let matchedItems = applyInsightFilters(mockFixtureItems(), filter);
+	if (ids) matchedItems = matchedItems.filter((item) => ids.includes(item.id));
+	const matched = ids ? ids.length : matchedItems.length;
+	const failed = matched >= 3 ? 1 : 0;
+	const splitsCleared =
+		field === 'setTransactionsCategory'
+			? matchedItems.filter((item) => item.splits.length > 0).length
+			: 0;
+	return { [field]: { matched, applied: matched - failed, failed, splitsCleared } };
+}
+
+function mockTransactions(variables: Record<string, unknown> | undefined): unknown {
+	const items = mockFixtureItems();
 	const filtered = applyInsightFilters(items, variables?.filter as Record<string, unknown>);
 	return {
 		transactions: {
@@ -536,6 +586,18 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: { data: mockSetTransactionTags(body.variables) },
+				setCookies: []
+			};
+		case 'SetTransactionsCategory':
+			return {
+				status: 200,
+				body: { data: mockBulkEdit(body.variables, 'setTransactionsCategory') },
+				setCookies: []
+			};
+		case 'SetTransactionsTags':
+			return {
+				status: 200,
+				body: { data: mockBulkEdit(body.variables, 'setTransactionsTags') },
 				setCookies: []
 			};
 		case 'SetTransactionRecurring':

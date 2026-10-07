@@ -183,6 +183,8 @@
 		<Card>
 			<TransactionTable
 				transactions={data.transactions.items}
+				filter={data.transactionFilter}
+				totalCount={data.transactions.totalCount}
 				currency={data.accounts[0]?.currency ?? 'EUR'}
 			/>
 			<Pagination

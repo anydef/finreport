@@ -227,7 +227,12 @@
 				</div>
 			{/if}
 			{#if data.transactions}
-				<TransactionTable transactions={data.transactions.items} currency={data.summary.currency} />
+				<TransactionTable
+					transactions={data.transactions.items}
+					currency={data.summary.currency}
+					filter={data.transactionFilter}
+					totalCount={data.transactions.totalCount}
+				/>
 				<Pagination
 					offset={data.transactions.offset}
 					limit={data.transactions.limit}

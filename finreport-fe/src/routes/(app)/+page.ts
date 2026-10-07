@@ -131,6 +131,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
 		summary: summaryResult.data?.cashflowSummary as CashflowSummary | undefined,
 		graph: graphResult.data?.cashflowGraph as CashflowGraph | undefined,
+		transactionFilter,
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
 		breakdown: breakdownResult.data?.categoryBreakdown as CategoryBreakdown | undefined,
 		today: toDateInputValue(today)

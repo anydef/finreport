@@ -366,6 +366,17 @@ type Me {
 	isAdmin: Boolean!
 }
 
+type BulkEditResult {
+	"How many transactions the filter matched."
+	matched: Int!
+	"How many were actually changed."
+	applied: Int!
+	"How many failed; the operation is not atomic."
+	failed: Int!
+	"How many had splits that this category change discarded."
+	splitsCleared: Int!
+}
+
 type Mutation {
 	"""
 	`login`/`logout` are the only unauthenticated mutations (§4/§5). A
@@ -399,6 +410,16 @@ type Mutation {
 	Replaces the whole tag set; `[]` clears (§4).
 	"""
 	setTransactionTags(transactionId: UUID!, tags: [String!]!): Transaction!
+	"""
+	Bulk edit: overrides the category of every transaction the filter matches.
+	Not atomic; discards splits. Mock-only until the backend resolver exists.
+	"""
+	setTransactionsCategory(filter: TransactionFilter!, categorySlug: String!): BulkEditResult!
+	"""
+	Bulk edit: overrides the tag set of every transaction the filter matches.
+	Not atomic. Mock-only until the backend resolver exists.
+	"""
+	setTransactionsTags(filter: TransactionFilter!, tags: [String!]!): BulkEditResult!
 	"""
 	`null` clears the override and lets auto-detection decide again
 	(§4).
@@ -660,6 +681,10 @@ input TransactionFilter {
 	`true` = only transfers, `false` = only non-transfers (§4).
 	"""
 	transfer: Boolean
+	"""
+	Exact transaction ids, OR-ed among themselves and AND-ed with the other conditions.
+	"""
+	transactionIds: [UUID!]
 }
 
 type TransactionLabel {

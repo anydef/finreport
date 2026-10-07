@@ -110,6 +110,8 @@ export interface TransactionFilter {
 	recurring?: boolean | null;
 	/** `true` = only transfers, `false` = only non-transfers (iteration 3 §4). */
 	transfer?: boolean | null;
+	/** Exact ids, OR-ed among themselves and AND-ed with the other conditions. */
+	transactionIds?: UUID[] | null;
 }
 
 export interface PageInput {
@@ -399,4 +401,16 @@ export interface GoalInput {
 	cadence?: GoalCadence | null;
 	startDate?: DateString | null;
 	endDate?: DateString | null;
+}
+
+/** Result of `setTransactionsCategory` / `setTransactionsTags`. Not atomic. */
+export interface BulkEditResult {
+	/** How many transactions the filter matched. */
+	matched: number;
+	/** How many were actually changed. */
+	applied: number;
+	/** How many failed. */
+	failed: number;
+	/** How many had splits that this category change discarded. */
+	splitsCleared: number;
 }
