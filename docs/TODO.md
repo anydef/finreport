@@ -19,52 +19,88 @@ See `docs/runbooks/iteration-1-deploy.md`.
 Agreed work, in priority order. Feature requests land in the Backlog below
 first; they move up here only once their priority is settled.
 
-**In progress (2026-10-08), making the tool natural to use rather than merely
-complete:**
+Everything in this section came from the user working with their own data on
+2026-10-08. The ordering principle: a **correctness bug beats a missing
+feature**, because a wrong number is worse than an absent one; then whatever
+reduces the 196-item review backlog, because that effort is being spent now;
+then the things that make the tool worth opening when nothing is broken.
+
+### Done 2026-10-08
+
+- ~~Refunds net against charges in the category breakdown~~ — it summed
+  `amount.abs()`, so a EUR 1000 medical bill reimbursed in full read as 2000
+  spent instead of 0. It also disagreed with iteration 4's goal evaluation,
+  which already netted refunds, so a goal and the breakdown gave different
+  answers for the same two transactions.
+- ~~Text search is case-insensitive~~ — the list used `LIKE` while the
+  cashflow SQL used `ILIKE`, so the charts and the list disagreed about the
+  same search term and the list silently dropped differently-cased rows.
+- ~~One human decision learns an active rule~~, and ~~a user override deletes
+  the contradicted LLM cache entry~~, so correcting a transaction propagates to
+  its siblings instead of teaching the system nothing.
+- ~~Spending by category excludes income and savings~~; ~~rolling 30-day
+  period~~; ~~`uncategorized` means no category rather than no label row~~;
+  ~~transaction detail modal~~; ~~filters on every table~~; ~~multi-select and
+  bulk edit~~; ~~sortable tables~~; ~~rule conditions display and a matches
+  count~~; ~~expandable subcategories~~; ~~the inert Uncategorized and Needs
+  review rows drill down~~; ~~parent-prefixed category slugs~~ plus the
+  `category-reslug` repair tool; ~~review-queue multi-select, bulk assign and
+  find-similar~~; ~~the labeler's LLM cap removed~~ and ~~its slug validated
+  against the taxonomy~~.
+
+### In progress
 
 1. **Review queue groups by merchant.** 196 held transactions are nowhere near
-   196 decisions — the same merchants repeat. The queue listed them
-   individually, so the user paid per transaction instead of per merchant.
-   Grouping by `counterparty_key` with a one-action assign per group is the
-   single biggest reduction in effort available, and needs no new concepts:
-   the key already drives rule learning and recurring detection, and the bulk
-   mutations already take a filter.
-2. **The dashboard says what needs attention** — uncategorised and held counts
-   *and what they are worth*, linking into the filtered views. A person opening
-   a finance app asks "is anything wrong?" before "what did I spend on food?",
-   and today they have to remember to visit `/review`.
-3. **A transaction row shows its own state** — a split indicator (the row shows
-   the whole amount while totals count it by parts, which is actively
-   misleading) and the label source, so a list can be scanned for what is
-   curated versus guessed.
+   196 decisions — the same merchants repeat. Grouping by `counterparty_key`
+   with one assign per group is the largest reduction in effort available.
+2. **Exempt a merchant from rule learning.** The safety valve for item 1 of the
+   Done list above: one correction on a catch-all like Amazon or PayPal would
+   otherwise create a counterparty-wide rule, and those are exactly the
+   merchants the user wants to split by hand.
+3. **The dashboard says what needs attention** — uncategorised and held counts
+   and what they are worth, linking into the filtered views.
+4. **A transaction row shows its own state** — split indicator (the row shows
+   the whole amount while totals count it by parts) and label source.
 
-**Next:**
+### Next, in this order
 
-4. **"What changed?"** Period-over-period deltas: groceries up EUR 80 on last
-   month, a new subscription appeared, a recurring charge stopped. Every number
-   today is a snapshot of one period, while the question people actually ask is
-   comparative. The recurring detector and the history are already there. This
-   is the only item here that is new feature work rather than reshaping what
-   exists, and it is what makes the dashboard worth opening when nothing is
-   broken.
-5. **Progress feedback while curating** — the uncategorised count falling, and
-   "N rules learned from your decisions", so an hour of categorising reads as
-   progress rather than a chore. Cheap once item 2's counts exist, and much
-   more meaningful now that one human decision learns a rule.
-6. Accounts as a multi-select dropdown in the filter panel (needs a
+5. **Compare months, by category and in total.** The user's own framing: browse
+   past months, then recognise trends across them, analysable per category and
+   as a whole. Every figure today is a snapshot of one period, while the
+   question people actually ask is comparative. Two halves, and the first is
+   worth shipping alone:
+   (a) a month picker — pick September, August, May without typing dates;
+   (b) period-over-period deltas per category and in total, with drill-down.
+   The recurring detector and the history already exist. This is the only
+   genuinely new feature here rather than a reshaping of what is there, and it
+   is what makes the dashboard worth opening when nothing is wrong.
+6. **Free-text note on a transaction.** Explicitly not part of labelling.
+   Cheaper than it looks: `UserLabelRecord.note` is already published and
+   projected, so this is a missing UI, not a new concept. Mind the
+   read-modify-write rule — the record is whole-state, so saving a note must
+   preserve the category, tags, splits and recurring override.
+7. **The "(no subcategory)" row must be clickable.** When a parent category is
+   expanded, transactions labelled with the parent *itself* get their own row,
+   currently rendered inert. Needs a filter for "this category exactly, not its
+   descendants" — `categorySlugs` always includes descendants today — so it is
+   a small backend addition plus wiring.
+8. **Progress feedback while curating** — the uncategorised count falling, and
+   "N rules learned from your decisions". Cheap once item 3's counts exist, and
+   meaningful now that one decision learns a rule.
+9. Accounts as a multi-select dropdown in the filter panel (needs a
    multi-select mode on `SearchMenu`, which would also serve categories and
    tags there).
-7. A Counterparty tab on the breakdown table, matching the chart's dimension
-   tabs. Needs a backend decision: `categoryBreakdown` is category-specific,
-   and `CashflowDimension` belongs to the Sankey. Generalising the breakdown to
-   take a dimension probably beats a second query, since `TAG` is already
-   declared in that enum.
-8. Admin user management in the UI.
-9. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
-   decision about credential storage** (security-critical).
-10. C24, PayPal and Scalable Capital integrations. First research the access
+10. A Counterparty tab on the breakdown table, matching the chart's dimension
+    tabs. Needs a backend decision: `categoryBreakdown` is category-specific
+    and `CashflowDimension` belongs to the Sankey; generalising the breakdown
+    to take a dimension probably beats a second query, since `TAG` is already
+    declared in that enum.
+11. Admin user management in the UI.
+12. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+    decision about credential storage** (security-critical).
+13. C24, PayPal and Scalable Capital integrations. First research the access
     method for each (API vs. CSV fallback).
-11. Sankey cash-flow views.
+14. Sankey cash-flow views.
 
 ### Deployment / data actions outstanding (user)
 
