@@ -106,8 +106,8 @@ const TRANSACTION_ITEM_FIELDS = `			id
 // this query by WP0 until WP-B's resolvers were real (§9 WP0 addendum #5);
 // WP-C adds them here now that the mocks model them.
 export const TRANSACTIONS_QUERY = `
-query Transactions($filter: TransactionFilter, $page: PageInput) {
-	transactions(filter: $filter, page: $page) {
+query Transactions($filter: TransactionFilter, $page: PageInput, $sort: TransactionSort) {
+	transactions(filter: $filter, page: $page, sort: $sort) {
 		items {
 ${TRANSACTION_ITEM_FIELDS}
 		}
@@ -544,8 +544,8 @@ query GoalProgress($id: UUID!, $startDate: Date, $endDate: Date) {
 }`;
 
 export const GOAL_TRANSACTIONS_QUERY = `
-query GoalTransactions($id: UUID!, $startDate: Date!, $endDate: Date!, $page: PageInput) {
-	goalTransactions(id: $id, startDate: $startDate, endDate: $endDate, page: $page) {
+query GoalTransactions($id: UUID!, $startDate: Date!, $endDate: Date!, $page: PageInput, $sort: TransactionSort) {
+	goalTransactions(id: $id, startDate: $startDate, endDate: $endDate, page: $page, sort: $sort) {
 		items {
 ${TRANSACTION_ITEM_FIELDS}
 		}

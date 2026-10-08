@@ -4,7 +4,8 @@
 	import { browser } from '$app/environment';
 	import { createGraphqlClient } from '$lib/graphqlClient';
 	import { ARCHIVE_GOAL_MUTATION, UPDATE_GOAL_MUTATION } from '$lib/graphql/queries';
-	import type { GoalInput } from '$lib/graphql/types';
+	import type { GoalInput, TransactionSort } from '$lib/graphql/types';
+	import { writeSort } from '$lib/transactionSort';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import GoalBarChart from '$lib/components/GoalBarChart.svelte';
@@ -60,12 +61,16 @@
 			: []
 	);
 
-	function navigate(opts: { txStart?: string; txEnd?: string; offset?: number } = {}) {
-		const params = new URLSearchParams();
+	function navigate(
+		opts: { txStart?: string; txEnd?: string; offset?: number; sort?: TransactionSort } = {}
+	) {
+		let params = new URLSearchParams();
 		if (opts.txStart && opts.txEnd) {
 			params.set('txStart', opts.txStart);
 			params.set('txEnd', opts.txEnd);
 		}
+		// Before the offset: `writeSort` drops paging, so a new sort restarts at page 1.
+		params = writeSort(opts.sort ?? data.sort, params);
 		if (opts.offset) params.set('offset', String(opts.offset));
 		const query = params.toString();
 		goto(query ? `${page.url.pathname}?${query}` : page.url.pathname, {
@@ -256,7 +261,12 @@
 					Failed to load the matching transactions.
 				</p>
 			{:else if data.transactions}
-				<TransactionTable transactions={data.transactions.items} currency={progress.currency} />
+				<TransactionTable
+					transactions={data.transactions.items}
+					currency={progress.currency}
+					sort={data.sort}
+					onsort={(next) => navigate({ txStart: data.txStart, txEnd: data.txEnd, sort: next })}
+				/>
 				<Pagination
 					offset={data.transactions.offset}
 					limit={data.transactions.limit}

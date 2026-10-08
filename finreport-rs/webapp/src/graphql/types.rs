@@ -241,6 +241,41 @@ pub enum Direction {
     Spending,
 }
 
+/// The column a transaction list is ordered by.
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum TransactionSortField {
+    /// Booking date, then external id.
+    BookingDate,
+    /// The **signed** amount: DESC runs largest income to largest expense.
+    /// (Filters `amountMin`/`amountMax` bound the magnitude; sorting keeps
+    /// the sign so income and expense do not interleave.)
+    Amount,
+    /// Case-insensitive counterparty name. Transactions without one sort
+    /// last in both directions.
+    CounterpartyName,
+    /// Case-insensitive name of the resolved category (a user override
+    /// outranks the label). Uncategorised and split transactions (which
+    /// have no single category) sort last in both directions.
+    Category,
+}
+
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum SortDirection {
+    Asc,
+    Desc,
+}
+
+/// Ordering for a transaction list. Always completed with a deterministic
+/// tiebreaker on the transaction id, so paging through equal keys never
+/// repeats or drops a row. Omitting it keeps the default: newest booking
+/// date first.
+#[derive(InputObject, Copy, Clone, Debug)]
+pub struct TransactionSort {
+    pub field: TransactionSortField,
+    #[graphql(default_with = "SortDirection::Desc")]
+    pub direction: SortDirection,
+}
+
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 pub enum Granularity {
     Day,

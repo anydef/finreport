@@ -14,6 +14,8 @@
 		writePanelFilters,
 		type PanelFilters
 	} from '$lib/transactionFilters';
+	import { writeSort } from '$lib/transactionSort';
+	import type { TransactionSort } from '$lib/graphql/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -39,6 +41,10 @@
 		if (preset === 'this-month') params.delete('preset');
 		else params.set('preset', preset as PeriodPresetId);
 		go(params);
+	}
+
+	function onSort(next: TransactionSort) {
+		go(writeSort(next, page.url.searchParams));
 	}
 
 	function onPageChange(offset: number) {
@@ -94,6 +100,8 @@
 					transactions={data.transactions.items}
 					filter={data.transactionFilter}
 					totalCount={data.transactions.totalCount}
+					sort={data.sort}
+					onsort={onSort}
 					currency={data.accounts[0]?.currency ?? 'EUR'}
 				/>
 				<Pagination

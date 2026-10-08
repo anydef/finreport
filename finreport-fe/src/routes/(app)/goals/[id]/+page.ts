@@ -6,6 +6,7 @@ import {
 } from '$lib/graphql/queries';
 import { progressRange } from '$lib/goalsView';
 import type { Category, GoalProgress, TransactionPage } from '$lib/graphql/types';
+import { DEFAULT_SORT, parseSort, sortVariable } from '$lib/transactionSort';
 import type { PageLoad } from './$types';
 
 const PAGE_LIMIT = 50;
@@ -23,7 +24,7 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 	const categories = (categoriesResult.data?.categories ?? []) as Category[];
 
 	if (!progress) {
-		return { error: true, id: params.id, categories } as const;
+		return { error: true, id: params.id, categories, sort: DEFAULT_SORT } as const;
 	}
 
 	// A bucket click narrows the list to that bucket's range (the dashboard's
@@ -32,6 +33,7 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 	const txStart = url.searchParams.get('txStart') ?? range.start;
 	const txEnd = url.searchParams.get('txEnd') ?? range.end;
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
+	const sort = parseSort(url.searchParams);
 	const fixed = progress.goal.periodKind === 'FIXED';
 
 	const [transactionsResult, seriesResult] = await Promise.all([
@@ -40,7 +42,8 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 				id: params.id,
 				startDate: txStart,
 				endDate: txEnd,
-				page: { limit: PAGE_LIMIT, offset }
+				page: { limit: PAGE_LIMIT, offset },
+				sort: sortVariable(sort)
 			})
 			.toPromise(),
 		fixed
@@ -63,6 +66,7 @@ export const load: PageLoad = async ({ fetch, params, url }) => {
 		range,
 		txStart,
 		txEnd,
+		sort,
 		offset,
 		transactions: transactionsResult.data?.goalTransactions as TransactionPage | undefined,
 		transactionsError: Boolean(transactionsResult.error),

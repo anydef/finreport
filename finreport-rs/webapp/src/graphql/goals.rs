@@ -16,7 +16,7 @@ use entity::entities::{category, goal, transaction};
 use rust_decimal::Decimal as RustDecimal;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, QueryOrder,
-    Statement,
+    QuerySelect, Statement,
 };
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -30,7 +30,7 @@ use crate::graphql::events::{kafka_unavailable_error, publish_event};
 use crate::graphql::insights::normalize_tags;
 use crate::graphql::scalars::{Date, Decimal, Uuid};
 use crate::graphql::transactions::{clamp_limit, to_graphql_transaction};
-use crate::graphql::types::{Category, PageInput, TransactionPage};
+use crate::graphql::types::{Category, PageInput, TransactionPage, TransactionSort};
 use crate::kafka::goals as wire;
 use crate::kafka::producer::EventPublisher;
 
@@ -584,6 +584,7 @@ pub async fn goal_transactions(
     start_date: Date,
     end_date: Date,
     page: Option<PageInput>,
+    sort: Option<TransactionSort>,
 ) -> async_graphql::Result<TransactionPage> {
     if start_date.0 > end_date.0 {
         return Err(validation_error("startDate must not be after endDate"));
@@ -596,6 +597,28 @@ pub async fn goal_transactions(
 
     let ids = goal_transaction_ids(db, &row, &scoped, start_date.0, end_date.0).await?;
     let total_count = ids.len() as i32;
+    if let Some(sort) = sort {
+        // An explicit sort pages in SQL over the whole id set, so it orders
+        // all contributing rows, not just the page.
+        let rows = if ids.is_empty() || scoped.is_empty() {
+            Vec::new()
+        } else {
+            let select = transaction::Entity::find()
+                .filter(transaction::Column::Id.is_in(ids))
+                .filter(transaction::Column::AccountId.is_in(scoped));
+            crate::graphql::transactions::apply_order(select, Some(sort))
+                .limit(limit as u64)
+                .offset(offset as u64)
+                .all(db)
+                .await?
+        };
+        return Ok(TransactionPage {
+            items: rows.into_iter().map(to_graphql_transaction).collect(),
+            total_count,
+            limit: limit as i32,
+            offset: offset as i32,
+        });
+    }
     let page_ids: Vec<uuid::Uuid> = ids.into_iter().skip(offset).take(limit).collect();
 
     // Defence in depth: the id list is already account-scoped, but the row

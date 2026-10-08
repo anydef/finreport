@@ -463,7 +463,7 @@ type Query {
 	"""
 	me: Me
 	accounts: [Account!]!
-	transactions(filter: TransactionFilter, page: PageInput): TransactionPage!
+	transactions(filter: TransactionFilter, page: PageInput, sort: TransactionSort): TransactionPage!
 	cashflowSummary(filter: TransactionFilter!, granularity: Granularity!): CashflowSummary!
 	cashflowGraph(filter: TransactionFilter!, grouping: CashflowGraphInput): CashflowGraph!
 	"""
@@ -496,7 +496,7 @@ type Query {
 	"""
 	The contribution rows behind a bucket, for drill-down.
 	"""
-	goalTransactions(id: UUID!, startDate: Date!, endDate: Date!, page: PageInput): TransactionPage!
+	goalTransactions(id: UUID!, startDate: Date!, endDate: Date!, page: PageInput, sort: TransactionSort): TransactionPage!
 	"""
 	`recurringSeries` (§4).
 	"""
@@ -619,6 +619,11 @@ enum RuleState {
 enum ScopeCombine {
 	ALL
 	ANY
+}
+
+enum SortDirection {
+	ASC
+	DESC
 }
 
 input SplitPartInput {
@@ -761,6 +766,44 @@ type TransactionPage {
 	totalCount: Int!
 	limit: Int!
 	offset: Int!
+}
+
+"""
+Ordering for a transaction list. Always completed with a deterministic
+tiebreaker on the transaction id, so paging through equal keys never
+repeats or drops a row. Omitting it keeps the default: newest booking
+date first.
+"""
+input TransactionSort {
+	field: TransactionSortField!
+	direction: SortDirection! = DESC
+}
+
+"""
+The column a transaction list is ordered by.
+"""
+enum TransactionSortField {
+	"""
+	Booking date, then external id.
+	"""
+	BOOKING_DATE
+	"""
+	The **signed** amount: DESC runs largest income to largest expense.
+	(Filters `amountMin`/`amountMax` bound the magnitude; sorting keeps
+	the sign so income and expense do not interleave.)
+	"""
+	AMOUNT
+	"""
+	Case-insensitive counterparty name. Transactions without one sort
+	last in both directions.
+	"""
+	COUNTERPARTY_NAME
+	"""
+	Case-insensitive name of the resolved category (a user override
+	outranks the label). Uncategorised and split transactions (which
+	have no single category) sort last in both directions.
+	"""
+	CATEGORY
 }
 
 type TransactionSplit {

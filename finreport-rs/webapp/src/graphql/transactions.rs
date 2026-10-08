@@ -9,7 +9,10 @@ use sea_orm::{
 use uuid::Uuid;
 
 use crate::graphql::scalars::{Date as GqlDate, Decimal as GqlDecimal, Uuid as GqlUuid};
-use crate::graphql::types::{Direction, Transaction, TransactionFilter, TransactionPage};
+use crate::graphql::types::{
+    Direction, SortDirection, Transaction, TransactionFilter, TransactionPage, TransactionSort,
+    TransactionSortField,
+};
 
 /// `PageInput.limit`, clamped to `1..=200` (§5). Pure and unit-tested.
 pub fn clamp_limit(limit: i32) -> u64 {
@@ -328,12 +331,64 @@ pub(crate) fn to_graphql_transaction(row: transaction::Model) -> Transaction {
     }
 }
 
+/// The resolved category's name, lower-cased for ordering: a user override
+/// outranks the label (a tags-only override with no category falls through),
+/// and a transaction with a valid split has no single category, so is NULL.
+const CATEGORY_SORT_KEY: &str = "(CASE WHEN EXISTS (SELECT 1 FROM transaction_split ts \
+       WHERE ts.transaction_id = transaction.id AND ts.invalid = false) THEN NULL \
+     ELSE (SELECT LOWER(c.name) FROM category c WHERE c.id = COALESCE(\
+       (SELECT ul.category_id FROM transaction_user_label ul WHERE ul.transaction_id = transaction.id), \
+       (SELECT tl.category_id FROM transaction_label tl WHERE tl.transaction_id = transaction.id))) END)";
+
+/// Orders a transaction select. `None` is today's order (newest booking
+/// date first). Every ordering ends in the transaction id so equal keys
+/// cannot swap between pages; NULL keys sort last in both directions.
+pub(crate) fn apply_order(
+    select: sea_orm::Select<transaction::Entity>,
+    sort: Option<TransactionSort>,
+) -> sea_orm::Select<transaction::Entity> {
+    use sea_orm::sea_query::{Expr, NullOrdering};
+    let Some(sort) = sort else {
+        return select
+            .order_by(transaction::Column::BookingDate, Order::Desc)
+            .order_by(transaction::Column::ExternalId, Order::Desc)
+            .order_by(transaction::Column::Id, Order::Desc);
+    };
+    let dir = match sort.direction {
+        SortDirection::Asc => Order::Asc,
+        SortDirection::Desc => Order::Desc,
+    };
+    let select = match sort.field {
+        TransactionSortField::BookingDate => {
+            // Date, then external id in the same direction, so DESC is
+            // exactly the default order.
+            return select
+                .order_by(transaction::Column::BookingDate, dir.clone())
+                .order_by(transaction::Column::ExternalId, dir.clone())
+                .order_by(transaction::Column::Id, dir);
+        }
+        TransactionSortField::Amount => select.order_by(transaction::Column::Amount, dir),
+        TransactionSortField::CounterpartyName => select.order_by_with_nulls(
+            Expr::cust("LOWER(transaction.counterparty_name)"),
+            dir,
+            NullOrdering::Last,
+        ),
+        TransactionSortField::Category => {
+            select.order_by_with_nulls(Expr::cust(CATEGORY_SORT_KEY), dir, NullOrdering::Last)
+        }
+    };
+    select
+        .order_by(transaction::Column::BookingDate, Order::Desc)
+        .order_by(transaction::Column::Id, Order::Desc)
+}
+
 pub async fn fetch_transactions(
     db: &DatabaseConnection,
     scoped_ids: &[Uuid],
     filter: &TransactionFilter,
     limit: i32,
     offset: i32,
+    sort: Option<TransactionSort>,
 ) -> async_graphql::Result<TransactionPage> {
     let limit = clamp_limit(limit);
     let offset = offset.max(0) as u64;
@@ -353,12 +408,7 @@ pub async fn fetch_transactions(
         .count(db)
         .await?;
 
-    let rows = transaction::Entity::find()
-        .filter(condition)
-        // Stable tie-break (§5): otherwise paging through a day with many
-        // transactions can repeat or skip rows.
-        .order_by(transaction::Column::BookingDate, Order::Desc)
-        .order_by(transaction::Column::ExternalId, Order::Desc)
+    let rows = apply_order(transaction::Entity::find().filter(condition), sort)
         .limit(limit)
         .offset(offset)
         .all(db)
@@ -482,6 +532,44 @@ mod tests {
             ..Default::default()
         });
         assert!(!without.contains(r#""counterparty_key" IN"#), "{without}");
+    }
+
+    fn order_sql(sort: Option<TransactionSort>) -> String {
+        use sea_orm::{DbBackend, QueryTrait};
+        let sql = apply_order(transaction::Entity::find(), sort)
+            .build(DbBackend::Postgres)
+            .to_string();
+        sql[sql.find("ORDER BY").expect("ordered")..].to_string()
+    }
+
+    #[test]
+    fn every_ordering_ends_in_the_transaction_id() {
+        assert_eq!(
+            order_sql(None),
+            r#"ORDER BY "transaction"."booking_date" DESC, "transaction"."external_id" DESC, "transaction"."id" DESC"#
+        );
+        for field in [
+            TransactionSortField::BookingDate,
+            TransactionSortField::Amount,
+            TransactionSortField::CounterpartyName,
+            TransactionSortField::Category,
+        ] {
+            for direction in [SortDirection::Asc, SortDirection::Desc] {
+                let sql = order_sql(Some(TransactionSort { field, direction }));
+                assert!(sql.contains(r#""transaction"."id""#), "{field:?} {direction:?}: {sql}");
+                assert!(sql.trim_end().ends_with("\"id\" ASC") || sql.trim_end().ends_with("\"id\" DESC"), "{sql}");
+            }
+        }
+    }
+
+    #[test]
+    fn nullable_sort_keys_put_nulls_last_in_both_directions() {
+        for field in [TransactionSortField::CounterpartyName, TransactionSortField::Category] {
+            for direction in [SortDirection::Asc, SortDirection::Desc] {
+                let sql = order_sql(Some(TransactionSort { field, direction }));
+                assert!(sql.contains("NULLS LAST"), "{field:?} {direction:?}: {sql}");
+            }
+        }
     }
 
     #[test]

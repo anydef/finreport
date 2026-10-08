@@ -21,7 +21,11 @@
 	} from '$lib/breakdownShaping';
 	import { createGraphqlClient } from '$lib/graphqlClient';
 	import { CATEGORY_BREAKDOWN_QUERY } from '$lib/graphql/queries';
-	import type { CategoryBreakdown as CategoryBreakdownData } from '$lib/graphql/types';
+	import { writeSort } from '$lib/transactionSort';
+	import type {
+		CategoryBreakdown as CategoryBreakdownData,
+		TransactionSort
+	} from '$lib/graphql/types';
 	import {
 		drilldownFilterForLink,
 		drilldownFilterForNode,
@@ -67,6 +71,8 @@
 		panel?: PanelFilters;
 		resetDrilldown?: boolean;
 		sankeyDimension?: 'counterparty' | 'category';
+		/** A new sort; omitted = keep the current one. */
+		sort?: TransactionSort;
 	}
 
 	function navigate(opts: NavOverrides = {}) {
@@ -86,7 +92,7 @@
 		const merged = { ...base, ...opts };
 		const sankeyDimension = opts.sankeyDimension ?? data.sankeyDimension;
 
-		const params = new URLSearchParams();
+		let params = new URLSearchParams();
 		if (preset !== 'this-month') params.set('preset', preset);
 		if (preset === 'custom') {
 			params.set('start', start);
@@ -106,6 +112,8 @@
 			params.set('selCategorySlugs', merged.categorySlugs.join(','));
 		if (merged.uncategorized) params.set('selUncategorized', 'true');
 		if (merged.needsReview !== undefined) params.set('selNeedsReview', String(merged.needsReview));
+		// Written before the offset: `writeSort` drops paging, a sort change restarts it.
+		params = writeSort(opts.sort ?? data.sort, params);
 		if (merged.offset) params.set('offset', String(merged.offset));
 
 		const withPanel = writePanelFilters(opts.panel ?? data.panel, params);
@@ -158,6 +166,10 @@
 	/** A panel edit changes the scope, so the chart selection and paging start over. */
 	function onFiltersChange(next: PanelFilters) {
 		navigate({ panel: next, offset: 0, resetDrilldown: true });
+	}
+
+	function onSort(next: TransactionSort) {
+		navigate({ sort: next, offset: 0 });
 	}
 
 	function onPageChange(offset: number) {
@@ -299,6 +311,8 @@
 					currency={data.summary.currency}
 					filter={data.transactionFilter}
 					totalCount={data.transactions.totalCount}
+					sort={data.sort}
+					onsort={onSort}
 				/>
 				<Pagination
 					offset={data.transactions.offset}

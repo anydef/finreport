@@ -13,7 +13,7 @@ use crate::graphql::labels::LabelSplitCache;
 use crate::graphql::types::{
     Account, CashflowGraph, CashflowGraphInput, CashflowSummary, Category,
     CategoryBreakdown, CategoryKind, Granularity, Me, PageInput, RecurringOverview, ReviewQueue,
-    Rule, RuleState, TagCount, TransactionFilter, TransactionPage,
+    Rule, RuleState, TagCount, TransactionFilter, TransactionPage, TransactionSort,
 };
 use crate::graphql::scalars::{Date, Uuid};
 use crate::graphql::{accounts, breakdown, categories, goals, review_queue, rules, transactions};
@@ -55,6 +55,7 @@ impl QueryRoot {
         ctx: &Context<'_>,
         filter: Option<TransactionFilter>,
         page: Option<PageInput>,
+        sort: Option<TransactionSort>,
     ) -> GqlResult<TransactionPage> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
@@ -65,7 +66,7 @@ impl QueryRoot {
             .as_ref()
             .map(|ids| ids.iter().map(|id| id.0).collect());
         let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
-        let page = transactions::fetch_transactions(db, &scoped_ids, &filter, page.limit, page.offset).await?;
+        let page = transactions::fetch_transactions(db, &scoped_ids, &filter, page.limit, page.offset, sort).await?;
 
         // Prime the per-request label/split cache for this page's rows
         // (§9 N+1 avoidance) — `Transaction.label`/`.splits` then read from
@@ -212,10 +213,11 @@ impl QueryRoot {
         start_date: Date,
         end_date: Date,
         page: Option<PageInput>,
+        sort: Option<TransactionSort>,
     ) -> GqlResult<TransactionPage> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        goals::goal_transactions(db, user, id, start_date, end_date, page).await
+        goals::goal_transactions(db, user, id, start_date, end_date, page, sort).await
     }
 
     /// `recurringSeries` (§4).

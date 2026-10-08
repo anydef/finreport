@@ -14,6 +14,14 @@ export type DateString = string;
 export type Decimal = string;
 
 export type Direction = 'INCOME' | 'SPENDING';
+
+export type TransactionSortField = 'BOOKING_DATE' | 'AMOUNT' | 'COUNTERPARTY_NAME' | 'CATEGORY';
+export type SortDirection = 'ASC' | 'DESC';
+/** Server-side ordering for `transactions` / `goalTransactions`; omitted = newest booking date first. */
+export interface TransactionSort {
+	field: TransactionSortField;
+	direction: SortDirection;
+}
 export type Granularity = 'DAY' | 'WEEK' | 'MONTH';
 
 export type CashflowNodeKind =

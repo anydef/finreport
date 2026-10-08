@@ -13,6 +13,8 @@ import { env as privateEnv } from '$env/dynamic/private';
 import { env as publicEnv } from '$env/dynamic/public';
 import type { RequestEvent } from '@sveltejs/kit';
 import { amountWithinRange } from '$lib/transactionFilters';
+import { compareBySort, DEFAULT_SORT } from '$lib/transactionSort';
+import type { TransactionSort } from '$lib/graphql/types';
 
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
@@ -284,11 +286,19 @@ function mockReviewHeld(variables: Record<string, unknown> | undefined): unknown
 function mockTransactions(variables: Record<string, unknown> | undefined): unknown {
 	const items = mockFixtureItems();
 	const filtered = applyInsightFilters(items, variables?.filter as Record<string, unknown>);
+	// Sort the whole filtered set before paging, as the server does.
+	const order = compareBySort((variables?.sort as TransactionSort | undefined) ?? DEFAULT_SORT);
+	filtered.sort(order as unknown as (a: MockTransaction, b: MockTransaction) => number);
+	const page = (variables?.page ?? {}) as { limit?: number; offset?: number };
+	const limit = page.limit ?? transactionsMock.data.transactions.limit;
+	const offset = page.offset ?? 0;
 	return {
 		transactions: {
 			...transactionsMock.data.transactions,
-			items: filtered,
-			totalCount: filtered.length
+			items: filtered.slice(offset, offset + limit),
+			totalCount: filtered.length,
+			limit,
+			offset
 		}
 	};
 }
@@ -533,12 +543,17 @@ function mockGoalTransactions(variables: Record<string, unknown> | undefined): u
 	const inRange = (
 		rowsByGoal[String(variables?.id)] ?? goalTransactionsMock.data.goalTransactions.items
 	).filter((row) => (!start || row.bookingDate >= start) && (!end || row.bookingDate <= end));
+	// Unsorted keeps the fixture's own order, as the real resolver keeps the engine's.
+	const sort = variables?.sort as TransactionSort | undefined;
+	const sorted = sort
+		? [...inRange].sort(compareBySort(sort) as (a: unknown, b: unknown) => number)
+		: inRange;
 	const page = (variables?.page ?? {}) as { limit?: number; offset?: number };
 	const limit = page.limit ?? 50;
 	const offset = page.offset ?? 0;
 	return {
 		goalTransactions: {
-			items: inRange.slice(offset, offset + limit),
+			items: sorted.slice(offset, offset + limit),
 			totalCount: inRange.length,
 			limit,
 			offset

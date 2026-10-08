@@ -14,6 +14,7 @@ import {
 	type PeriodPresetId
 } from '$lib/period';
 import { parsePanelFilters, toTransactionFilter } from '$lib/transactionFilters';
+import { parseSort, sortVariable } from '$lib/transactionSort';
 import type { PageLoad } from './$types';
 
 const PAGE_LIMIT = 50;
@@ -35,6 +36,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const range = readRange(url, preset, today);
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
 	const panel = parsePanelFilters(url.searchParams);
+	const sort = parseSort(url.searchParams);
 
 	const client = createGraphqlClient(fetch);
 
@@ -52,7 +54,11 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	};
 
 	const transactionsResult = await client
-		.query(TRANSACTIONS_QUERY, { filter, page: { limit: PAGE_LIMIT, offset } })
+		.query(TRANSACTIONS_QUERY, {
+			filter,
+			page: { limit: PAGE_LIMIT, offset },
+			sort: sortVariable(sort)
+		})
 		.toPromise();
 
 	return {
@@ -61,6 +67,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		end: range.end,
 		granularity: defaultGranularity(range),
 		panel,
+		sort,
 		offset,
 		error: Boolean(
 			accountsResult.error || categoriesResult.error || tagsResult.error || transactionsResult.error

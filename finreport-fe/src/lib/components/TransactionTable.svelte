@@ -24,6 +24,8 @@
 		toggleRow,
 		type Selection
 	} from '$lib/bulkSelection';
+	import SortHeader from './SortHeader.svelte';
+	import { DEFAULT_SORT, nextSort, sortKey } from '$lib/transactionSort';
 	import { createGraphqlClient } from '$lib/graphqlClient';
 	import {
 		CATEGORIES_QUERY,
@@ -38,7 +40,9 @@
 		BulkEditResult,
 		Category,
 		Transaction,
-		TransactionFilter
+		TransactionFilter,
+		TransactionSort,
+		TransactionSortField
 	} from '$lib/graphql/types';
 
 	interface Props {
@@ -52,9 +56,24 @@
 		filter?: TransactionFilter;
 		/** Rows matching `filter` across all pages, not just the loaded ones. */
 		totalCount?: number;
+		/**
+		 * The server-side ordering the rows were loaded with. Giving `onsort`
+		 * turns the Date, Counterparty, Category and Amount headers into sort
+		 * buttons. The parent re-queries; the table never reorders rows itself,
+		 * because it only holds one page of them.
+		 */
+		sort?: TransactionSort;
+		onsort?: (next: TransactionSort) => void;
 	}
 
-	let { transactions, currency, filter, totalCount = 0 }: Props = $props();
+	let {
+		transactions,
+		currency,
+		filter,
+		totalCount = 0,
+		sort = DEFAULT_SORT,
+		onsort
+	}: Props = $props();
 
 	let edited = $state<Record<string, Transaction>>({});
 	let selectedId = $state<string | null>(null);
@@ -72,11 +91,12 @@
 	let selection = $state<Selection>(EMPTY_SELECTION);
 	let bulkKind = $state<'category' | 'tags' | null>(null);
 
-	// A selection belongs to the filter it was made under. When the filter
-	// changes, drop it: a stale selection is how a bulk tool edits wrong rows.
-	const currentFilterKey = $derived(filterKey(filter ?? {}));
+	// A selection belongs to the filter and the ordering it was made under.
+	// When either changes, drop it: a stale selection is how a bulk tool edits
+	// wrong rows (an explicit id list would silently span a reordering).
+	const selectionScope = $derived(`${filterKey(filter ?? {})}|${sortKey(sort)}`);
 	$effect(() => {
-		void currentFilterKey;
+		void selectionScope;
 		untrack(() => {
 			selection = EMPTY_SELECTION;
 			bulkKind = null;
@@ -91,6 +111,11 @@
 	$effect(() => {
 		if (headerBox) headerBox.indeterminate = header === 'some';
 	});
+
+	/** Headers are plain text unless the parent can re-query with a new sort. */
+	const sortTo = $derived(
+		onsort ? (field: TransactionSortField) => onsort(nextSort(sort, field)) : undefined
+	);
 
 	function openBulk(kind: 'category' | 'tags') {
 		bulkKind = kind;
@@ -238,13 +263,13 @@
 							/>
 						</th>
 					{/if}
-					<th class="py-2 pr-4 font-medium">Date</th>
-					<th class="py-2 pr-4 font-medium">Counterparty</th>
+					<SortHeader label="Date" field="BOOKING_DATE" {sort} onsort={sortTo} />
+					<SortHeader label="Counterparty" field="COUNTERPARTY_NAME" {sort} onsort={sortTo} />
 					<th class="py-2 pr-4 font-medium">Description</th>
-					<th class="py-2 pr-4 font-medium">Category</th>
+					<SortHeader label="Category" field="CATEGORY" {sort} onsort={sortTo} />
 					<th class="py-2 pr-4 font-medium">Tags</th>
 					<th class="py-2 pr-4 font-medium">Flags</th>
-					<th class="py-2 pr-4 text-right font-medium">Amount</th>
+					<SortHeader label="Amount" field="AMOUNT" {sort} onsort={sortTo} align="right" />
 				</tr>
 			</thead>
 			<tbody>

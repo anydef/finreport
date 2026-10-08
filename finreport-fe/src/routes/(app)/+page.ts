@@ -28,6 +28,7 @@ import {
 	type PeriodPresetId
 } from '$lib/period';
 import { layerSelection, parsePanelFilters, toTransactionFilter } from '$lib/transactionFilters';
+import { parseSort, sortVariable } from '$lib/transactionSort';
 import type { PageLoad } from './$types';
 
 const PAGE_LIMIT = 50;
@@ -96,6 +97,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 
 	const client = createGraphqlClient(fetch);
 	const panel = parsePanelFilters(url.searchParams);
+	const sort = parseSort(url.searchParams);
 
 	const [accountsResult, categoriesResult, tagsResult] = await Promise.all([
 		client.query(ACCOUNTS_QUERY, {}).toPromise(),
@@ -129,7 +131,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		client
 			.query(TRANSACTIONS_QUERY, {
 				filter: transactionFilter,
-				page: { limit: PAGE_LIMIT, offset }
+				page: { limit: PAGE_LIMIT, offset },
+				sort: sortVariable(sort)
 			})
 			.toPromise(),
 		client
@@ -159,6 +162,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		granularity,
 		drilldown,
 		panel,
+		sort,
 		/** The period + panel filter the breakdown ran with; expanding a row scopes a copy of it. */
 		breakdownFilter: periodFilter as Partial<TransactionFilter>,
 		sankeyDimension,
