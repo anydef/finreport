@@ -120,3 +120,22 @@ query ReviewHeldTransactions($filter: TransactionFilter, $page: PageInput) {
 		totalCount
 	}
 }`;
+
+/** The held queue grouped by merchant, largest group first (`heldMerchantGroups`). */
+export const HELD_MERCHANT_GROUPS_QUERY = `
+query HeldMerchantGroups($page: PageInput) {
+	heldMerchantGroups(page: $page) {
+		groups {
+			counterpartyKey
+			displayName
+			heldCount
+			totalAmount
+			currency
+			reviewReasons
+			proposedCategoryPath
+			proposedCategoryVotes
+		}
+		groupCount
+		heldCount
+	}
+}`;

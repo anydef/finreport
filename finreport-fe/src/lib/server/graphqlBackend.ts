@@ -138,7 +138,12 @@ interface MockTransaction {
 	amount: string;
 	counterpartyName: string | null;
 	description: string | null;
-	label: { status: string; category: { slug: string } | null } | null;
+	label: {
+		status: string;
+		category: { slug: string } | null;
+		reviewReason?: string | null;
+		proposedCategoryPath?: string | null;
+	} | null;
 	splits: unknown[];
 	tags: string[];
 	transfer: unknown;
@@ -266,6 +271,56 @@ function mockReviewQueue(variables: Record<string, unknown> | undefined): unknow
 	const all = reviewQueueMock.data.reviewQueue;
 	return {
 		reviewQueue: { ...all, transactions: mockReviewItems().slice(offset, offset + limit) }
+	};
+}
+
+/**
+ * `HeldMerchantGroups`: derived from the held fixture the way the backend
+ * aggregates it, so the groups always agree with `ReviewHeldTransactions`
+ * and the bulk-edit mock: signed net total, most common name/proposal
+ * (ties alphabetical), distinct reasons, the keyless rows as one bucket,
+ * largest group first.
+ */
+function mockHeldGroups(variables: Record<string, unknown> | undefined): unknown {
+	const page = variables?.page as { limit?: number; offset?: number } | undefined;
+	const rows = mockReviewItems();
+	const byKey = new Map<string | null, MockTransaction[]>();
+	for (const row of rows) {
+		const key = row.counterpartyKey || null;
+		byKey.set(key, [...(byKey.get(key) ?? []), row]);
+	}
+	const mode = (values: (string | null | undefined)[]): { value: string | null; count: number } => {
+		const counts = new Map<string, number>();
+		for (const v of values) if (v) counts.set(v, (counts.get(v) ?? 0) + 1);
+		const best = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
+		return best ? { value: best[0], count: best[1] } : { value: null, count: 0 };
+	};
+	const groups = [...byKey.entries()].map(([key, items]) => {
+		const proposed = mode(items.map((i) => i.label?.proposedCategoryPath));
+		const total = items.reduce((sum, i) => sum + Math.round(Number(i.amount) * 100), 0);
+		const reasons = [...new Set(items.map((i) => i.label?.reviewReason).filter(Boolean))];
+		return {
+			counterpartyKey: key,
+			displayName:
+				key === null
+					? 'No merchant key'
+					: (mode(items.map((i) => i.counterpartyName)).value ?? key),
+			heldCount: items.length,
+			totalAmount: (total / 100).toFixed(2),
+			currency: 'EUR',
+			reviewReasons: reasons,
+			proposedCategoryPath: proposed.value,
+			proposedCategoryVotes: proposed.count
+		};
+	});
+	groups.sort((a, b) => b.heldCount - a.heldCount || a.displayName.localeCompare(b.displayName));
+	const offset = page?.offset ?? 0;
+	return {
+		heldMerchantGroups: {
+			groups: groups.slice(offset, offset + (page?.limit ?? groups.length)),
+			groupCount: groups.length,
+			heldCount: rows.length
+		}
 	};
 }
 
@@ -646,6 +701,8 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 				body: { data: mockReviewQueue(body.variables) },
 				setCookies: []
 			};
+		case 'HeldMerchantGroups':
+			return { status: 200, body: { data: mockHeldGroups(body.variables) }, setCookies: [] };
 		case 'ReviewHeldTransactions':
 			return { status: 200, body: { data: mockReviewHeld(body.variables) }, setCookies: [] };
 		case 'Rules':

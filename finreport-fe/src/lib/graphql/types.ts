@@ -448,3 +448,24 @@ export interface AttentionSummary {
 	uncategorized: AttentionBucket;
 	needsReview: AttentionBucket;
 }
+
+/** One merchant's held transactions (`heldMerchantGroups`). */
+export interface HeldMerchantGroup {
+	/** `null` for the single bucket of held transactions that have no merchant key. */
+	counterpartyKey: string | null;
+	displayName: string;
+	heldCount: number;
+	/** Signed net sum (negative = net spending): a refund cancels the charge it reverses. */
+	totalAmount: string;
+	currency: string;
+	reviewReasons: ReviewReason[];
+	proposedCategoryPath: string | null;
+	/** How many held transactions of the group carry exactly `proposedCategoryPath`. */
+	proposedCategoryVotes: number;
+}
+
+export interface HeldMerchantGroups {
+	groups: HeldMerchantGroup[];
+	groupCount: number;
+	heldCount: number;
+}

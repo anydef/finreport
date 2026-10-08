@@ -7,6 +7,7 @@ pub mod categories;
 pub mod cookies;
 pub mod current_user;
 mod events;
+mod held_groups;
 pub mod goals;
 pub mod http;
 mod insights;

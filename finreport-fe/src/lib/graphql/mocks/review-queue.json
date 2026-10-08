@@ -4,12 +4,13 @@
     "reviewQueue": {
       "transactions": [
         {
-          "id": "1f6a6e2b-9b3d-4c8a-ab9e-5a2b0c7d4e11",
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000001",
           "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
           "bookingDate": "2024-06-28",
           "amount": "-49.99",
           "currency": "EUR",
           "counterpartyName": "Amazon",
+          "counterpartyKey": "amazon",
           "description": "Online purchase",
           "label": {
             "source": "LLM",
@@ -18,16 +19,178 @@
             "proposedCategoryPath": null,
             "reasoning": "fake provider: multiple plausible categories",
             "confidence": 0.6
-          },
-          "counterparty_key": "amazon"
+          }
         },
         {
-          "id": "3c2d1e0f-8a7b-4c6d-9e5f-1a2b3c4d5e6f",
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000002",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-21",
+          "amount": "-18.40",
+          "currency": "EUR",
+          "counterpartyName": "Amazon",
+          "counterpartyKey": "amazon",
+          "description": "Marketplace order",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "shopping.online",
+            "reasoning": "fake provider: proposing new category shopping.online",
+            "confidence": 0.7
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000003",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-14",
+          "amount": "-72.15",
+          "currency": "EUR",
+          "counterpartyName": "Amazon",
+          "counterpartyKey": "amazon",
+          "description": "Prime Video and books",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "shopping.online",
+            "reasoning": "fake provider: proposing new category shopping.online",
+            "confidence": 0.7
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000004",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-02",
+          "amount": "-12.99",
+          "currency": "EUR",
+          "counterpartyName": "Amazon",
+          "counterpartyKey": "amazon",
+          "description": "Kindle book",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "shopping.books",
+            "reasoning": "fake provider: proposing new category shopping.books",
+            "confidence": 0.65
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000005",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-27",
+          "amount": "-54.10",
+          "currency": "EUR",
+          "counterpartyName": "REWE Markt",
+          "counterpartyKey": "rewe",
+          "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "food.supermarkets",
+            "reasoning": "fake provider: proposing new category food.supermarkets",
+            "confidence": 0.85
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000006",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-20",
+          "amount": "-33.72",
+          "currency": "EUR",
+          "counterpartyName": "REWE Markt",
+          "counterpartyKey": "rewe",
+          "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "food.supermarkets",
+            "reasoning": "fake provider: proposing new category food.supermarkets",
+            "confidence": 0.85
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000007",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-13",
+          "amount": "-61.05",
+          "currency": "EUR",
+          "counterpartyName": "REWE Markt",
+          "counterpartyKey": "rewe",
+          "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "food.supermarkets",
+            "reasoning": "fake provider: proposing new category food.supermarkets",
+            "confidence": 0.85
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000008",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-08",
+          "amount": "12.40",
+          "currency": "EUR",
+          "counterpartyName": "Rewe Sagt Danke",
+          "counterpartyKey": "rewe",
+          "description": "Refund deposit",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "NEW_CATEGORY",
+            "proposedCategoryPath": "food.supermarkets",
+            "reasoning": "fake provider: proposing new category food.supermarkets",
+            "confidence": 0.8
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000009",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-26",
+          "amount": "-27.30",
+          "currency": "EUR",
+          "counterpartyName": "Lidl Filiale 112",
+          "counterpartyKey": "lidl",
+          "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.5
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000010",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-12",
+          "amount": "-19.85",
+          "currency": "EUR",
+          "counterpartyName": "Lidl Filiale 112",
+          "counterpartyKey": "lidl",
+          "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.5
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000011",
           "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
           "bookingDate": "2024-06-25",
           "amount": "-120.00",
           "currency": "EUR",
           "counterpartyName": "Acme Co-Working",
+          "counterpartyKey": "acme co working",
           "description": "Monthly desk rental",
           "label": {
             "source": "LLM",
@@ -36,53 +199,16 @@
             "proposedCategoryPath": "housing.coworking",
             "reasoning": "fake provider: proposing new category housing.coworking",
             "confidence": 0.8
-          },
-          "counterparty_key": "acme co working"
-        },
-        {
-          "id": "6a1b2c3d-0001-4a5b-8c9d-0e1f2a3b4c01",
-          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
-          "bookingDate": "2024-06-21",
-          "amount": "-18.40",
-          "currency": "EUR",
-          "counterpartyName": "Amazon",
-          "counterparty_key": "amazon",
-          "description": "Marketplace order",
-          "label": {
-            "source": "LLM",
-            "status": "NEEDS_REVIEW",
-            "reviewReason": "AMBIGUOUS",
-            "proposedCategoryPath": null,
-            "reasoning": "fake provider: multiple plausible categories",
-            "confidence": 0.55
           }
         },
         {
-          "id": "6a1b2c3d-0002-4a5b-8c9d-0e1f2a3b4c02",
-          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
-          "bookingDate": "2024-06-14",
-          "amount": "-72.15",
-          "currency": "EUR",
-          "counterpartyName": "Amazon",
-          "counterparty_key": "amazon",
-          "description": "Prime Video and books",
-          "label": {
-            "source": "LLM",
-            "status": "NEEDS_REVIEW",
-            "reviewReason": "AMBIGUOUS",
-            "proposedCategoryPath": null,
-            "reasoning": "fake provider: multiple plausible categories",
-            "confidence": 0.55
-          }
-        },
-        {
-          "id": "6a1b2c3d-0003-4a5b-8c9d-0e1f2a3b4c03",
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000012",
           "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
           "bookingDate": "2024-06-10",
           "amount": "-9.99",
           "currency": "EUR",
           "counterpartyName": "Kleinanbieter Meyer",
-          "counterparty_key": "kleinanbieter meyer",
+          "counterpartyKey": "kleinanbieter meyer",
           "description": "Card payment",
           "label": {
             "source": "LLM",
@@ -94,13 +220,13 @@
           }
         },
         {
-          "id": "6a1b2c3d-0004-4a5b-8c9d-0e1f2a3b4c04",
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000013",
           "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
           "bookingDate": "2024-06-03",
           "amount": "-33.00",
           "currency": "EUR",
           "counterpartyName": "Unknown shop",
-          "counterparty_key": null,
+          "counterpartyKey": null,
           "description": "POS purchase",
           "label": {
             "source": "LLM",
@@ -109,6 +235,24 @@
             "proposedCategoryPath": null,
             "reasoning": "fake provider: multiple plausible categories",
             "confidence": 0.55
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000014",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-01",
+          "amount": "-5.50",
+          "currency": "EUR",
+          "counterpartyName": null,
+          "counterpartyKey": null,
+          "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.5
           }
         }
       ],
@@ -135,7 +279,7 @@
           "createdAt": "2024-06-20T08:00:00Z"
         }
       ],
-      "totalCount": 6
+      "totalCount": 14
     }
   }
 }

@@ -1,57 +1,65 @@
 import { createGraphqlClient } from '$lib/graphqlClient';
 import {
 	CATEGORIES_QUERY,
+	HELD_MERCHANT_GROUPS_QUERY,
 	REVIEW_HELD_TRANSACTIONS_QUERY,
 	REVIEW_QUEUE_WITH_SPLITS_QUERY
 } from '$lib/graphql/adminReviewQueries';
 import { reviewQueueFilter } from '$lib/bulkSelection';
-import type { Category, ReviewQueue, Transaction } from '$lib/graphql/types';
+import { expandedKey, parseView } from '$lib/heldGroups';
+import type { Category, HeldMerchantGroups, ReviewQueue, Transaction } from '$lib/graphql/types';
 import type { PageLoad } from './$types';
 
 const PAGE_LIMIT = 50;
+// Groups are far fewer than transactions (one per merchant), so one page of the
+// maximum size holds the whole grouped queue in practice.
+const GROUP_LIMIT = 200;
 
 /**
- * `?counterpartyKey=` narrows the queue to the held transactions of one
- * counterparty ("find similar"). `reviewQueue` takes no filter, so that case
- * reads `transactions(needsReview, counterpartyKeys)` for the rows and still
- * calls `reviewQueue` (one row) for the pending rules.
+ * `?view=groups` (default): the held queue grouped by merchant, plus, when
+ * `?expand=<counterpartyKey>` names a group, that group's held transactions.
+ * `?view=flat`: the paged flat list. The pre-grouping `?counterpartyKey=` link
+ * is read as `expand`, so old links land on the merchant's expanded group.
  */
 export const load: PageLoad = async ({ fetch, url }) => {
+	const view = parseView(url.searchParams.get('view'));
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
-	const counterpartyKey = url.searchParams.get('counterpartyKey') || null;
+	const expand = view === 'groups' ? expandedKey(url.searchParams) : null;
 	const client = createGraphqlClient(fetch);
 
-	const [reviewQueueResult, categoriesResult, similarResult] = await Promise.all([
+	const [queueResult, categoriesResult, groupsResult, expandedResult] = await Promise.all([
 		client
 			.query(REVIEW_QUEUE_WITH_SPLITS_QUERY, {
-				page: counterpartyKey ? { limit: 1, offset: 0 } : { limit: PAGE_LIMIT, offset }
+				page: view === 'flat' ? { limit: PAGE_LIMIT, offset } : { limit: 1, offset: 0 }
 			})
 			.toPromise(),
 		client.query(CATEGORIES_QUERY, { includeArchived: false }).toPromise(),
-		counterpartyKey
+		view === 'groups'
+			? client
+					.query(HELD_MERCHANT_GROUPS_QUERY, { page: { limit: GROUP_LIMIT, offset: 0 } })
+					.toPromise()
+			: Promise.resolve(null),
+		expand
 			? client
 					.query(REVIEW_HELD_TRANSACTIONS_QUERY, {
-						filter: reviewQueueFilter(counterpartyKey),
-						page: { limit: PAGE_LIMIT, offset }
+						filter: reviewQueueFilter(expand),
+						page: { limit: GROUP_LIMIT, offset: 0 }
 					})
 					.toPromise()
 			: Promise.resolve(null)
 	]);
 
-	const queue = reviewQueueResult.data?.reviewQueue as ReviewQueue | undefined;
-	const similar = similarResult?.data?.transactions as
-		| { items: Transaction[]; totalCount: number }
-		| undefined;
-	const held = counterpartyKey
-		? similar && { transactions: similar.items, totalCount: similar.totalCount }
-		: queue && { transactions: queue.transactions, totalCount: queue.totalCount };
-
 	return {
+		view,
 		offset,
 		limit: PAGE_LIMIT,
-		counterpartyKey,
-		error: Boolean(reviewQueueResult.error || categoriesResult.error || similarResult?.error),
-		reviewQueue: queue && held ? ({ ...queue, ...held } as ReviewQueue) : undefined,
+		expand,
+		error: Boolean(
+			queueResult.error || categoriesResult.error || groupsResult?.error || expandedResult?.error
+		),
+		reviewQueue: queueResult.data?.reviewQueue as ReviewQueue | undefined,
+		groups: groupsResult?.data?.heldMerchantGroups as HeldMerchantGroups | undefined,
+		expandedTransactions: (expandedResult?.data?.transactions?.items ?? []) as Transaction[],
 		categories: (categoriesResult.data?.categories ?? []) as Category[]
 	};
 };

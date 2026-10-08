@@ -383,6 +383,68 @@ enum Granularity {
 	MONTH
 }
 
+type HeldMerchantGroup {
+	"""
+	The normalised merchant key (`transaction.counterparty_key`), the value
+	to pass in `TransactionFilter.counterpartyKeys`. `null` for the single
+	bucket of held transactions that have no key; no filter can address
+	that bucket, only individual transaction ids can.
+	"""
+	counterpartyKey: String
+	"""
+	The most common `counterpartyName` among the group's held
+	transactions (ties broken alphabetically, so it is stable). Falls back
+	to the key; the ungrouped bucket is named "No merchant key".
+	"""
+	displayName: String!
+	"""
+	How many held transactions the group has.
+	"""
+	heldCount: Int!
+	"""
+	Signed sum of the group's amounts (negative = net spending), in
+	`currency`. A merchant paid in two currencies is summed as-is.
+	"""
+	totalAmount: Decimal!
+	"""
+	The most common currency of the group.
+	"""
+	currency: String!
+	"""
+	The distinct review reasons present in the group.
+	"""
+	reviewReasons: [ReviewReason!]!
+	"""
+	The LLM's most common proposed category path (`proposedCategoryPath`)
+	among the group, or `null` if none of them carries one. Ties are broken
+	alphabetically.
+	"""
+	proposedCategoryPath: String
+	"""
+	How many of the group's held transactions carry exactly
+	`proposedCategoryPath`. The proposal is unanimous iff this equals
+	`heldCount`; anything less means the group disagrees (or some members
+	have no proposal) and a one-click accept would be a guess.
+	"""
+	proposedCategoryVotes: Int!
+}
+
+type HeldMerchantGroups {
+	"""
+	This page of groups, largest `heldCount` first (ties by name).
+	"""
+	groups: [HeldMerchantGroup!]!
+	"""
+	Number of groups in total, the ungrouped bucket included.
+	"""
+	groupCount: Int!
+	"""
+	Number of held transactions in total; equals the sum of every group's
+	`heldCount` and `reviewQueue.totalCount`.
+	"""
+	heldCount: Int!
+}
+
 """
 A scalar that can represent any JSON value.
 """
@@ -508,6 +570,14 @@ type Query {
 	transactions with their worth. All-time, across the caller's accounts.
 	"""
 	attentionSummary: AttentionSummary!
+	"""
+	`heldMerchantGroups`: the held (`NEEDS_REVIEW`) transactions of the
+	caller's own accounts grouped by merchant (`counterpartyKey`), largest
+	group first. Held transactions with no key form one extra bucket with a
+	`null` key, so the groups always sum to `heldCount`. `page` pages the
+	groups, not the transactions.
+	"""
+	heldMerchantGroups(page: PageInput): HeldMerchantGroups!
 	"""
 	`tags` (§4): all tags, descending count.
 	"""

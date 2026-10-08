@@ -16,7 +16,9 @@ use crate::graphql::types::{
     Rule, RuleState, TagCount, TransactionFilter, TransactionPage, TransactionSort,
 };
 use crate::graphql::scalars::{Date, Uuid};
-use crate::graphql::{accounts, attention, breakdown, categories, goals, review_queue, rules, transactions};
+use crate::graphql::{
+    accounts, attention, breakdown, categories, goals, held_groups, review_queue, rules, transactions,
+};
 
 pub struct QueryRoot;
 
@@ -174,6 +176,23 @@ impl QueryRoot {
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let scoped_ids = scoped_account_ids(user, None)?;
         attention::fetch_attention_summary(db, &scoped_ids).await
+    }
+
+    /// `heldMerchantGroups`: the held (`NEEDS_REVIEW`) transactions of the
+    /// caller's own accounts grouped by merchant (`counterpartyKey`), largest
+    /// group first. Held transactions with no key form one extra bucket with a
+    /// `null` key, so the groups always sum to `heldCount`. `page` pages the
+    /// groups, not the transactions.
+    async fn held_merchant_groups(
+        &self,
+        ctx: &Context<'_>,
+        page: Option<PageInput>,
+    ) -> GqlResult<held_groups::HeldMerchantGroups> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let page = page.unwrap_or_default();
+        let scoped_ids = scoped_account_ids(user, None)?;
+        held_groups::fetch_held_merchant_groups(db, &scoped_ids, page.limit, page.offset).await
     }
 
     /// `tags` (§4): all tags, descending count.

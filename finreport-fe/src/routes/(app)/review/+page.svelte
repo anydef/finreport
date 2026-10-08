@@ -3,6 +3,7 @@
 	import { untrack } from 'svelte';
 	import {
 		EMPTY_SELECTION,
+		describeResult,
 		filterKey,
 		headerState,
 		isSelected,
@@ -28,9 +29,11 @@
 		SET_TRANSACTIONS_CATEGORY_MUTATION,
 		SET_TRANSACTIONS_TAGS_MUTATION
 	} from '$lib/graphql/queries';
-	import type { BulkEditResult, Rule, Transaction } from '$lib/graphql/types';
+	import { groupFilter, needsCreating, proposedCategoryInput, reviewHref } from '$lib/heldGroups';
+	import type { BulkEditResult, HeldMerchantGroup, Rule, Transaction } from '$lib/graphql/types';
 	import BulkEditDialog from '$lib/components/BulkEditDialog.svelte';
 	import Card from '$lib/components/Card.svelte';
+	import HeldGroupCard from '$lib/components/HeldGroupCard.svelte';
 	import ReviewSelectionBar from '$lib/components/ReviewSelectionBar.svelte';
 	import ReviewCard from '$lib/components/ReviewCard.svelte';
 	import SplitEditor from '$lib/components/SplitEditor.svelte';
@@ -52,7 +55,50 @@
 
 	const rows = $derived(data.reviewQueue?.transactions ?? []);
 	const totalCount = $derived(data.reviewQueue?.totalCount ?? 0);
-	const baseFilter = $derived(reviewQueueFilter(data.counterpartyKey));
+	const baseFilter = reviewQueueFilter();
+
+	// --- Grouped view ----------------------------------------------------
+	// A group is assigned with `{ needsReview: true, counterpartyKeys: [key] }`,
+	// the same filter the flat view's bulk bar uses, so it cannot reach anything
+	// outside the queue. The outcome is shown as the server reported it, and the
+	// page reloads rather than hiding the group optimistically.
+	let groupDialog = $state<HeldMerchantGroup | null>(null);
+	let groupBusyKey = $state<string | null>(null);
+	let notice = $state<{ tone: 'success' | 'partial' | 'failed'; text: string } | null>(null);
+
+	const dialogGroupResult = (group: HeldMerchantGroup, slug: string) =>
+		bulkMutate(
+			SET_TRANSACTIONS_CATEGORY_MUTATION,
+			{ filter: groupFilter(group), categorySlug: slug },
+			'setTransactionsCategory'
+		);
+
+	async function groupDialogDone() {
+		groupDialog = null;
+		await invalidateAll();
+	}
+
+	/** Accept the LLM's unanimous proposal for the whole group, creating the category if it is new. */
+	async function acceptProposal(group: HeldMerchantGroup, path: string) {
+		groupBusyKey = group.counterpartyKey;
+		notice = null;
+		try {
+			if (needsCreating(path, data.categories)) {
+				await mutate(ENSURE_CATEGORY_MUTATION, { input: proposedCategoryInput(path) });
+			}
+			const result = await dialogGroupResult(group, path);
+			const outcome = describeResult(result);
+			notice = { tone: outcome.tone, text: `${group.displayName}: ${outcome.headline}` };
+			await invalidateAll();
+		} catch (err) {
+			notice = {
+				tone: 'failed',
+				text: `${group.displayName}: ${err instanceof Error ? err.message : 'Could not apply the suggestion.'}`
+			};
+		} finally {
+			groupBusyKey = null;
+		}
+	}
 	// A selection belongs to the filter and page it was made under.
 	const scopeKey = $derived(`${filterKey(baseFilter)}@${data.offset}`);
 	$effect(() => {
@@ -106,21 +152,17 @@
 	}
 
 	/**
-	 * "Find similar" narrows this queue to the held transactions sharing the
-	 * ticked transaction's counterparty (`?counterpartyKey=`), keeping the user
-	 * in the resolve-and-assign flow.
+	 * "Find similar" opens the ticked transaction's merchant group in the
+	 * grouped view: the group is the same set of held transactions, with the
+	 * assign-to-all action next to it.
 	 */
 	function findSimilar() {
 		if (similar.kind !== 'ready') return;
-		void goto(`?counterpartyKey=${encodeURIComponent(similar.counterpartyKey)}`);
+		void goto(reviewHref('groups', similar.counterpartyKey));
 	}
 
 	function pageHref(offset: number): string {
-		const params = new URLSearchParams();
-		if (data.counterpartyKey) params.set('counterpartyKey', data.counterpartyKey);
-		if (offset > 0) params.set('offset', String(offset));
-		const qs = params.toString();
-		return qs ? `?${qs}` : '?';
+		return offset > 0 ? `?view=flat&offset=${offset}` : reviewHref('flat');
 	}
 
 	function client() {
@@ -147,21 +189,12 @@
 	 * corrected afterwards from `/admin/categories`.
 	 */
 	async function createAndApplyProposed(transactionId: string, proposedPath: string) {
-		const segments = proposedPath.split('.');
-		const slug = proposedPath;
-		const name = segments[segments.length - 1]
-			.split('_')
-			.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
-			.join(' ');
-		const parentSlug = segments.length > 1 ? segments.slice(0, -1).join('.') : undefined;
 		// `ensureCategory`, not `createCategory`: the LLM proposes the same
 		// missing category for many held transactions, so the second approval
 		// must reuse the category the first one created rather than failing
 		// with "already exists".
-		await mutate(ENSURE_CATEGORY_MUTATION, {
-			input: { slug, name, kind: 'EXPENSE', parentSlug }
-		});
-		await setCategory(transactionId, slug);
+		await mutate(ENSURE_CATEGORY_MUTATION, { input: proposedCategoryInput(proposedPath) });
+		await setCategory(transactionId, proposedPath);
 	}
 
 	async function submitSplit(
@@ -202,30 +235,67 @@
 		</p>
 	{:else if data.reviewQueue}
 		<Card title={`Held transactions (${totalCount})`}>
-			{#if data.counterpartyKey}
-				<div
-					data-testid="similar-banner"
-					class="mb-3 flex flex-wrap items-center gap-2 rounded-md bg-slate-50 p-2 text-xs text-slate-700"
-				>
-					<span>
-						Showing only held transactions from the same counterparty (<code
-							>{data.counterpartyKey}</code
-						>).
-					</span>
+			<nav aria-label="Queue view" class="mb-3 flex items-center gap-2 text-xs">
+				{#each [{ view: 'groups', label: 'By merchant' }, { view: 'flat', label: 'All transactions' }] as option (option.view)}
 					<a
-						href="?"
-						class="focus-visible:outline-brand cursor-pointer rounded-md bg-slate-100 px-2 py-1 font-medium text-slate-700 hover:bg-slate-200 focus-visible:outline focus-visible:outline-2"
+						href={reviewHref(option.view as 'groups' | 'flat')}
+						aria-current={data.view === option.view ? 'page' : undefined}
+						class="focus-visible:outline-brand cursor-pointer rounded-md px-2 py-1 font-medium focus-visible:outline focus-visible:outline-2 {data.view ===
+						option.view
+							? 'bg-brand text-white'
+							: 'bg-slate-100 text-slate-700 hover:bg-slate-200'}"
 					>
-						Back to the whole queue
+						{option.label}
 					</a>
-				</div>
-			{/if}
-			{#if rows.length === 0}
-				<p class="text-sm text-slate-500">
-					{data.counterpartyKey
-						? 'No other held transactions from this counterparty.'
-						: 'Nothing needs review right now.'}
+				{/each}
+				{#if data.view === 'groups' && data.groups}
+					<span class="text-slate-500">{data.groups.groupCount} merchants</span>
+				{/if}
+			</nav>
+			{#if notice}
+				<p
+					role={notice.tone === 'success' ? 'status' : 'alert'}
+					data-testid="group-notice"
+					class="mb-3 rounded-md border p-2 text-xs {notice.tone === 'success'
+						? 'border-emerald-300 bg-emerald-50 text-emerald-900'
+						: 'border-amber-400 bg-amber-50 text-amber-900'}"
+				>
+					{notice.text}
 				</p>
+			{/if}
+			{#if data.view === 'groups'}
+				{#if !data.groups || data.groups.groups.length === 0}
+					<p class="text-sm text-slate-500">Nothing needs review right now.</p>
+				{:else}
+					<div class="flex flex-col gap-3">
+						{#each data.groups.groups as group (group.counterpartyKey ?? '\u0000ungrouped')}
+							{@const open =
+								group.counterpartyKey !== null && group.counterpartyKey === data.expand}
+							<HeldGroupCard
+								{group}
+								expanded={open}
+								toggleHref={reviewHref('groups', open ? null : group.counterpartyKey)}
+								flatHref={reviewHref('flat')}
+								busy={groupBusyKey === group.counterpartyKey}
+								onAssign={() => (groupDialog = group)}
+								onAccept={(path) => acceptProposal(group, path)}
+							>
+								{#each data.expandedTransactions as transaction (transaction.id)}
+									<ReviewCard
+										{transaction}
+										categories={data.categories}
+										onSetCategory={(slug) => setCategory(transaction.id, slug)}
+										onCreateAndApplyProposed={(path) =>
+											createAndApplyProposed(transaction.id, path)}
+										onOpenSplitEditor={() => (splitEditorTransaction = transaction)}
+									/>
+								{/each}
+							</HeldGroupCard>
+						{/each}
+					</div>
+				{/if}
+			{:else if rows.length === 0}
+				<p class="text-sm text-slate-500">Nothing needs review right now.</p>
 			{:else}
 				<div class="flex flex-col gap-3">
 					<label class="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
@@ -342,6 +412,21 @@
 		</Card>
 	{/if}
 </div>
+
+{#if groupDialog}
+	{@const group = groupDialog}
+	<BulkEditDialog
+		kind="category"
+		count={group.heldCount}
+		splits={{ count: 0, exact: false }}
+		categories={data.categories}
+		note={`All ${group.heldCount} held transaction${group.heldCount === 1 ? '' : 's'} from ${group.displayName}. ${dialogNote}`}
+		onApplyCategory={(slug) => dialogGroupResult(group, slug)}
+		onApplyTags={() => Promise.reject(new Error('Tags are not edited per merchant group.'))}
+		ondone={groupDialogDone}
+		onclose={() => (groupDialog = null)}
+	/>
+{/if}
 
 {#if bulkKind}
 	<BulkEditDialog
