@@ -570,3 +570,71 @@ async fn cashflow_graph_category_dimension_conserves_flow_and_links_to_labelled_
     );
     assert!(nodes.iter().any(|n| n["kind"] == "CATEGORY"));
 }
+
+/// `uncategorized` means "no category assigned", not "no label row". A
+/// transaction labelled while the taxonomy was empty has a row with a NULL
+/// `category_id`: it renders as "—" and must be findable. The old predicate
+/// tested for the absence of the row itself, so on real data — where every
+/// transaction has a row — filtering for Uncategorized returned nothing while
+/// the category breakdown reported a large uncategorised total.
+#[tokio::test]
+async fn uncategorized_filter_means_no_category_not_no_label_row() {
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "uncat-filter-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Uncategorized filter account").await;
+    common::link(&db, user, account).await;
+    let (groceries, _) = common::seed_category(&db, "groceries", "Groceries", "expense").await;
+
+    // No label row at all.
+    let no_row = common::seed_transaction(&db, account, "2024-08-01", "-10.00", Some("No row")).await;
+    // A label row whose category is NULL — the case that was invisible.
+    let null_cat = common::seed_transaction(&db, account, "2024-08-02", "-20.00", Some("Null cat")).await;
+    common::seed_transaction_label(&db, null_cat, None, "llm", "resolved").await;
+    // Properly categorised.
+    let categorised =
+        common::seed_transaction(&db, account, "2024-08-03", "-30.00", Some("Categorised")).await;
+    common::seed_transaction_label(&db, categorised, Some(groceries), "llm", "resolved").await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "uncat-filter-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    let ids_for = |uncategorized: bool, caller: AuthenticatedUser| {
+        let schema = schema.clone();
+        async move {
+            let query = format!(
+                r#"{{ transactions(filter: {{ startDate: "2024-08-01", endDate: "2024-08-03",
+                     uncategorized: {uncategorized} }}) {{ items {{ id }} }} }}"#
+            );
+            let response = schema.execute(authed(Request::new(query), Some(caller))).await;
+            assert!(response.errors.is_empty(), "{:?}", response.errors);
+            let data = response.data.into_json().unwrap();
+            data["transactions"]["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t["id"].as_str().unwrap().to_string())
+                .collect::<Vec<String>>()
+        }
+    };
+
+    let mut uncategorised = ids_for(true, caller.clone()).await;
+    uncategorised.sort();
+    let mut expected = vec![no_row.to_string(), null_cat.to_string()];
+    expected.sort();
+    assert_eq!(
+        uncategorised, expected,
+        "both the missing row and the NULL category must count as uncategorised"
+    );
+
+    let categorised_ids = ids_for(false, caller).await;
+    assert_eq!(
+        categorised_ids,
+        vec![categorised.to_string()],
+        "uncategorized: false must select only rows that really have a category"
+    );
+}

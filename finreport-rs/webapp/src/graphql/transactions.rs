@@ -173,11 +173,41 @@ pub async fn build_condition_with_category_filters(
         let ids = category_descendant_ids(db, slugs).await?;
         condition = condition.add(category_match_condition(&ids));
     }
-    if filter.uncategorized == Some(true) {
-        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
-            "NOT EXISTS (SELECT 1 FROM transaction_label tl WHERE tl.transaction_id = transaction.id)",
-            Vec::<sea_orm::Value>::new(),
-        ));
+    // `uncategorized` means **no category assigned**, which is what a user
+    // means by it — not "no label row", which is what this used to test. A
+    // transaction labelled while the taxonomy was empty has a row whose
+    // `category_id` is NULL: it displays as "—" and is uncategorised in every
+    // sense, but the old predicate excluded it, so filtering for
+    // Uncategorized returned nothing while `breakdown.rs` (which buckets on
+    // "has no category") reported a large Uncategorized total. Two
+    // definitions of one word; this is now the breakdown's.
+    //
+    // A split transaction is *not* uncategorised: its categories live on the
+    // parts, so `transaction_label.category_id` is legitimately NULL for it
+    // (the labeler's split branch resolves to source=user with no category).
+    // Valid splits therefore count as categorised, matching
+    // `projection::labeling::find_valid_splits`' notion of a split that counts.
+    //
+    // `needsReview` stays separate: a held label and a missing category are
+    // different states (iteration 2 spec §5).
+    const HAS_CATEGORY: &str = "(EXISTS (SELECT 1 FROM transaction_label tl \
+         WHERE tl.transaction_id = transaction.id AND tl.category_id IS NOT NULL) \
+         OR EXISTS (SELECT 1 FROM transaction_split ts \
+         WHERE ts.transaction_id = transaction.id AND ts.invalid = false))";
+    match filter.uncategorized {
+        Some(true) => {
+            condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+                &format!("NOT {HAS_CATEGORY}"),
+                Vec::<sea_orm::Value>::new(),
+            ));
+        }
+        Some(false) => {
+            condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+                HAS_CATEGORY,
+                Vec::<sea_orm::Value>::new(),
+            ));
+        }
+        None => {}
     }
     if filter.needs_review == Some(true) {
         condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
