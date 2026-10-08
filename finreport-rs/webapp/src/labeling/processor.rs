@@ -82,8 +82,9 @@ pub struct LabelingOps {
 
 impl LabelingOps {
     /// Wires the real WP2 functions, capturing `APP_rule_learn_min_observations`/
-    /// `APP_rule_auto_approve_threshold` for `learn::consider`.
-    pub fn real(min_observations: u32, auto_approve_threshold: f32) -> Self {
+    /// `APP_rule_learn_min_user_observations`/`APP_rule_auto_approve_threshold`
+    /// for `learn::consider`.
+    pub fn real(min_observations: u32, min_user_observations: u32, auto_approve_threshold: f32) -> Self {
         Self {
             normalize: Box::new(|counterparty, description| {
                 normalize::normalize(counterparty, description)
@@ -104,7 +105,7 @@ impl LabelingOps {
                 rules::most_specific_match(rules_slice, input).cloned()
             }),
             consider: Box::new(move |observations| {
-                learn::consider(observations, min_observations, auto_approve_threshold)
+                learn::consider(observations, min_observations, min_user_observations, auto_approve_threshold)
             }),
         }
     }
@@ -456,17 +457,10 @@ pub async fn resolve_transaction(
     }
 
     // 4/5. LLM cache, then the LLM itself.
-    let normalized_counterparty = (ops.normalize)(txn.counterparty_name.as_deref(), None);
-    let normalized_description = (ops.normalize)(None, txn.description.as_deref());
-    let direction = transaction_direction(txn.amount);
-    let fp = (ops.fingerprint)(
-        provider.id(),
-        provider.model(),
-        prompt_version,
-        &normalized_counterparty,
-        &normalized_description,
-        direction,
-    );
+    let key_inputs = cache_key_inputs(ops, txn);
+    let fp = cache_fingerprint(ops, provider, prompt_version, &key_inputs);
+    let CacheKeyInputs { counterparty: normalized_counterparty, description: normalized_description, .. } =
+        key_inputs;
 
     if let Some(cached) = proj::find_cache(db, &fp).await? {
         if cache_entry_is_usable(&cached, catalog) {
@@ -555,6 +549,70 @@ pub async fn resolve_transaction(
         &fp,
         llm_min_confidence,
     )))
+}
+
+/// The transaction-derived inputs of the `llm_label_cache` fingerprint.
+struct CacheKeyInputs {
+    counterparty: String,
+    description: String,
+    direction: Direction,
+}
+
+fn cache_key_inputs(ops: &LabelingOps, txn: &TransactionForLabeling) -> CacheKeyInputs {
+    CacheKeyInputs {
+        counterparty: (ops.normalize)(txn.counterparty_name.as_deref(), None),
+        description: (ops.normalize)(None, txn.description.as_deref()),
+        direction: transaction_direction(txn.amount),
+    }
+}
+
+/// The one place the cache fingerprint is assembled, shared by the lookup in
+/// [`resolve_transaction`] and the invalidation in [`label_one_transaction`]
+/// so the two can never disagree on which entry a transaction maps to.
+fn cache_fingerprint(
+    ops: &LabelingOps,
+    provider: &dyn LabelProvider,
+    prompt_version: &str,
+    inputs: &CacheKeyInputs,
+) -> String {
+    (ops.fingerprint)(
+        provider.id(),
+        provider.model(),
+        prompt_version,
+        &inputs.counterparty,
+        &inputs.description,
+        inputs.direction,
+    )
+}
+
+/// Drops the `llm_label_cache` entry for `txn`'s fingerprint when it holds an
+/// answer the human just contradicted, so a sibling with the same fingerprint
+/// is no longer served the rejected LLM answer for free.
+///
+/// Deleted rather than rewritten with the user's category: a cache row's key
+/// asserts "this provider/model/prompt version said X", and a human decision
+/// stored there would make that key lie. The learned rule (Change 1, ahead of
+/// the cache in the chain) is what carries the human decision to siblings.
+/// An entry that agrees with the user is kept (still correct, still free).
+/// Returns whether an entry was removed.
+pub async fn invalidate_contradicted_cache_entry(
+    db: &impl ConnectionTrait,
+    ops: &LabelingOps,
+    provider: &dyn LabelProvider,
+    prompt_version: &str,
+    txn: &TransactionForLabeling,
+    user_category_id: Uuid,
+) -> Result<bool, DbErr> {
+    let fp = cache_fingerprint(ops, provider, prompt_version, &cache_key_inputs(ops, txn));
+    let Some(cached) = proj::find_cache(db, &fp).await? else {
+        return Ok(false);
+    };
+    if cached.category_id == Some(user_category_id) {
+        return Ok(false);
+    }
+    proj::project_llm_cache(db, &fp, None).await?;
+    info!(transaction_id = %txn.id, fingerprint = %fp, "labeler: dropped llm-cache entry contradicted by a user override");
+    Ok(true)
 }
 
 /// A provider answer after checking its slug against the catalog.
@@ -734,10 +792,11 @@ pub async fn maybe_learn_rule(
     let observations = proj::observations_for_counterparty_key(db, counterparty_key).await?;
     let observations: Vec<Observation<'_>> = observations
         .iter()
-        .map(|(slug, confidence)| Observation {
+        .map(|o| Observation {
             counterparty_key,
-            category_slug: slug.as_str(),
-            confidence: *confidence,
+            category_slug: o.category_slug.as_str(),
+            confidence: o.confidence,
+            user_confirmed: o.user_confirmed,
         })
         .collect();
 
@@ -893,6 +952,12 @@ pub async fn label_one_transaction(
 
     let record = build_label_record(db, txn, &resolved).await?;
     publish_and_project_label(db, publisher, txn, &record).await?;
+
+    if resolved.source == LabelSource::User
+        && let Some(user_category_id) = resolved.category_id
+    {
+        invalidate_contradicted_cache_entry(db, ops, provider, prompt_version, txn, user_category_id).await?;
+    }
 
     if matches!(
         resolved.source,

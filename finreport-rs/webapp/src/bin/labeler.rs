@@ -94,6 +94,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         categorizer::factory::build_provider(&settings)?;
     let ops = LabelingOps::real(
         settings.rule_learn_min_observations,
+        settings.rule_learn_min_user_observations,
         settings.rule_auto_approve_threshold,
     );
 

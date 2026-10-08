@@ -743,7 +743,16 @@ pub async fn find_transaction_by_source(
     .await
 }
 
-/// Every (category slug, confidence) pair labelled `user`/`llm`/`llm-cache`
+/// One label observed for a `counterparty_key`, as the rule learner sees it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CounterpartyObservation {
+    pub category_slug: String,
+    pub confidence: f32,
+    /// `true` for a `label_source = 'user'` label (a human decision).
+    pub user_confirmed: bool,
+}
+
+/// Every observation (category slug, confidence, whether human) labelled `user`/`llm`/`llm-cache`
 /// (never `rule` — §2.8 "a rule's own output must not justify itself") for
 /// transactions sharing `counterparty_key`, for `labeling::learn::consider`
 /// to weigh. A user label's confidence is reported as `1.0` regardless of
@@ -751,7 +760,7 @@ pub async fn find_transaction_by_source(
 pub async fn observations_for_counterparty_key(
     db: &impl ConnectionTrait,
     counterparty_key: &str,
-) -> Result<Vec<(String, f32)>, DbErr> {
+) -> Result<Vec<CounterpartyObservation>, DbErr> {
     let transaction_ids: Vec<Uuid> = transaction::Entity::find()
         .filter(transaction::Column::CounterpartyKey.eq(counterparty_key))
         .all(db)
@@ -783,12 +792,13 @@ pub async fn observations_for_counterparty_key(
         .filter_map(|l| {
             let category_id = l.category_id?;
             let slug = slug_by_id.get(&category_id)?.clone();
-            let confidence = if l.label_source == "user" {
+            let user_confirmed = l.label_source == "user";
+            let confidence = if user_confirmed {
                 1.0
             } else {
                 l.confidence.and_then(|d| d.to_string().parse().ok()).unwrap_or(0.0)
             };
-            Some((slug, confidence))
+            Some(CounterpartyObservation { category_slug: slug, confidence, user_confirmed })
         })
         .collect())
 }

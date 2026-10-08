@@ -23,6 +23,7 @@ use entity::entities::{account, transaction, transaction_label};
 use rust_decimal::Decimal;
 use sea_orm::{ActiveModelTrait, ActiveValue::Set, EntityTrait};
 use std::str::FromStr;
+use categorizer::provider::LabelProvider as _;
 use support::{TestKafka, TestPostgres};
 use uuid::Uuid;
 use webapp::kafka::labeling::category_uuid;
@@ -380,7 +381,7 @@ async fn a_matching_rule_wins_over_the_llm_tier() {
     .expect("seed rule");
 
     let catalog = proj::build_catalog(&db).await.expect("build catalog");
-    let ops = LabelingOps::real(3, 0.9);
+    let ops = LabelingOps::real(3, 1, 0.9);
     let cost_guard = CostGuard::new(10);
 
     struct PanicProvider;
@@ -450,7 +451,7 @@ async fn repeated_llm_agreement_learns_a_rule() {
     // confidence for a keyword hit is high enough to clear the bar once
     // three agreeing observations land (§2.8 "confidence = min of the
     // underlying confidences").
-    let ops = LabelingOps::real(3, 0.9);
+    let ops = LabelingOps::real(3, 1, 0.9);
     let cost_guard = CostGuard::new(10);
 
     for i in 0..3 {
@@ -504,7 +505,7 @@ async fn differently_formatted_counterparties_share_a_normalized_key() {
     seed_categories(&db, &["uncategorized", "personal.gym"]).await;
     let catalog = proj::build_catalog(&db).await.expect("build catalog");
     let provider = categorizer::provider::fake::FakeProvider::new();
-    let ops = LabelingOps::real(3, 0.9);
+    let ops = LabelingOps::real(3, 1, 0.9);
     let cost_guard = CostGuard::new(10);
 
     let txn_a = seed_transaction(&db, "KEY-TEST-A", "FITNESS FIRST GMBH").await;
@@ -559,7 +560,7 @@ async fn each_sweep_gets_a_fresh_llm_budget_and_exhaustion_leaves_rows_unlabelle
     seed_categories(&db, &["uncategorized", "personal.gym"]).await;
     let catalog = proj::build_catalog(&db).await.expect("build catalog");
     let provider = categorizer::provider::fake::FakeProvider::new();
-    let ops = LabelingOps::real(3, 0.9);
+    let ops = LabelingOps::real(3, 1, 0.9);
     let guard = CostGuard::new(1);
 
     for (i, name) in ["Fitness First", "Lidl Sagt Danke", "Netflix International"].iter().enumerate() {
@@ -574,6 +575,246 @@ async fn each_sweep_gets_a_fresh_llm_budget_and_exhaustion_leaves_rows_unlabelle
         assert_eq!(
             labelled, expected_labelled,
             "a budget of 1 labels exactly one more transaction per sweep"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A human decision propagates to similar transactions
+// ---------------------------------------------------------------------------
+
+struct PanicProvider;
+#[async_trait::async_trait]
+impl categorizer::provider::LabelProvider for PanicProvider {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+    fn model(&self) -> &str {
+        "fake-v1"
+    }
+    async fn suggest(
+        &self,
+        _req: &categorizer::provider::LabelRequest<'_>,
+    ) -> Result<categorizer::provider::LabelSuggestion, categorizer::provider::ProviderError> {
+        panic!("a sibling must be served by the rule, never by a fresh LLM call");
+    }
+}
+
+struct CountingProvider(std::sync::atomic::AtomicU32);
+#[async_trait::async_trait]
+impl categorizer::provider::LabelProvider for CountingProvider {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+    fn model(&self) -> &str {
+        "fake-v1"
+    }
+    async fn suggest(
+        &self,
+        _req: &categorizer::provider::LabelRequest<'_>,
+    ) -> Result<categorizer::provider::LabelSuggestion, categorizer::provider::ProviderError> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(categorizer::provider::LabelSuggestion {
+            category_slug: Some("personal.gym".to_string()),
+            proposed_path: None,
+            confidence: 0.9,
+            ambiguous: false,
+            reasoning: None,
+        })
+    }
+}
+
+/// Seeds a "Fitness First" transaction with its `counterparty_key` already set.
+async fn seed_fitness_first(db: &sea_orm::DatabaseConnection, external_id: &str) -> TransactionForLabeling {
+    let mut txn = seed_transaction(db, external_id, "Fitness First").await;
+    let key = webapp::labeling::normalize::normalize(txn.counterparty_name.as_deref(), None);
+    proj::set_counterparty_key(db, txn.id, &key).await.expect("set counterparty key");
+    txn.counterparty_key = Some(key);
+    txn
+}
+
+fn user_override(txn: &TransactionForLabeling, slug: &str) -> webapp::kafka::labeling::UserLabelRecord {
+    webapp::kafka::labeling::UserLabelRecord {
+        schema_version: webapp::kafka::labeling::CURRENT_SCHEMA_VERSION,
+        source: txn.source.clone(),
+        external_id: txn.external_id.clone(),
+        category_slug: Some(slug.to_string()),
+        parts: Vec::new(),
+        tags: Vec::new(),
+        recurring: None,
+        revision: Utc::now(),
+        note: None,
+    }
+}
+
+/// The fingerprint the labeler computes for a "Fitness First" debit under the
+/// `FakeProvider` and `test-prompt-v1`.
+fn fitness_first_fingerprint() -> String {
+    webapp::labeling::fingerprint::fingerprint(
+        "fake",
+        categorizer::provider::fake::FakeProvider::new().model(),
+        "test-prompt-v1",
+        &webapp::labeling::normalize::normalize(Some("Fitness First"), None),
+        &webapp::labeling::normalize::normalize(None, None),
+        webapp::labeling::fingerprint::Direction::Debit,
+    )
+}
+
+/// The whole point: the user corrects one transaction; the sibling that
+/// previously would have been served the LLM's rejected answer from the cache
+/// now resolves, through the real chain and with no LLM call, to the user's
+/// category.
+#[tokio::test]
+async fn a_user_override_makes_a_sibling_resolve_to_the_users_category() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(3, 1, 0.9);
+    let cost_guard = CostGuard::new(10);
+    let fp = fitness_first_fingerprint();
+
+    // 1. The LLM labels the first transaction "personal.gym" and caches it.
+    let corrected = seed_fitness_first(&db, "PROPAGATE-A").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &corrected)
+        .await
+        .expect("llm label");
+    let cached = proj::find_cache(&db, &fp).await.expect("find cache").expect("the LLM answer is cached");
+    assert_eq!(cached.category_id, Some(category_uuid("personal.gym")));
+    assert!(proj::find_rule(&db, webapp::kafka::labeling::learned_rule_uuid(
+        &webapp::labeling::normalize::normalize(Some("Fitness First"), None), "personal.gym")).await.unwrap().is_none(),
+        "one LLM observation must not learn a rule");
+
+    // 2. The human says it is a restaurant.
+    proj::project_user_label(&db, corrected.id, Some(user_override(&corrected, "food.restaurants")))
+        .await
+        .expect("project user label");
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &corrected)
+        .await
+        .expect("user override resolves");
+
+    assert!(
+        proj::find_cache(&db, &fp).await.expect("find cache").is_none(),
+        "the contradicted cache entry must be dropped"
+    );
+    let key = webapp::labeling::normalize::normalize(Some("Fitness First"), None);
+    let rule = proj::find_rule(&db, webapp::kafka::labeling::learned_rule_uuid(&key, "food.restaurants"))
+        .await
+        .expect("find rule")
+        .expect("one user decision learns a rule");
+    assert_eq!(rule.state, webapp::kafka::labeling::RuleState::Active, "confidence 1.0 auto-approves");
+
+    // 3. A sibling resolves to the user's category; the provider would panic.
+    let sibling = seed_fitness_first(&db, "PROPAGATE-B").await;
+    label_one_transaction(&db, &publisher, &ops, &PanicProvider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &sibling)
+        .await
+        .expect("sibling resolves via the rule");
+    let label = transaction_label::Entity::find_by_id(sibling.id).one(&db).await.unwrap().expect("sibling label");
+    assert_eq!(label.label_source, "rule");
+    assert_eq!(label.category_id, Some(category_uuid("food.restaurants")));
+    assert_eq!(label.rule_id, Some(rule.id));
+}
+
+/// With no rule able to form, the invalidation alone still stops the stale
+/// answer being served from the cache: the sibling is re-asked (one provider
+/// call), not handed the rejected entry.
+#[tokio::test]
+async fn a_user_override_drops_the_stale_cache_entry_even_without_a_rule() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    // A learner that never fires isolates Change 2 from Change 1.
+    let ops = LabelingOps::real(u32::MAX, u32::MAX, 0.9);
+    let cost_guard = CostGuard::new(10);
+    let fp = fitness_first_fingerprint();
+
+    let corrected = seed_fitness_first(&db, "NORULE-A").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &corrected)
+        .await
+        .expect("llm label");
+    assert!(proj::find_cache(&db, &fp).await.unwrap().is_some());
+
+    proj::project_user_label(&db, corrected.id, Some(user_override(&corrected, "food.restaurants")))
+        .await
+        .unwrap();
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &corrected)
+        .await
+        .unwrap();
+    assert!(proj::find_cache(&db, &fp).await.unwrap().is_none(), "stale entry dropped");
+
+    // The sibling is no longer served from the cache: it costs a provider call.
+    let counting = CountingProvider(std::sync::atomic::AtomicU32::new(0));
+    let sibling = seed_fitness_first(&db, "NORULE-B").await;
+    label_one_transaction(&db, &publisher, &ops, &counting, &catalog, "test-prompt-v1", 0.0, &cost_guard, &sibling)
+        .await
+        .expect("sibling resolves");
+    assert_eq!(counting.0.load(std::sync::atomic::Ordering::SeqCst), 1, "re-asked, not served the stale entry");
+}
+
+/// An entry that agrees with the human is still correct and stays cached.
+#[tokio::test]
+async fn a_user_override_that_agrees_with_the_cache_keeps_it() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(u32::MAX, u32::MAX, 0.9);
+    let cost_guard = CostGuard::new(10);
+
+    let txn = seed_fitness_first(&db, "AGREE-A").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+        .await
+        .unwrap();
+    proj::project_user_label(&db, txn.id, Some(user_override(&txn, "personal.gym"))).await.unwrap();
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+        .await
+        .unwrap();
+    assert!(proj::find_cache(&db, &fitness_first_fingerprint()).await.unwrap().is_some());
+}
+
+/// Two humans putting one counterparty in two categories is not a rule, even
+/// though each decision alone would be enough at the default threshold of 1.
+/// (`min_user_observations = 2` here so the first decision does not already
+/// publish a rule before the conflict exists; the pure conflict rule at the
+/// default is covered in `labeling::learn`'s unit tests.)
+#[tokio::test]
+async fn conflicting_user_decisions_learn_no_rule() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(3, 2, 0.9);
+    let cost_guard = CostGuard::new(10);
+
+    for (id, slug) in [("CONFLICT-A", "food.restaurants"), ("CONFLICT-B", "personal.gym")] {
+        let txn = seed_fitness_first(&db, id).await;
+        proj::project_user_label(&db, txn.id, Some(user_override(&txn, slug))).await.unwrap();
+        label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+            .await
+            .unwrap();
+    }
+    let key = webapp::labeling::normalize::normalize(Some("Fitness First"), None);
+    for slug in ["food.restaurants", "personal.gym"] {
+        assert!(
+            proj::find_rule(&db, webapp::kafka::labeling::learned_rule_uuid(&key, slug)).await.unwrap().is_none(),
+            "no rule for {slug}"
         );
     }
 }

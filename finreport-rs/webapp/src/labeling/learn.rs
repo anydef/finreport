@@ -19,6 +19,8 @@ pub struct Observation<'a> {
     /// `1.0` for a user-confirmed label (§2.8), the LLM's own confidence
     /// otherwise.
     pub confidence: f32,
+    /// `true` for a human decision (`label_source = 'user'`).
+    pub user_confirmed: bool,
 }
 
 /// A candidate learned rule, not yet published.
@@ -35,35 +37,59 @@ pub struct LearnedRule {
 /// Decides whether `observations` (all sharing one `counterparty_key`) should
 /// become a learned rule, and whether it auto-approves.
 ///
-/// - Fewer than `min_observations` ⇒ `None` (not yet a candidate).
-/// - Any two observations naming different `category_slug`s ⇒ `None` — a
-///   conflicting history disqualifies the candidate outright, it is never
-///   written as `in_review` either (§2.8).
-/// - Otherwise, confidence is the **minimum** of every observation's
-///   confidence (never an average — one weak link disqualifies the
-///   candidate's auto-approval, it does not get diluted away), and
-///   `auto_approved` is set at `confidence >= auto_approve_threshold`,
+/// - **Human evidence dominates.** If any observation is `user_confirmed`:
+///   user decisions naming different categories => `None` (a conflicting
+///   human history is not a rule, and is never written as `in_review`
+///   either); otherwise the user's category is the candidate, and LLM
+///   observations naming some *other* category are discarded as the guesses
+///   the human just overruled (counting them as conflict would let a wrong
+///   LLM answer veto the very correction that rejects it). It qualifies at
+///   `min_user_observations` user decisions, with confidence taken from the
+///   user observations only (1.0), or failing that via the LLM threshold
+///   over every agreeing observation.
+/// - **LLM-only evidence**: fewer than `min_observations` => `None`; any two
+///   observations naming different `category_slug`s => `None`; confidence is
+///   the **minimum** over all observations (never an average).
+/// - `auto_approved` is set at `confidence >= auto_approve_threshold`,
 ///   inclusive at the boundary.
 pub fn consider(
     observations: &[Observation<'_>],
     min_observations: u32,
+    min_user_observations: u32,
     auto_approve_threshold: f32,
 ) -> Option<LearnedRule> {
-    if (observations.len() as u32) < min_observations {
-        return None;
-    }
     let first = observations.first()?;
     let counterparty_key = first.counterparty_key;
-    let category_slug = first.category_slug;
 
-    if observations
-        .iter()
-        .any(|o| o.category_slug != category_slug)
-    {
-        return None;
-    }
+    let user: Vec<&Observation<'_>> = observations.iter().filter(|o| o.user_confirmed).collect();
+    let (category_slug, evidence): (&str, Vec<&Observation<'_>>) = if let Some(first_user) = user.first() {
+        let category_slug = first_user.category_slug;
+        if user.iter().any(|o| o.category_slug != category_slug) {
+            return None;
+        }
+        let agreeing: Vec<&Observation<'_>> = observations
+            .iter()
+            .filter(|o| o.category_slug == category_slug)
+            .collect();
+        if (user.len() as u32) >= min_user_observations {
+            (category_slug, user)
+        } else if (agreeing.len() as u32) >= min_observations {
+            (category_slug, agreeing)
+        } else {
+            return None;
+        }
+    } else {
+        if (observations.len() as u32) < min_observations {
+            return None;
+        }
+        let category_slug = first.category_slug;
+        if observations.iter().any(|o| o.category_slug != category_slug) {
+            return None;
+        }
+        (category_slug, observations.iter().collect())
+    };
 
-    let confidence = observations
+    let confidence = evidence
         .iter()
         .map(|o| o.confidence)
         .fold(f32::INFINITY, f32::min);
@@ -117,6 +143,7 @@ mod tests {
     use uuid::Uuid;
 
     const MIN_OBSERVATIONS: u32 = 3;
+    const MIN_USER_OBSERVATIONS: u32 = 1;
     const THRESHOLD: f32 = 0.9;
 
     fn obs<'a>(category_slug: &'a str, confidence: f32) -> Observation<'a> {
@@ -124,14 +151,64 @@ mod tests {
             counterparty_key: "lidl",
             category_slug,
             confidence,
+            user_confirmed: false,
         }
+    }
+
+    fn user_obs<'a>(category_slug: &'a str) -> Observation<'a> {
+        Observation { user_confirmed: true, ..obs(category_slug, 1.0) }
+    }
+
+    #[test]
+    fn a_single_user_decision_is_a_candidate_and_auto_approves() {
+        let candidate = consider(&[user_obs("food.groceries")], MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD).unwrap();
+        assert_eq!(candidate.category_slug, "food.groceries");
+        assert_eq!(candidate.confidence, 1.0);
+        assert!(candidate.auto_approved);
+    }
+
+    #[test]
+    fn a_single_llm_observation_is_still_not_a_candidate() {
+        assert_eq!(consider(&[obs("food.groceries", 1.0)], MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD), None);
+    }
+
+    #[test]
+    fn conflicting_user_decisions_disqualify_even_when_each_alone_would_qualify() {
+        let observations = vec![user_obs("food.groceries"), user_obs("food.restaurants")];
+        assert_eq!(consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD), None);
+    }
+
+    #[test]
+    fn a_user_decision_overrules_disagreeing_llm_guesses() {
+        let observations = vec![
+            obs("food.restaurants", 0.95),
+            obs("food.restaurants", 0.95),
+            user_obs("food.groceries"),
+        ];
+        let candidate = consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD).unwrap();
+        assert_eq!(candidate.category_slug, "food.groceries");
+        assert_eq!(candidate.confidence, 1.0);
+    }
+
+    #[test]
+    fn a_higher_user_threshold_needs_more_user_decisions_or_llm_agreement() {
+        let one_user = vec![user_obs("food.groceries")];
+        assert_eq!(consider(&one_user, MIN_OBSERVATIONS, 2, THRESHOLD), None);
+        let two_users = vec![user_obs("food.groceries"), user_obs("food.groceries")];
+        assert!(consider(&two_users, MIN_OBSERVATIONS, 2, THRESHOLD).is_some());
+        // One user + two agreeing LLM guesses reaches the LLM threshold of 3,
+        // at the weakest confidence among them.
+        let mixed = vec![user_obs("food.groceries"), obs("food.groceries", 0.8), obs("food.groceries", 0.95)];
+        let candidate = consider(&mixed, MIN_OBSERVATIONS, 2, THRESHOLD).unwrap();
+        assert_eq!(candidate.confidence, 0.8);
+        assert!(!candidate.auto_approved);
     }
 
     #[test]
     fn fewer_than_min_observations_is_not_a_candidate() {
         let observations = vec![obs("food.groceries", 1.0), obs("food.groceries", 1.0)];
         assert_eq!(
-            consider(&observations, MIN_OBSERVATIONS, THRESHOLD),
+            consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD),
             None,
             "N-1 observations must not yield a candidate"
         );
@@ -144,7 +221,7 @@ mod tests {
             obs("food.groceries", 1.0),
             obs("food.groceries", 1.0),
         ];
-        let candidate = consider(&observations, MIN_OBSERVATIONS, THRESHOLD).unwrap();
+        let candidate = consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD).unwrap();
         assert_eq!(candidate.category_slug, "food.groceries");
         assert_eq!(candidate.confidence, 1.0);
         assert!(candidate.auto_approved);
@@ -158,13 +235,13 @@ mod tests {
             obs("food.restaurants", 1.0),
             obs("food.groceries", 1.0),
         ];
-        assert_eq!(consider(&observations, MIN_OBSERVATIONS, THRESHOLD), None);
+        assert_eq!(consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD), None);
     }
 
     #[test]
     fn confidence_is_the_minimum_not_the_average() {
         let observations = vec![obs("food.groceries", 0.95), obs("food.groceries", 0.6), obs("food.groceries", 0.99)];
-        let candidate = consider(&observations, MIN_OBSERVATIONS, THRESHOLD).unwrap();
+        let candidate = consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD).unwrap();
         assert_eq!(candidate.confidence, 0.6);
         assert!(!candidate.auto_approved);
     }
@@ -174,7 +251,7 @@ mod tests {
         // Three user confirmations (confidence 1.0 each, per the caller's
         // convention) give confidence 1.0, auto-approved.
         let observations = vec![obs("food.groceries", 1.0), obs("food.groceries", 1.0), obs("food.groceries", 1.0)];
-        let candidate = consider(&observations, MIN_OBSERVATIONS, THRESHOLD).unwrap();
+        let candidate = consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD).unwrap();
         assert_eq!(candidate.confidence, 1.0);
         assert!(candidate.auto_approved);
     }
@@ -182,7 +259,7 @@ mod tests {
     #[test]
     fn auto_approve_threshold_is_inclusive_at_exactly_0_9() {
         let observations = vec![obs("food.groceries", 0.9), obs("food.groceries", 0.95), obs("food.groceries", 0.99)];
-        let candidate = consider(&observations, MIN_OBSERVATIONS, THRESHOLD).unwrap();
+        let candidate = consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD).unwrap();
         assert_eq!(candidate.confidence, 0.9);
         assert!(candidate.auto_approved, "0.9 must auto-approve, inclusive");
     }
@@ -190,7 +267,7 @@ mod tests {
     #[test]
     fn just_below_auto_approve_threshold_stays_in_review() {
         let observations = vec![obs("food.groceries", 0.899_999), obs("food.groceries", 1.0), obs("food.groceries", 1.0)];
-        let candidate = consider(&observations, MIN_OBSERVATIONS, THRESHOLD).unwrap();
+        let candidate = consider(&observations, MIN_OBSERVATIONS, MIN_USER_OBSERVATIONS, THRESHOLD).unwrap();
         assert!(!candidate.auto_approved);
     }
 

@@ -164,6 +164,13 @@ pub struct Settings {
     /// becomes a learned-rule candidate (§2.8).
     #[serde(default = "default_rule_learn_min_observations")]
     pub rule_learn_min_observations: u32,
+    /// Minimum *user-confirmed* same-category observations before a
+    /// `counterparty_key` becomes a learned-rule candidate. A human decision
+    /// is stronger evidence than an LLM guess, so the default is 1 (the
+    /// LLM-only threshold above is untouched). Conflicting user decisions
+    /// still disqualify the candidate.
+    #[serde(default = "default_rule_learn_min_user_observations")]
+    pub rule_learn_min_user_observations: u32,
     /// Confidence threshold (inclusive) above which a learned rule is
     /// auto-approved rather than surfaced in the review queue (§2.8).
     #[serde(default = "default_rule_auto_approve_threshold")]
@@ -616,6 +623,12 @@ fn default_rule_learn_min_observations() -> u32 {
     3
 }
 
+/// `APP_rule_learn_min_user_observations` default: one human decision is
+/// enough to learn a rule.
+fn default_rule_learn_min_user_observations() -> u32 {
+    1
+}
+
 /// `APP_rule_auto_approve_threshold` default (§2.8, §4), inclusive at the
 /// boundary.
 fn default_rule_auto_approve_threshold() -> f32 {
@@ -692,6 +705,19 @@ mod test {
             ("APP_url", "https://api.comdirect.de/api"),
             ("APP_save_file_path", ".session.json"),
         ]
+    }
+
+    #[test]
+    fn rule_learn_min_user_observations_defaults_to_one() {
+        assert_eq!(settings_from(&base_vars()).rule_learn_min_user_observations, 1);
+        assert_eq!(settings_from(&base_vars()).rule_learn_min_observations, 3);
+    }
+
+    #[test]
+    fn rule_learn_min_user_observations_is_read_from_env() {
+        let mut vars = base_vars();
+        vars.push(("APP_rule_learn_min_user_observations", "2"));
+        assert_eq!(settings_from(&vars).rule_learn_min_user_observations, 2);
     }
 
     #[test]

@@ -83,6 +83,7 @@ fn dummy_settings() -> Arc<Settings> {
         llm_max_requests_per_run: 200,
         prompt_version: "2".to_string(),
         rule_learn_min_observations: 3,
+        rule_learn_min_user_observations: 1,
         rule_auto_approve_threshold: 0.9,
         labeler_max_projection_lag: 0,
         labeler_sweep_interval_secs: 3600,
