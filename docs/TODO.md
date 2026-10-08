@@ -19,53 +19,65 @@ See `docs/runbooks/iteration-1-deploy.md`.
 Agreed work, in priority order. Feature requests land in the Backlog below
 first; they move up here only once their priority is settled.
 
-**Done 2026-10-08** — the categorisation/tagging/browsability batch:
+**In progress (2026-10-08), making the tool natural to use rather than merely
+complete:**
 
-1. ~~Spending by category excludes income and savings~~ — the dashboard now
-   asks `categoryBreakdown` for `kind: EXPENSE`.
-2. ~~Rolling 30-day period~~ — "Last 30 days", distinct from "This month",
-   which was already month-to-date.
-3. ~~Make the labeler able to clear a backlog~~ — `APP_llm_max_requests_per_run`
-   defaulted to 200 *per process* and was never reset, and the long-running
-   labeler only swept at startup, so it went silent after 200 uncached calls
-   until someone restarted the container. It now sweeps on a timer
-   (`APP_labeler_sweep_interval_secs`, default hourly), refills per sweep, and
-   defaults to **no cap** (0 = unlimited). Sweeps and live records have
-   separate budgets so neither starves the other.
-4. ~~`uncategorized` means no category, not no label row~~ — it tested for the
-   absence of a `transaction_label` row, so with every transaction labelled it
-   matched nothing while the breakdown reported a large uncategorised total.
-5. ~~Transaction detail modal~~ — click any row to edit category, tags and the
-   recurring flag; shared `TransactionItem` extracted.
-6. ~~Filters on every transaction table~~ — one shared panel on the dashboard
-   and `/transactions`: accounts, categories, tags, amount range, search,
-   tri-state flags, linkable via search params.
-7. ~~Multi-select and bulk edit~~ — select rows or everything matching the
-   filter, then override categories or tags from the table header. Filter-based
-   mutations, so "all matching" means all of them and not the loaded page.
+1. **Review queue groups by merchant.** 196 held transactions are nowhere near
+   196 decisions — the same merchants repeat. The queue listed them
+   individually, so the user paid per transaction instead of per merchant.
+   Grouping by `counterparty_key` with a one-action assign per group is the
+   single biggest reduction in effort available, and needs no new concepts:
+   the key already drives rule learning and recurring detection, and the bulk
+   mutations already take a filter.
+2. **The dashboard says what needs attention** — uncategorised and held counts
+   *and what they are worth*, linking into the filtered views. A person opening
+   a finance app asks "is anything wrong?" before "what did I spend on food?",
+   and today they have to remember to visit `/review`.
+3. **A transaction row shows its own state** — a split indicator (the row shows
+   the whole amount while totals count it by parts, which is actively
+   misleading) and the label source, so a list can be scanned for what is
+   curated versus guessed.
 
-Still open:
+**Next:**
 
-8. Iteration 4: savings and spending goals (`docs/specs/iteration-4.md`).
-   WP0 contracts and WP-C (UI on mocks, approved) are merged; WP-A (evaluation)
-   and WP-B (GraphQL) are in progress.
-9. Admin user management in the UI.
-10. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
-    decision about credential storage** (security-critical).
-11. C24, PayPal and Scalable Capital integrations. First research the access
+4. **"What changed?"** Period-over-period deltas: groceries up EUR 80 on last
+   month, a new subscription appeared, a recurring charge stopped. Every number
+   today is a snapshot of one period, while the question people actually ask is
+   comparative. The recurring detector and the history are already there. This
+   is the only item here that is new feature work rather than reshaping what
+   exists, and it is what makes the dashboard worth opening when nothing is
+   broken.
+5. **Progress feedback while curating** — the uncategorised count falling, and
+   "N rules learned from your decisions", so an hour of categorising reads as
+   progress rather than a chore. Cheap once item 2's counts exist, and much
+   more meaningful now that one human decision learns a rule.
+6. Accounts as a multi-select dropdown in the filter panel (needs a
+   multi-select mode on `SearchMenu`, which would also serve categories and
+   tags there).
+7. A Counterparty tab on the breakdown table, matching the chart's dimension
+   tabs. Needs a backend decision: `categoryBreakdown` is category-specific,
+   and `CashflowDimension` belongs to the Sankey. Generalising the breakdown to
+   take a dimension probably beats a second query, since `TAG` is already
+   declared in that enum.
+8. Admin user management in the UI.
+9. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+   decision about credential storage** (security-critical).
+10. C24, PayPal and Scalable Capital integrations. First research the access
     method for each (API vs. CSV fallback).
-12. Sankey cash-flow views.
+11. Sankey cash-flow views.
 
 ### Deployment / data actions outstanding (user)
 
-- Redeploy for the labeler and bulk-edit backend changes.
-- Clear the empty-taxonomy residue so the labeler can re-label: delete the
-  poisoned LLM cache entries (`DELETE FROM llm_label_cache WHERE category_id
-  IS NULL`, ~148) and the stuck labels (`DELETE FROM transaction_label WHERE
-  category_id IS NULL`, ~610), then restart the labeler. Canary one
-  transaction first. Do **not** change `APP_projection_group` afterwards: the
-  deleted rows still exist as records on `finreport.transaction-label`, and a
-  projector replay would resurrect exactly what was deleted.
+- Redeploy for the labeler, bulk-edit, goals, rules and sort changes.
+- `finreport-be-category-reslug` now applies on deploy and repairs the six
+  categories whose slug lacks their parent's prefix (and the 18 user overrides
+  attached to them). Verify afterwards with the detection SQL in
+  `docs/runbooks/category-reslug-repair.md`; once clean, that service and
+  `finreport-be-repair-headers` can both be deleted — they are recovery, not
+  steady state.
+- Do **not** change `APP_projection_group` after deleting label rows: those
+  records still exist on `finreport.transaction-label`, and a projector replay
+  would resurrect exactly what was deleted.
 
 ## Backlog
 
@@ -83,6 +95,12 @@ by agreeing where it goes.
   exclusion, so the only way back is to clear and re-tick by hand. Adding
   `excludeTransactionIds` to the filter closes it. Worth settling before more
   is built on the filter contract.
+
+- **Phone layout for the web UI** — deferred deliberately. A native phone app
+  is planned in Kotlin (user, 2026-10-08), so reshaping the SvelteKit tables
+  into a phone card layout would be work the native app replaces. The detail
+  modal already becomes a full-height sheet at phone width; a 7-column table
+  does not, and is left as-is.
 
 - **Clickable affordances** — S, frontend-only. Clickable things should look
   clickable: `cursor-pointer`, a hover state, and a visible focus ring. Today
