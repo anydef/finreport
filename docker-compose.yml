@@ -162,7 +162,11 @@ services:
     pull_policy: always
     container_name: finreport-be-category-reslug
     entrypoint: ["category-reslug"]
-    command: ["--dry-run"]
+    # Applies the repair, rather than only reporting it. Safe on every deploy
+    # for the same reason the other one-shots here are: it detects the damage
+    # itself and a clean tree makes it a no-op that reports zero. Pass
+    # ["--dry-run"] to inspect without writing.
+    command: []
     restart: "no"
     depends_on:
       finreport-be-migrate:
