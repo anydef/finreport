@@ -98,20 +98,36 @@
           "description": "Bargeldauszahlung",
           "transactionType": "Barauszahlung",
           "label": {
-            "category": {
-              "id": "2b38634e-c189-55e7-8d5e-2f4f002d1e0f",
-              "slug": "other.cash",
-              "name": "Cash withdrawal",
-              "kind": "EXPENSE"
-            },
-            "source": "RULE",
-            "confidence": 0.95,
+            "category": null,
+            "source": "USER",
+            "confidence": null,
             "status": "RESOLVED",
             "reviewReason": null,
             "proposedCategoryPath": null,
             "reasoning": null
           },
-          "splits": [],
+          "splits": [
+            {
+              "index": 0,
+              "amount": "-60.00",
+              "category": {
+                "id": "7f5a7e2e-7d0a-5f3d-9c8a-2f1b6a0c4d11",
+                "slug": "food.groceries",
+                "name": "Groceries",
+                "kind": "EXPENSE"
+              }
+            },
+            {
+              "index": 1,
+              "amount": "-40.00",
+              "category": {
+                "id": "2b38634e-c189-55e7-8d5e-2f4f002d1e0f",
+                "slug": "other.cash",
+                "name": "Cash withdrawal",
+                "kind": "EXPENSE"
+              }
+            }
+          ],
           "tags": [],
           "transfer": {
             "counterpartTransactionId": null,

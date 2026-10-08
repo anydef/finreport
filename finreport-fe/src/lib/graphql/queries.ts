@@ -592,3 +592,17 @@ mutation SetTransactionsTags($filter: TransactionFilter!, $tags: [String!]!) {
 		splitsCleared
 	}
 }`;
+
+export const ATTENTION_SUMMARY_QUERY = `
+query AttentionSummary {
+	attentionSummary {
+		uncategorized {
+			count
+			totalAmount
+		}
+		needsReview {
+			count
+			totalAmount
+		}
+	}
+}`;

@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
+	import AttentionSummary from '$lib/components/AttentionSummary.svelte';
 	import Card from '$lib/components/Card.svelte';
 	import PeriodSelector from '$lib/components/PeriodSelector.svelte';
 	import TotalsRow from '$lib/components/TotalsRow.svelte';
@@ -220,6 +221,14 @@
 </svelte:head>
 
 <div class="flex flex-col gap-6">
+	{#if data.attention}
+		<AttentionSummary
+			summary={data.attention}
+			currency={data.summary?.currency ?? data.accounts[0]?.currency ?? 'EUR'}
+			today={data.today}
+		/>
+	{/if}
+
 	<Card>
 		<PeriodSelector
 			bind:preset

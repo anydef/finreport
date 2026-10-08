@@ -16,7 +16,7 @@ use crate::graphql::types::{
     Rule, RuleState, TagCount, TransactionFilter, TransactionPage, TransactionSort,
 };
 use crate::graphql::scalars::{Date, Uuid};
-use crate::graphql::{accounts, breakdown, categories, goals, review_queue, rules, transactions};
+use crate::graphql::{accounts, attention, breakdown, categories, goals, review_queue, rules, transactions};
 
 pub struct QueryRoot;
 
@@ -165,6 +165,15 @@ impl QueryRoot {
         let scoped_ids = scoped_account_ids(user, None)?;
         let cache = ctx.data::<LabelSplitCache>()?;
         review_queue::fetch_review_queue(db, cache, &scoped_ids, page.limit, page.offset).await
+    }
+
+    /// What is waiting for the user: uncategorised and held-for-review
+    /// transactions with their worth. All-time, across the caller's accounts.
+    async fn attention_summary(&self, ctx: &Context<'_>) -> GqlResult<attention::AttentionSummary> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let scoped_ids = scoped_account_ids(user, None)?;
+        attention::fetch_attention_summary(db, &scoped_ids).await
     }
 
     /// `tags` (§4): all tags, descending count.

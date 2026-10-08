@@ -29,6 +29,8 @@ import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
 import clearTransactionCategoryMock from '$lib/graphql/mocks/clear-transaction-category.json';
 import unsplitTransactionMock from '$lib/graphql/mocks/unsplit-transaction.json';
+import attentionMock from '$lib/graphql/mocks/attention-summary.json';
+import attentionZeroMock from '$lib/graphql/mocks/attention-summary-zero.json';
 import tagsMock from '$lib/graphql/mocks/tags.json';
 import recurringOverviewMock from '$lib/graphql/mocks/recurring-overview.json';
 import goalsMock from '$lib/graphql/mocks/goals.json';
@@ -664,6 +666,15 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			};
 		// Iteration-3 (§4) stub operations: same "WP0 mock, real backend still
 		// NOT_IMPLEMENTED" shape as the iteration-2 block above.
+		// MOCK_ATTENTION=zero serves the nothing-to-do state.
+		case 'AttentionSummary':
+			return {
+				status: 200,
+				body: {
+					data: (privateEnv.MOCK_ATTENTION === 'zero' ? attentionZeroMock : attentionMock).data
+				},
+				setCookies: []
+			};
 		case 'Tags':
 			return { status: 200, body: { data: tagsMock.data }, setCookies: [] };
 		case 'RecurringSeries':

@@ -1,0 +1,9 @@
+{
+  "query": "query AttentionSummary {\n\tattentionSummary {\n\t\tuncategorized {\n\t\t\tcount\n\t\t\ttotalAmount\n\t\t}\n\t\tneedsReview {\n\t\t\tcount\n\t\t\ttotalAmount\n\t\t}\n\t}\n}",
+  "data": {
+    "attentionSummary": {
+      "uncategorized": { "count": 0, "totalAmount": "0" },
+      "needsReview": { "count": 0, "totalAmount": "0" }
+    }
+  }
+}

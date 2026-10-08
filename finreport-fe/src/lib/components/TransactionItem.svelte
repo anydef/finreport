@@ -8,6 +8,7 @@
 	 */
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 	import { labelSourceBadge, needsReviewBadge } from '$lib/labelBadge';
+	import { splitIndicator } from '$lib/splitView';
 	import Badge from './Badge.svelte';
 	import type { Transaction } from '$lib/graphql/types';
 
@@ -34,7 +35,8 @@
 	let opener = $state<HTMLButtonElement | null>(null);
 
 	function onRowClick(event: MouseEvent) {
-		if ((event.target as HTMLElement).closest('a, input, [data-select-cell]')) return;
+		if ((event.target as HTMLElement).closest('a, input, [data-select-cell], [data-split-toggle]'))
+			return;
 		// Focus first so the modal records this row's button as the element to return to.
 		opener?.focus();
 		onopen(tx);
@@ -42,6 +44,11 @@
 
 	const sourceBadge = $derived(labelSourceBadge(tx.label));
 	const reviewPill = $derived(needsReviewBadge(tx.label));
+	// A split's own label has no category (it lives on the parts), so the cell
+	// shows the split pill instead of "—". Its label source is always "you", so
+	// that badge is dropped for splits: one pill, not two, keeps the row calm.
+	const split = $derived(splitIndicator(tx.splits));
+	let partsOpen = $state(false);
 </script>
 
 <!-- The counterparty button below is the keyboard/AT equivalent of this row click. -->
@@ -78,8 +85,22 @@
 	<td class="py-2 pr-4 text-slate-600">{tx.description ?? ''}</td>
 	<td class="py-2 pr-4">
 		<div class="flex flex-wrap items-center gap-1">
-			<span class="text-slate-700">{tx.label?.category?.name ?? '—'}</span>
-			{#if sourceBadge}
+			{#if split}
+				<button
+					type="button"
+					data-split-toggle
+					aria-expanded={partsOpen}
+					aria-label={split.ariaLabel}
+					onclick={() => (partsOpen = !partsOpen)}
+					class="focus-visible:outline-brand inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800 hover:bg-violet-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+				>
+					<span aria-hidden="true">{partsOpen ? '▾' : '▸'}</span>
+					{split.text}
+				</button>
+			{:else}
+				<span class="text-slate-700">{tx.label?.category?.name ?? '—'}</span>
+			{/if}
+			{#if sourceBadge && !split}
 				<Badge text={sourceBadge.text} variant={sourceBadge.variant} />
 			{/if}
 			{#if reviewPill}
@@ -117,3 +138,24 @@
 		{formatAmount(tx.amount, currency)}
 	</td>
 </tr>
+
+{#if split && partsOpen}
+	<tr class="border-b border-slate-100 bg-violet-50/50" data-testid="split-parts">
+		<td colspan={onselect ? 8 : 7} class="py-2 pr-0 pl-8">
+			<p class="mb-1 text-xs text-slate-500">
+				Split into {split.count}
+				{split.count === 1 ? 'part' : 'parts'} — totals count each part under its own category.
+			</p>
+			<ul class="flex flex-col gap-0.5">
+				{#each tx.splits as part (part.index)}
+					<li class="flex max-w-md items-center justify-between gap-4 text-sm">
+						<span class="text-slate-700">{part.category.name}</span>
+						<span class="font-medium whitespace-nowrap text-slate-700">
+							{formatAmount(part.amount, currency)}
+						</span>
+					</li>
+				{/each}
+			</ul>
+		</td>
+	</tr>
+{/if}

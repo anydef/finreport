@@ -18,6 +18,29 @@ type Account {
 	latestBalance: Balance
 }
 
+"""
+A count of transactions and what they are worth.
+"""
+type AttentionBucket {
+	count: Int!
+	"""
+	Magnitude of the **signed** net of the transactions: a refund cancels the
+	charge it reverses (as in the category breakdown). Accounts share a currency.
+	"""
+	totalAmount: Decimal!
+}
+
+type AttentionSummary {
+	"""
+	No category assigned (see the `uncategorized` transaction filter).
+	"""
+	uncategorized: AttentionBucket!
+	"""
+	Labels held for human review (see the `needsReview` filter).
+	"""
+	needsReview: AttentionBucket!
+}
+
 type Balance {
 	date: Date!
 	amount: Decimal!
@@ -480,6 +503,11 @@ type Query {
 	rules(state: RuleState): [Rule!]!
 	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
 	reviewQueue(page: PageInput): ReviewQueue!
+	"""
+	What is waiting for the user: uncategorised and held-for-review
+	transactions with their worth. All-time, across the caller's accounts.
+	"""
+	attentionSummary: AttentionSummary!
 	"""
 	`tags` (§4): all tags, descending count.
 	"""

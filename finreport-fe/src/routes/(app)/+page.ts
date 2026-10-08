@@ -1,6 +1,7 @@
 import { createGraphqlClient } from '$lib/graphqlClient';
 import {
 	ACCOUNTS_QUERY,
+	ATTENTION_SUMMARY_QUERY,
 	CASHFLOW_GRAPH_QUERY,
 	CASHFLOW_SUMMARY_QUERY,
 	CATEGORIES_QUERY,
@@ -10,6 +11,7 @@ import {
 } from '$lib/graphql/queries';
 import type {
 	Account,
+	AttentionSummary,
 	CashflowDimension,
 	CashflowGraph,
 	CashflowSummary,
@@ -99,10 +101,12 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const panel = parsePanelFilters(url.searchParams);
 	const sort = parseSort(url.searchParams);
 
-	const [accountsResult, categoriesResult, tagsResult] = await Promise.all([
+	const [accountsResult, categoriesResult, tagsResult, attentionResult] = await Promise.all([
 		client.query(ACCOUNTS_QUERY, {}).toPromise(),
 		client.query(CATEGORIES_QUERY, {}).toPromise(),
-		client.query(TAGS_QUERY, {}).toPromise()
+		client.query(TAGS_QUERY, {}).toPromise(),
+		// All-time: takes no period, so it never hides a backlog outside the period.
+		client.query(ATTENTION_SUMMARY_QUERY, {}).toPromise()
 	]);
 	const categories = (categoriesResult.data?.categories ?? []) as Category[];
 
@@ -170,6 +174,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		error,
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
 		categories,
+		attention: attentionResult.data?.attentionSummary as AttentionSummary | undefined,
 		allTags: (tagsResult.data?.tags ?? []) as TagCount[],
 		summary: summaryResult.data?.cashflowSummary as CashflowSummary | undefined,
 		graph: graphResult.data?.cashflowGraph as CashflowGraph | undefined,

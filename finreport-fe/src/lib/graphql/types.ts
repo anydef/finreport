@@ -436,3 +436,15 @@ export interface BulkEditResult {
 	/** How many had splits that this category change discarded. */
 	splitsCleared: number;
 }
+
+/** A count of transactions and the magnitude of their signed net (`attentionSummary`). */
+export interface AttentionBucket {
+	count: number;
+	totalAmount: Decimal;
+}
+
+/** All-time, caller-scoped: what is waiting for the user. */
+export interface AttentionSummary {
+	uncategorized: AttentionBucket;
+	needsReview: AttentionBucket;
+}
