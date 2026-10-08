@@ -4,11 +4,13 @@
 	 * badge for learned rules published above the threshold (§2.8), and the
 	 * actions revoke / re-apply / edit.
 	 */
+	import Badge from '../Badge.svelte';
 	import Button from '../Button.svelte';
 	import {
 		describeReach,
 		groupRulesByState,
 		isAutoApproved,
+		merchantKeyOf,
 		summarizeConditions
 	} from '$lib/rulesView';
 	import type { Rule } from '$lib/graphql/types';
@@ -18,9 +20,13 @@
 		onedit: (rule: Rule) => void;
 		onrevoke: (rule: Rule) => void;
 		onreapply: (rule: Rule) => void;
+		/** Merchant keys currently exempt from learning (their rows show it instead of the action). */
+		exemptKeys?: ReadonlySet<string>;
+		/** "Never learn rules for this merchant again": asks the page to confirm and exempt the key. */
+		onexempt?: (rule: Rule, counterpartyKey: string) => void;
 	}
 
-	let { rules, onedit, onrevoke, onreapply }: Props = $props();
+	let { rules, onedit, onrevoke, onreapply, exemptKeys = new Set(), onexempt }: Props = $props();
 
 	const groups = $derived(groupRulesByState(rules));
 
@@ -51,6 +57,9 @@
 				{#if isAutoApproved(rule)}
 					{@render badge('auto-approved', 'brand')}
 				{/if}
+				{#if merchantKeyOf(rule) && exemptKeys.has(merchantKeyOf(rule) ?? '')}
+					<Badge text="merchant exempt from learning" variant="warning" />
+				{/if}
 			</div>
 		</td>
 		<td class="py-2 pr-4 text-slate-600">{rule.category.name}</td>
@@ -79,6 +88,16 @@
 				<Button variant="ghost" onclick={() => onrevoke(rule)}>Revoke</Button>
 			{/if}
 			<Button variant="ghost" onclick={() => onreapply(rule)}>Re-apply</Button>
+			{#if onexempt}
+				{@const merchant = merchantKeyOf(rule)}
+				{#if merchant && !exemptKeys.has(merchant)}
+					<Button
+						variant="ghost"
+						title="Stop learning rules for this merchant, so every transaction is labelled or split by hand"
+						onclick={() => onexempt(rule, merchant)}>Never learn this merchant</Button
+					>
+				{/if}
+			{/if}
 		</td>
 	</tr>
 {/snippet}

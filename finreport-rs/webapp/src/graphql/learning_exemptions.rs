@@ -48,6 +48,18 @@ fn validation_error(message: impl Into<String>) -> async_graphql::Error {
     async_graphql::Error::new(message.into()).extend_with(|_, e| e.set("code", "VALIDATION"))
 }
 
+/// The key the learner indexes on for whatever the user typed or clicked: an
+/// already-normalised key passes through unchanged, a raw name ("Amazon
+/// Payments Europe S.C.A.") is normalised exactly like a transaction's
+/// counterparty is. Empty after normalising is rejected.
+fn canonical_key(input: &str) -> async_graphql::Result<String> {
+    let key = crate::labeling::normalize::normalize(Some(input), None);
+    if key.is_empty() {
+        return Err(validation_error("counterpartyKey must not be empty"));
+    }
+    Ok(key)
+}
+
 /// Display name + count per merchant key over the caller's accounts, in one
 /// query for the whole list.
 async fn evidence_for(
@@ -148,10 +160,8 @@ pub async fn exempt_from_learning(
     decided_by: Uuid,
     counterparty_key: &str,
 ) -> async_graphql::Result<LearningExemption> {
-    let key = counterparty_key.trim();
-    if key.is_empty() {
-        return Err(validation_error("counterpartyKey must not be empty"));
-    }
+    let key = canonical_key(counterparty_key)?;
+    let key = key.as_str();
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
 
     let record = LearningExemptionRecord {
@@ -186,10 +196,34 @@ pub async fn remove_learning_exemption(
     publisher: Option<&Arc<EventPublisher>>,
     counterparty_key: &str,
 ) -> async_graphql::Result<bool> {
-    let key = counterparty_key.trim();
+    let key = canonical_key(counterparty_key)?;
+    let key = key.as_str();
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
     let existed = proj::is_learning_exempt(db, key).await?;
     publish_tombstone(publisher, TOPIC_LEARNING_EXEMPTION, key).await?;
     proj::project_learning_exemption(db, key, None).await?;
     Ok(existed)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_stored_key_passes_through_unchanged() {
+        for key in ["amazon", "fitness first", "paypal"] {
+            assert_eq!(canonical_key(key).unwrap(), key);
+        }
+    }
+
+    #[test]
+    fn a_typed_name_is_normalised_like_a_counterparty() {
+        assert_eq!(canonical_key("  Amazon Payments GmbH ").unwrap(), "amazon payments");
+        assert_eq!(canonical_key("PayPal").unwrap(), "paypal");
+    }
+
+    #[test]
+    fn an_empty_key_is_rejected() {
+        assert!(canonical_key("   ").is_err());
+    }
 }

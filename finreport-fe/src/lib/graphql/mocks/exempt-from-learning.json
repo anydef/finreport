@@ -1,0 +1,14 @@
+{
+  "query": "mutation ExemptFromLearning($counterpartyKey: String!) {\n  exemptFromLearning(counterpartyKey: $counterpartyKey) {\n    counterpartyKey\n    displayName\n    transactionCount\n    exemptedAt\n  }\n}",
+  "variables": {
+    "counterpartyKey": "amazon"
+  },
+  "data": {
+    "exemptFromLearning": {
+      "counterpartyKey": "amazon",
+      "displayName": "AMAZON PAYMENTS EUROPE S.C.A.",
+      "transactionCount": 23,
+      "exemptedAt": "2024-06-20T10:00:00Z"
+    }
+  }
+}

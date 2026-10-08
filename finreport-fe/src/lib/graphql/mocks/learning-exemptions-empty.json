@@ -1,0 +1,6 @@
+{
+  "query": "query LearningExemptions {\n  learningExemptions {\n    counterpartyKey\n    displayName\n    transactionCount\n    exemptedAt\n  }\n}",
+  "data": {
+    "learningExemptions": []
+  }
+}

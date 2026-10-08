@@ -4,8 +4,10 @@ import {
 	canHaveChildren,
 	flattenCategoryTreeWithPath,
 	groupRulesByState,
+	describeExemptionImpact,
 	describeReach,
 	isAutoApproved,
+	merchantKeyOf,
 	mergeConditions,
 	MAX_CATEGORY_DEPTH,
 	sortByRecentlyCreated,
@@ -277,5 +279,29 @@ describe('describeReach', () => {
 		expect(describeReach(0)).toBe('matches nothing');
 		expect(describeReach(1)).toBe('1 transaction');
 		expect(describeReach(37)).toBe('37 transactions');
+	});
+});
+
+describe('merchantKeyOf', () => {
+	it('reads the counterparty key a rule is about', () => {
+		expect(merchantKeyOf({ conditions: { counterparty_key: 'amazon' } })).toBe('amazon');
+	});
+
+	it('is null for a rule that is not merchant-specific', () => {
+		expect(merchantKeyOf({ conditions: {} })).toBeNull();
+		expect(merchantKeyOf({ conditions: { description_contains: 'rent' } })).toBeNull();
+		expect(merchantKeyOf({ conditions: { counterparty_key: '  ' } })).toBeNull();
+	});
+});
+
+describe('describeExemptionImpact', () => {
+	it('says what is left to do by hand', () => {
+		expect(describeExemptionImpact(0)).toBe('No transactions in your accounts yet.');
+		expect(describeExemptionImpact(1)).toBe(
+			'1 transaction in your accounts to label or split by hand.'
+		);
+		expect(describeExemptionImpact(12)).toBe(
+			'12 transactions in your accounts to label or split by hand.'
+		);
 	});
 });

@@ -1,0 +1,9 @@
+{
+  "query": "mutation RemoveLearningExemption($counterpartyKey: String!) {\n  removeLearningExemption(counterpartyKey: $counterpartyKey)\n}",
+  "variables": {
+    "counterpartyKey": "paypal"
+  },
+  "data": {
+    "removeLearningExemption": true
+  }
+}

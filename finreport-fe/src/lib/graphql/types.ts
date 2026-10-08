@@ -469,3 +469,19 @@ export interface HeldMerchantGroups {
 	groupCount: number;
 	heldCount: number;
 }
+
+/**
+ * A merchant the user has told the rule learner to leave alone ("exempt from
+ * learning"): decisions on it never become a rule, so it is labelled (and
+ * split) by hand.
+ */
+export interface LearningExemption {
+	/** The normalised merchant key rules and the learner index on. */
+	counterpartyKey: string;
+	/** The merchant's name as it appears on the caller's transactions. */
+	displayName: string;
+	/** How many of the caller's transactions carry this merchant key. */
+	transactionCount: number;
+	/** RFC 3339 instant. */
+	exemptedAt: string;
+}

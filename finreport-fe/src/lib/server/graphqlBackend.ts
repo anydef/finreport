@@ -37,6 +37,8 @@ import goalsMock from '$lib/graphql/mocks/goals.json';
 import goalProgressRecurringMock from '$lib/graphql/mocks/goal-progress-recurring.json';
 import goalProgressFixedMock from '$lib/graphql/mocks/goal-progress-fixed.json';
 import goalTransactionsMock from '$lib/graphql/mocks/goal-transactions.json';
+import learningExemptionsMock from '$lib/graphql/mocks/learning-exemptions.json';
+import learningExemptionsEmptyMock from '$lib/graphql/mocks/learning-exemptions-empty.json';
 
 /** Name of the mock-mode session cookie, mirroring the real `fr_session` cookie's role. */
 const MOCK_SESSION_COOKIE = 'fr_session';
@@ -525,6 +527,58 @@ function mockSetRuleState(variables: Record<string, unknown> | undefined): unkno
 	};
 }
 
+interface MockLearningExemption {
+	counterpartyKey: string;
+	displayName: string;
+	transactionCount: number;
+	exemptedAt: string;
+}
+
+/**
+ * The exempt-merchant list is the one piece of mock state that is not a
+ * fixed fixture: exempting and undoing must be visibly working end to end
+ * (including the empty state), so it is kept in memory for the lifetime of
+ * the dev server. Seeded from the fixture; a restart resets it.
+ */
+const mockExemptions: MockLearningExemption[] = [
+	...(learningExemptionsMock.data.learningExemptions as MockLearningExemption[])
+];
+
+function mockLearningExemptions(): unknown {
+	return mockExemptions.length === 0
+		? learningExemptionsEmptyMock.data
+		: { learningExemptions: [...mockExemptions] };
+}
+
+function mockExemptFromLearning(variables: Record<string, unknown> | undefined): unknown {
+	const key = String(variables?.counterpartyKey ?? '')
+		.trim()
+		.toLowerCase();
+	const existing = mockExemptions.find((e) => e.counterpartyKey === key);
+	if (existing) return existing;
+	// Name and count come from the rule fixture where the merchant has one.
+	const rule = rulesMock.data.rules.find(
+		(r) => (r.conditions as { counterparty_key?: string }).counterparty_key === key
+	);
+	const created: MockLearningExemption = {
+		counterpartyKey: key,
+		displayName: rule ? rule.name.split(' → ')[0] : key,
+		transactionCount: rule?.matchingTransactionCount ?? 0,
+		exemptedAt: new Date().toISOString()
+	};
+	mockExemptions.unshift(created);
+	return created;
+}
+
+function mockRemoveLearningExemption(variables: Record<string, unknown> | undefined): boolean {
+	const key = String(variables?.counterpartyKey ?? '')
+		.trim()
+		.toLowerCase();
+	const index = mockExemptions.findIndex((e) => e.counterpartyKey === key);
+	if (index >= 0) mockExemptions.splice(index, 1);
+	return index >= 0;
+}
+
 /** `reapplyRule` returns how many transactions it will re-queue (§5); a fixed, plausible count in mock mode. */
 function mockReapplyRule(): unknown {
 	return 7;
@@ -821,6 +875,24 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: { data: { setRuleState: mockSetRuleState(body.variables) } },
+				setCookies: []
+			};
+		case 'LearningExemptions':
+			return {
+				status: 200,
+				body: { data: mockLearningExemptions() },
+				setCookies: []
+			};
+		case 'ExemptFromLearning':
+			return {
+				status: 200,
+				body: { data: { exemptFromLearning: mockExemptFromLearning(body.variables) } },
+				setCookies: []
+			};
+		case 'RemoveLearningExemption':
+			return {
+				status: 200,
+				body: { data: { removeLearningExemption: mockRemoveLearningExemption(body.variables) } },
 				setCookies: []
 			};
 		case 'ReapplyRule':

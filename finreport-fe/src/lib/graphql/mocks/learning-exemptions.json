@@ -1,0 +1,13 @@
+{
+  "query": "query LearningExemptions {\n  learningExemptions {\n    counterpartyKey\n    displayName\n    transactionCount\n    exemptedAt\n  }\n}",
+  "data": {
+    "learningExemptions": [
+      {
+        "counterpartyKey": "paypal",
+        "displayName": "PayPal (Europe) S.a.r.l. et Cie, S.C.A.",
+        "transactionCount": 14,
+        "exemptedAt": "2024-06-18T09:30:00Z"
+      }
+    ]
+  }
+}

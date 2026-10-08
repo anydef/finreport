@@ -119,6 +119,19 @@ export function mergeConditions(
 }
 
 /** The "matches N transactions" cell text; the zero state is spelled out, not a bare 0. */
+/** The merchant key a rule is about (`conditions.counterparty_key`), or null for a rule that is not merchant-specific. */
+export function merchantKeyOf(rule: Pick<Rule, 'conditions'>): string | null {
+	const key = asConditions(rule.conditions).counterparty_key;
+	return typeof key === 'string' && key.trim() !== '' ? key.trim() : null;
+}
+
+/** What the user is committing to for a merchant, in plain words (shown in the confirm dialog and the exempt list). */
+export function describeExemptionImpact(transactionCount: number): string {
+	if (transactionCount === 0) return 'No transactions in your accounts yet.';
+	const noun = transactionCount === 1 ? 'transaction' : 'transactions';
+	return `${transactionCount} ${noun} in your accounts to label or split by hand.`;
+}
+
 export function describeReach(count: number): string {
 	if (count === 0) return 'matches nothing';
 	return `${count} transaction${count === 1 ? '' : 's'}`;
