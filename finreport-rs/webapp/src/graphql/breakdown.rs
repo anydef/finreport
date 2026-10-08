@@ -132,6 +132,13 @@ pub async fn fetch_breakdown(
     let categories_by_id: HashMap<Uuid, category::Model> =
         all_categories.into_iter().map(|c| (c.id, c)).collect();
 
+    // Signed while accumulating, magnitude only when emitted. Summing
+    // `amount.abs()` per contribution made a refund *add* to its category
+    // instead of cancelling the charge: a 1000 medical bill reimbursed in full
+    // read as 2000 spent rather than 0. It also contradicted iteration 4's
+    // goal evaluation (§3.3), where a refund inside the scope reduces the
+    // total — the same two transactions would disagree between a goal and this
+    // breakdown.
     let mut needs_review_total = RustDecimal::ZERO;
     let mut needs_review_count = 0i32;
     let mut uncategorized_total = RustDecimal::ZERO;
@@ -155,7 +162,7 @@ pub async fn fetch_breakdown(
                 let label = labels_by_transaction.get(&transaction_id);
                 match label {
                     Some(l) if l.status == "needs_review" => {
-                        needs_review_total += whole_amount.abs();
+                        needs_review_total += whole_amount;
                         needs_review_count += 1;
                         continue;
                     }
@@ -165,7 +172,7 @@ pub async fn fetch_breakdown(
                         amount: whole_amount,
                     }],
                     None => {
-                        uncategorized_total += whole_amount.abs();
+                        uncategorized_total += whole_amount;
                         uncategorized_count += 1;
                         continue;
                     }
@@ -175,13 +182,13 @@ pub async fn fetch_breakdown(
 
         for contribution in contributions {
             let Some(category_id) = contribution.category_id else {
-                uncategorized_total += contribution.amount.abs();
+                uncategorized_total += contribution.amount;
                 uncategorized_count += 1;
                 continue;
             };
             let rolled_id = roll_up(&categories_by_id, category_id, level);
             let entry = rolled.entry(rolled_id).or_insert_with(|| (RustDecimal::ZERO, std::collections::HashSet::new()));
-            entry.0 += contribution.amount.abs();
+            entry.0 += contribution.amount;
             entry.1.insert(contribution.transaction_id);
         }
     }
@@ -225,7 +232,7 @@ pub async fn fetch_breakdown(
             };
             Some(CategoryBreakdownRow {
                 category: to_graphql(category_row.clone()),
-                amount: GqlDecimal(amount),
+                amount: GqlDecimal(amount.abs()),
                 transaction_count: transactions.len() as i32,
                 share,
             })
@@ -235,13 +242,13 @@ pub async fn fetch_breakdown(
 
     let uncategorized = (uncategorized_count > 0).then(|| CategoryBreakdownRow {
         category: sentinel_category(UNCATEGORIZED_ID, "uncategorized", "Uncategorized"),
-        amount: GqlDecimal(uncategorized_total),
+        amount: GqlDecimal(uncategorized_total.abs()),
         transaction_count: uncategorized_count,
         share: 0.0,
     });
     let needs_review = (needs_review_count > 0).then(|| CategoryBreakdownRow {
         category: sentinel_category(NEEDS_REVIEW_ID, "needs_review", "Needs Review"),
-        amount: GqlDecimal(needs_review_total),
+        amount: GqlDecimal(needs_review_total.abs()),
         transaction_count: needs_review_count,
         share: 0.0,
     });

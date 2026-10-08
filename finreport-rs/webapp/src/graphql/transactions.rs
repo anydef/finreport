@@ -112,12 +112,21 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
         condition = condition.add(transaction::Column::BookingDate.lte(end));
     }
     if let Some(search) = filter.search.as_ref().filter(|s| !s.is_empty()) {
+        // ILIKE, not LIKE: the SDL documents this field as a case-insensitive
+        // substring, and the hand-rolled cashflow SQL twin
+        // (`cashflow/summary.rs`, `cashflow/mod.rs`) has always used ILIKE —
+        // so `LIKE` here made the charts and the transaction list disagree
+        // about the same search term, with the list silently missing rows
+        // whose casing differed.
+        // Raw expression because sea-orm's `ColumnTrait` offers only `like`.
         let pattern = format!("%{search}%");
-        condition = condition.add(
-            Condition::any()
-                .add(transaction::Column::CounterpartyName.like(&pattern))
-                .add(transaction::Column::Description.like(&pattern)),
-        );
+        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+            "(transaction.counterparty_name ILIKE $1 OR transaction.description ILIKE $2)",
+            vec![
+                sea_orm::Value::from(pattern.clone()),
+                sea_orm::Value::from(pattern),
+            ],
+        ));
     }
     match filter.direction {
         Some(Direction::Income) => {

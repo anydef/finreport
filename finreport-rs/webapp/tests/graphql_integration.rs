@@ -638,3 +638,100 @@ async fn uncategorized_filter_means_no_category_not_no_label_row() {
         "uncategorized: false must select only rows that really have a category"
     );
 }
+
+/// A refund must cancel the charge it reverses, not add to it. The breakdown
+/// summed `amount.abs()` per contribution, so a 1000 medical bill reimbursed
+/// in full read as 2000 spent instead of 0 — and it contradicted iteration 4's
+/// goal evaluation (§3.3), where a refund inside the scope reduces the total,
+/// so a goal and this breakdown disagreed about the same two transactions.
+#[tokio::test]
+async fn a_refund_nets_against_the_charge_in_the_category_breakdown() {
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "refund-net-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Refund netting account").await;
+    common::link(&db, user, account).await;
+    let (health, _) = common::seed_category(&db, "health", "Health", "expense").await;
+
+    let bill = common::seed_transaction(&db, account, "2024-09-10", "-1000.00", Some("Praxis")).await;
+    common::seed_transaction_label(&db, bill, Some(health), "user", "resolved").await;
+    let refund =
+        common::seed_transaction(&db, account, "2024-09-20", "1000.00", Some("Krankenkasse")).await;
+    common::seed_transaction_label(&db, refund, Some(health), "user", "resolved").await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "refund-net-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    let response = schema
+        .execute(authed(
+            Request::new(
+                r#"{ categoryBreakdown(filter: { startDate: "2024-09-01", endDate: "2024-09-30" },
+                      level: 1) { rows { category { slug } amount transactionCount } } }"#,
+            ),
+            Some(caller),
+        ))
+        .await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    let rows = data["categoryBreakdown"]["rows"].as_array().unwrap();
+    // `seed_category` suffixes the slug to keep tests independent.
+    let row = rows
+        .iter()
+        .find(|r| r["category"]["slug"].as_str().unwrap().starts_with("health"))
+        .unwrap_or_else(|| panic!("expected a health row among {rows:?}"));
+
+    assert_eq!(
+        Decimal::from_str(row["amount"].as_str().unwrap()).unwrap(),
+        Decimal::ZERO,
+        "a fully reimbursed bill nets to zero, not to twice the amount"
+    );
+    assert_eq!(row["transactionCount"], 2, "both transactions still counted");
+}
+
+/// The SDL documents `search` as a case-insensitive substring, and the
+/// hand-rolled cashflow SQL has always used ILIKE — but the transaction list
+/// used LIKE, so the charts and the list disagreed about the same term.
+#[tokio::test]
+async fn the_search_filter_is_case_insensitive() {
+    let db = common::db().await;
+
+    let (user, _) = common::seed_user(&db, "search-case-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Search casing account").await;
+    common::link(&db, user, account).await;
+
+    let tx =
+        common::seed_transaction(&db, account, "2024-09-05", "-9.99", Some("SPOTIFY AB")).await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "search-case-test".to_string(),
+        account_ids: vec![account],
+    };
+
+    for term in ["spotify", "SPOTIFY", "Spotify", "potify"] {
+        let query = format!(
+            r#"{{ transactions(filter: {{ startDate: "2024-09-01", endDate: "2024-09-30",
+                 search: "{term}" }}) {{ items {{ id }} }} }}"#
+        );
+        let response = schema
+            .execute(authed(Request::new(query), Some(caller.clone())))
+            .await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let data = response.data.into_json().unwrap();
+        let ids: Vec<&str> = data["transactions"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["id"].as_str().unwrap())
+            .collect();
+        assert!(
+            ids.contains(&tx.to_string().as_str()),
+            "searching {term:?} must match \"SPOTIFY AB\""
+        );
+    }
+}
