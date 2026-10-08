@@ -1,5 +1,6 @@
 //! Integration tests for `setTransactionsCategory` / `setTransactionsTags`
-//! and the `transactionIds` / `amountMin` / `amountMax` filter fields.
+//! and the `transactionIds` / `amountMin` / `amountMax` / `counterpartyKeys`
+//! filter fields, plus the review flow's idempotent `ensureCategory`.
 //! Gated behind the `integration` feature like the rest of the suite; a
 //! throwaway Kafka container backs the publish side, Postgres is the shared
 //! `finreport-wp4-pg` instance (`common::db`).
@@ -492,4 +493,217 @@ async fn validation_failures_change_nothing() {
     // At the cap exactly is fine.
     let data = w.run_ok(bulk_category(&ids[..2], &slug)).await;
     assert_eq!(data["setTransactionsCategory"]["applied"], 2);
+}
+
+impl World {
+    async fn set_key(&self, tx: Uuid, key: &str) {
+        self.db
+            .execute_unprepared(&format!(
+                "UPDATE transaction SET counterparty_key = '{key}' WHERE id = '{tx}'"
+            ))
+            .await
+            .unwrap();
+    }
+
+    /// Ids of `transactions(filter: {...})`, sorted.
+    async fn filtered_ids(&self, filter: &str) -> Vec<String> {
+        let data = self
+            .run_ok(format!("{{ transactions(filter: {{ {filter} }}) {{ items {{ id }} }} }}"))
+            .await;
+        let mut ids: Vec<String> = data["transactions"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        ids
+    }
+}
+
+fn sorted_ids(ids: &[Uuid]) -> Vec<String> {
+    let mut v: Vec<String> = ids.iter().map(|i| i.to_string()).collect();
+    v.sort();
+    v
+}
+
+#[tokio::test]
+async fn counterparty_keys_select_every_variant_sharing_a_key_and_nothing_else() {
+    let w = world().await;
+    let tag = Uuid::new_v4().simple().to_string();
+    let (lidl, rewe) = (format!("lidl_{tag}"), format!("rewe_{tag}"));
+    // Three raw spellings of one merchant, one other merchant, one unkeyed.
+    let a = common::seed_transaction(&w.db, w.account, "2024-07-01", "-10.00", Some("LIDL SAGT DANKE")).await;
+    let b = common::seed_transaction(&w.db, w.account, "2024-07-02", "-11.00", Some("Lidl Berlin 123")).await;
+    let c = common::seed_transaction(&w.db, w.account, "2024-07-03", "-12.00", Some("LIDL DIGITAL")).await;
+    let other = common::seed_transaction(&w.db, w.account, "2024-07-04", "-13.00", Some("REWE")).await;
+    let unkeyed = common::seed_transaction(&w.db, w.account, "2024-07-05", "-14.00", Some("LIDL SAGT DANKE")).await;
+    for tx in [a, b, c] {
+        w.set_key(tx, &lidl).await;
+    }
+    w.set_key(other, &rewe).await;
+
+    assert_eq!(
+        w.filtered_ids(&format!(r#"counterpartyKeys: ["{lidl}"]"#)).await,
+        sorted_ids(&[a, b, c]),
+        "every variant sharing the key, and not the unkeyed or other-key rows"
+    );
+    assert_eq!(
+        w.filtered_ids(&format!(r#"counterpartyKeys: ["{lidl}", "{rewe}"]"#)).await,
+        sorted_ids(&[a, b, c, other]),
+        "keys are OR-ed"
+    );
+    assert!(w.filtered_ids(r#"counterpartyKeys: ["no_such_key"]"#).await.is_empty());
+    // The raw-name filter misses the variants: the reason this filter exists.
+    assert_eq!(
+        w.filtered_ids(r#"counterpartyNames: ["LIDL SAGT DANKE"]"#).await,
+        sorted_ids(&[a, unkeyed])
+    );
+    // The row exposes its key so a client can filter by it.
+    let data = w
+        .run_ok(format!(
+            r#"{{ transactions(filter: {{ transactionIds: ["{a}"] }}) {{ items {{ counterpartyKey }} }} }}"#
+        ))
+        .await;
+    assert_eq!(data["transactions"]["items"][0]["counterpartyKey"], lidl.as_str());
+
+    // The aggregations honour it too.
+    let summary = w
+        .run_ok(format!(
+            r#"{{ cashflowSummary(filter: {{ counterpartyKeys: ["{lidl}"] startDate: "2024-07-01" endDate: "2024-07-31" }}, granularity: MONTH) {{
+                buckets {{ spending transactionCount }} }} }}"#
+        ))
+        .await;
+    let bucket = &summary["cashflowSummary"]["buckets"][0];
+    assert_eq!(bucket["transactionCount"], 3);
+    assert_eq!(Decimal::from_str(bucket["spending"].as_str().unwrap()).unwrap(), Decimal::from(33));
+    // The graph over the key equals the graph over exactly those ids.
+    let graph_total = |filter: String| {
+        let w = &w;
+        async move {
+            let graph = w
+                .run_ok(format!(
+                    r#"{{ cashflowGraph(filter: {{ {filter} startDate: "2024-07-01" endDate: "2024-07-31" }}) {{ links {{ value }} }} }}"#
+                ))
+                .await;
+            graph["cashflowGraph"]["links"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|l| Decimal::from_str(l["value"].as_str().unwrap()).unwrap())
+                .sum::<Decimal>()
+        }
+    };
+    let by_key = graph_total(format!(r#"counterpartyKeys: ["{lidl}"]"#)).await;
+    let by_ids = graph_total(format!(r#"transactionIds: ["{a}", "{b}", "{c}"]"#)).await;
+    assert!(by_key > Decimal::ZERO);
+    assert_eq!(by_key, by_ids);
+}
+
+#[tokio::test]
+async fn a_bulk_edit_can_be_driven_by_counterparty_keys() {
+    let w = world().await;
+    let (_, slug) = common::seed_category(&w.db, "expense.bulk-key", "Key", "EXPENSE").await;
+    let key = format!("lidl_{}", Uuid::new_v4().simple());
+    let a = common::seed_transaction(&w.db, w.account, "2024-07-01", "-10.00", Some("LIDL A")).await;
+    let b = common::seed_transaction(&w.db, w.account, "2024-07-02", "-11.00", Some("Lidl B")).await;
+    let other = common::seed_transaction(&w.db, w.account, "2024-07-03", "-12.00", Some("REWE")).await;
+    w.set_key(a, &key).await;
+    w.set_key(b, &key).await;
+    w.set_key(other, "unrelated").await;
+
+    let data = w
+        .run_ok(format!(
+            r#"mutation {{ setTransactionsCategory(filter: {{ counterpartyKeys: ["{key}"] }}, categorySlug: "{slug}") {{ matched applied }} }}"#
+        ))
+        .await;
+    assert_eq!(data["setTransactionsCategory"]["matched"], 2);
+    assert_eq!(data["setTransactionsCategory"]["applied"], 2);
+    assert!(w.user_label(a).await.is_some());
+    assert!(w.user_label(b).await.is_some());
+    assert!(w.user_label(other).await.is_none());
+
+    let data = w
+        .run_ok(format!(
+            r#"mutation {{ setTransactionsTags(filter: {{ counterpartyKeys: ["{key}"] }}, tags: ["lidl"]) {{ matched applied }} }}"#
+        ))
+        .await;
+    assert_eq!(data["setTransactionsTags"]["matched"], 2);
+    assert_eq!(w.tags(a).await, vec!["lidl"]);
+    assert!(w.tags(other).await.is_empty());
+}
+
+fn ensure_category(slug: &str, kind: &str, parent: Option<&str>) -> String {
+    let parent = parent.map(|p| format!(r#", parentSlug: "{p}""#)).unwrap_or_default();
+    format!(
+        r#"mutation {{ ensureCategory(input: {{ slug: "{slug}", name: "Proposed", kind: {kind}{parent} }}) {{ id slug kind }} }}"#
+    )
+}
+
+fn error_code(response: &async_graphql::Response) -> Option<String> {
+    response
+        .errors
+        .first()
+        .and_then(|e| e.extensions.as_ref())
+        .and_then(|x| x.get("code"))
+        .map(|c| c.to_string().trim_matches('"').to_string())
+}
+
+#[tokio::test]
+async fn approving_the_same_proposed_category_twice_assigns_both_to_one_category() {
+    let w = world().await;
+    let slug = format!("proposed_{}", Uuid::new_v4().simple());
+    let first = w.tx("-10.00").await;
+    let second = w.tx("-20.00").await;
+
+    // What the review screen does per held transaction: ensure, then assign.
+    let mut ids = Vec::new();
+    for tx in [first, second] {
+        let data = w.run_ok(ensure_category(&slug, "EXPENSE", None)).await;
+        ids.push(data["ensureCategory"]["id"].as_str().unwrap().to_string());
+        w.run_ok(format!(
+            r#"mutation {{ setTransactionCategory(transactionId: "{tx}", categorySlug: "{slug}") {{ id }} }}"#
+        ))
+        .await;
+    }
+    assert_eq!(ids[0], ids[1], "the second call returns the category the first created");
+    let cat = Uuid::parse_str(&ids[0]).unwrap();
+    assert_eq!(w.user_label(first).await.unwrap().category_id, Some(cat));
+    assert_eq!(w.user_label(second).await.unwrap().category_id, Some(cat));
+}
+
+#[tokio::test]
+async fn create_category_stays_strict_about_duplicates() {
+    let w = world().await;
+    let slug = format!("strict_{}", Uuid::new_v4().simple());
+    w.run_ok(ensure_category(&slug, "EXPENSE", None)).await;
+    let dup = w
+        .run(format!(
+            r#"mutation {{ createCategory(input: {{ slug: "{slug}", name: "Again", kind: EXPENSE }}) {{ id }} }}"#
+        ))
+        .await;
+    assert!(!dup.errors.is_empty(), "createCategory must still reject a duplicate");
+    assert!(dup.errors[0].message.contains("already exists"), "{:?}", dup.errors);
+}
+
+#[tokio::test]
+async fn ensure_category_rejects_a_conflicting_definition() {
+    let w = world().await;
+    let parent = format!("parent_{}", Uuid::new_v4().simple());
+    let other_parent = format!("otherparent_{}", Uuid::new_v4().simple());
+    let child = format!("{parent}.child");
+    w.run_ok(ensure_category(&parent, "EXPENSE", None)).await;
+    w.run_ok(ensure_category(&other_parent, "EXPENSE", None)).await;
+    w.run_ok(ensure_category(&child, "EXPENSE", Some(&parent))).await;
+
+    // Same definition: fine (and the name is not part of the identity).
+    w.run_ok(ensure_category(&child, "EXPENSE", Some(&parent))).await;
+
+    // Different kind, then different parent: CONFLICT, nothing changed.
+    let kind = w.run(ensure_category(&child, "INCOME", Some(&parent))).await;
+    assert_eq!(error_code(&kind).as_deref(), Some("CONFLICT"), "{:?}", kind.errors);
+    let parented = w.run(ensure_category(&child, "EXPENSE", Some(&other_parent))).await;
+    assert_eq!(error_code(&parented).as_deref(), Some("CONFLICT"), "{:?}", parented.errors);
+    let orphan = w.run(ensure_category(&child, "EXPENSE", None)).await;
+    assert_eq!(error_code(&orphan).as_deref(), Some("CONFLICT"), "{:?}", orphan.errors);
 }

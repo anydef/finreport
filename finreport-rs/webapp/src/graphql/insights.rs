@@ -628,6 +628,7 @@ fn to_graphql_transaction(row: &transaction::Model) -> Transaction {
         counterparty_iban: row.counterparty_iban.clone(),
         description: row.description.clone(),
         transaction_type: row.transaction_type.clone(),
+        counterparty_key: row.counterparty_key.clone(),
     }
 }
 

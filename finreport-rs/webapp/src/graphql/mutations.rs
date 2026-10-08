@@ -138,6 +138,16 @@ impl MutationRoot {
         categories::create_category(db, publisher, input).await
     }
 
+    /// Idempotent `createCategory` for the review flow ("assign and create
+    /// new category"): an equivalent existing category (same kind and parent)
+    /// is returned as is; a clashing definition fails with `CONFLICT`.
+    async fn ensure_category(&self, ctx: &Context<'_>, input: CategoryInput) -> GqlResult<Category> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        categories::ensure_category(db, publisher, input).await
+    }
+
     async fn rename_category(
         &self,
         ctx: &Context<'_>,

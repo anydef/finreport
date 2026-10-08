@@ -26,6 +26,7 @@ fn to_graphql_transaction(row: transaction::Model) -> Transaction {
         counterparty_iban: row.counterparty_iban,
         description: row.description,
         transaction_type: row.transaction_type,
+        counterparty_key: row.counterparty_key,
     }
 }
 

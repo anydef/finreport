@@ -34,7 +34,13 @@ pub(crate) fn transaction_id_list(filter: &TransactionFilter) -> Option<Vec<Uuid
         .map(|ids| ids.iter().map(|id| id.0).collect())
 }
 
-/// Hand-rolled SQL twin of the `transactionIds`/`amountMin`/`amountMax`
+/// The filter's `counterpartyKeys`, if it names any. Unlike
+/// `transactionIds`, an empty list is unconstrained (as `counterpartyNames`).
+pub(crate) fn counterparty_key_list(filter: &TransactionFilter) -> Option<Vec<String>> {
+    filter.counterparty_keys.clone().filter(|k| !k.is_empty())
+}
+
+/// Hand-rolled SQL twin of the `transactionIds`/`counterpartyKeys`/`amountMin`/`amountMax`
 /// predicates in [`build_condition`], for the aggregation queries in
 /// `cashflow` that do not go through sea-orm. `alias` is the transaction
 /// table's alias (or name) in that query; `first_param` is the next free
@@ -51,6 +57,11 @@ pub(crate) fn id_and_amount_sql(
     if let Some(ids) = transaction_id_list(filter) {
         sql.push_str(&format!(" AND {alias}.id = ANY(${idx})"));
         params.push(ids.into());
+        idx += 1;
+    }
+    if let Some(keys) = counterparty_key_list(filter) {
+        sql.push_str(&format!(" AND {alias}.counterparty_key = ANY(${idx})"));
+        params.push(keys.into());
         idx += 1;
     }
     let (min, max) = amount_magnitude_bounds(filter);
@@ -74,6 +85,9 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
 
     if let Some(ids) = transaction_id_list(filter) {
         condition = condition.add(transaction::Column::Id.is_in(ids));
+    }
+    if let Some(keys) = counterparty_key_list(filter) {
+        condition = condition.add(transaction::Column::CounterpartyKey.is_in(keys));
     }
     let (amount_min, amount_max) = amount_magnitude_bounds(filter);
     if let Some(min) = amount_min {
@@ -310,6 +324,7 @@ pub(crate) fn to_graphql_transaction(row: transaction::Model) -> Transaction {
         counterparty_iban: row.counterparty_iban,
         description: row.description,
         transaction_type: row.transaction_type,
+        counterparty_key: row.counterparty_key,
     }
 }
 
@@ -423,6 +438,50 @@ mod tests {
         let (sql, params) = id_and_amount_sql("t", &filter, 3);
         assert_eq!(sql, " AND ABS(t.amount) <= $3");
         assert_eq!(params.len(), 1);
+    }
+
+    #[test]
+    fn counterparty_keys_sql_sits_between_ids_and_amounts_and_empty_is_unconstrained() {
+        let filter = TransactionFilter {
+            transaction_ids: Some(vec![GqlUuid(Uuid::nil())]),
+            counterparty_keys: Some(vec!["lidl".into(), "rewe".into()]),
+            amount_max: Some(dec("20")),
+            ..Default::default()
+        };
+        let (sql, params) = id_and_amount_sql("t", &filter, 1);
+        assert_eq!(
+            sql,
+            " AND t.id = ANY($1) AND t.counterparty_key = ANY($2) AND ABS(t.amount) <= $3"
+        );
+        assert_eq!(params.len(), 3);
+
+        let empty = TransactionFilter {
+            counterparty_keys: Some(vec![]),
+            ..Default::default()
+        };
+        assert_eq!(counterparty_key_list(&empty), None);
+        assert!(id_and_amount_sql("t", &empty, 1).0.is_empty());
+    }
+
+    #[test]
+    fn counterparty_keys_condition_is_added_only_when_non_empty() {
+        use sea_orm::{DbBackend, QueryTrait};
+        let sql = |filter: &TransactionFilter| {
+            transaction::Entity::find()
+                .filter(build_condition(&[Uuid::nil()], filter))
+                .build(DbBackend::Postgres)
+                .to_string()
+        };
+        let with = sql(&TransactionFilter {
+            counterparty_keys: Some(vec!["lidl".into(), "rewe".into()]),
+            ..Default::default()
+        });
+        assert!(with.contains(r#""counterparty_key" IN ('lidl', 'rewe')"#), "{with}");
+        let without = sql(&TransactionFilter {
+            counterparty_keys: Some(vec![]),
+            ..Default::default()
+        });
+        assert!(!without.contains(r#""counterparty_key" IN"#), "{without}");
     }
 
     #[test]

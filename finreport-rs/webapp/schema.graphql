@@ -403,6 +403,12 @@ type Mutation {
 	splitTransaction(transactionId: UUID!, parts: [SplitPartInput!]!): Transaction!
 	unsplitTransaction(transactionId: UUID!): Transaction!
 	createCategory(input: CategoryInput!): Category!
+	"""
+	Idempotent `createCategory` for the review flow ("assign and create
+	new category"): an equivalent existing category (same kind and parent)
+	is returned as is; a clashing definition fails with `CONFLICT`.
+	"""
+	ensureCategory(input: CategoryInput!): Category!
 	renameCategory(id: UUID!, name: String!): Category!
 	archiveCategory(id: UUID!): Category!
 	createRule(input: RuleInput!): Rule!
@@ -627,6 +633,13 @@ type Transaction {
 	counterpartyIban: String
 	description: String
 	transactionType: String
+	"""
+	Normalised counterparty (`transaction.counterparty_key`), the same key
+	rule learning and recurring detection use; filter by it with
+	`TransactionFilter.counterpartyKeys`. `null` until the labeler has
+	normalised the row.
+	"""
+	counterpartyKey: String
 	label: TransactionLabel
 	splits: [TransactionSplit!]!
 	"""
@@ -709,6 +722,12 @@ input TransactionFilter {
 	unbounded. Use `direction` to pick income or spending.
 	"""
 	amountMax: Decimal
+	"""
+	Normalized counterparty keys (`transaction.counterparty_key`), OR-ed.
+	Matches variants of one merchant that `counterpartyNames` would miss.
+	Omitted or empty = unconstrained.
+	"""
+	counterpartyKeys: [String!]
 }
 
 type TransactionLabel {

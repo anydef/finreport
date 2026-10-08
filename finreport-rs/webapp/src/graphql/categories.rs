@@ -252,6 +252,71 @@ pub async fn create_category(
         .ok_or_else(|| async_graphql::Error::new("category upsert did not take effect"))
 }
 
+fn conflict_error(message: impl Into<String>) -> async_graphql::Error {
+    async_graphql::Error::new(message.into()).extend_with(|_, e| e.set("code", "CONFLICT"))
+}
+
+/// Why an existing category cannot stand in for the one `ensureCategory`
+/// was asked for, or `None` when it can. Only the *identity* of the
+/// definition is compared (`kind`, parent, not archived); `name` is display
+/// text that `renameCategory` changes freely, so a different name is not a
+/// conflict. Pure, so the decision is unit-tested without a database.
+pub(crate) fn definition_conflict(
+    slug: &str,
+    existing_kind: &str,
+    existing_parent_slug: Option<&str>,
+    existing_archived: bool,
+    input: &CategoryInput,
+) -> Option<String> {
+    if existing_kind != gql_kind_str(input.kind) {
+        return Some(format!(
+            "category '{slug}' already exists with kind '{existing_kind}', not '{}'",
+            gql_kind_str(input.kind)
+        ));
+    }
+    if existing_parent_slug != input.parent_slug.as_deref() {
+        return Some(format!(
+            "category '{slug}' already exists under parent {}, not {}",
+            existing_parent_slug.unwrap_or("(none)"),
+            input.parent_slug.as_deref().unwrap_or("(none)")
+        ));
+    }
+    if existing_archived {
+        return Some(format!("category '{slug}' already exists but is archived"));
+    }
+    None
+}
+
+/// `ensureCategory`: the review flow's "make sure this category exists" —
+/// returns the existing category when `slug` is already taken by an
+/// equivalent one (same kind and parent, not archived), creates it exactly as
+/// [`create_category`] would otherwise, and fails with a `CONFLICT` error when
+/// the slug exists with a different definition. `create_category` itself stays
+/// strict: a duplicate there is a mistake worth reporting.
+pub async fn ensure_category(
+    db: &DatabaseConnection,
+    publisher: Option<&Arc<EventPublisher>>,
+    input: CategoryInput,
+) -> async_graphql::Result<Category> {
+    let Some(existing) = find_by_slug(db, &input.slug).await? else {
+        return create_category(db, publisher, input).await;
+    };
+    let existing_parent_slug = match existing.parent_id {
+        Some(parent_id) => find_by_id(db, parent_id).await?.map(|p| p.slug),
+        None => None,
+    };
+    match definition_conflict(
+        &input.slug,
+        &existing.kind,
+        existing_parent_slug.as_deref(),
+        existing.archived,
+        &input,
+    ) {
+        Some(reason) => Err(conflict_error(reason)),
+        None => Ok(to_graphql(existing)),
+    }
+}
+
 /// `renameCategory` (§5): `slug` is immutable, only `name` changes.
 pub async fn rename_category(
     db: &DatabaseConnection,
@@ -365,6 +430,34 @@ fn parse_origin(origin: &str) -> CategoryOrigin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn input(kind: GqlCategoryKind, parent: Option<&str>) -> CategoryInput {
+        CategoryInput {
+            slug: "housing.coworking".into(),
+            name: "Coworking".into(),
+            kind,
+            parent_slug: parent.map(String::from),
+        }
+    }
+
+    #[test]
+    fn matching_kind_and_parent_is_not_a_conflict_whatever_the_name() {
+        let i = input(GqlCategoryKind::Expense, Some("housing"));
+        assert_eq!(
+            definition_conflict("housing.coworking", "expense", Some("housing"), false, &i),
+            None
+        );
+    }
+
+    #[test]
+    fn different_kind_parent_or_archived_is_a_conflict() {
+        let i = input(GqlCategoryKind::Expense, Some("housing"));
+        let c = |kind, parent, archived| definition_conflict("housing.coworking", kind, parent, archived, &i);
+        assert!(c("income", Some("housing"), false).unwrap().contains("kind"));
+        assert!(c("expense", Some("other"), false).unwrap().contains("parent"));
+        assert!(c("expense", None, false).unwrap().contains("(none)"));
+        assert!(c("expense", Some("housing"), true).unwrap().contains("archived"));
+    }
 
     #[test]
     fn valid_slugs_accepted() {

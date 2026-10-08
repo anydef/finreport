@@ -102,6 +102,11 @@ pub struct Transaction {
     pub counterparty_iban: Option<String>,
     pub description: Option<String>,
     pub transaction_type: Option<String>,
+    /// Normalised counterparty (`transaction.counterparty_key`), the same key
+    /// rule learning and recurring detection use; filter by it with
+    /// `TransactionFilter.counterpartyKeys`. `null` until the labeler has
+    /// normalised the row.
+    pub counterparty_key: Option<String>,
 }
 
 /// Iteration 2 (§5): `label`/`splits` are resolver-computed, not eagerly
@@ -280,6 +285,10 @@ pub struct TransactionFilter {
     /// Inclusive bound on the amount's magnitude (absolute value); `None` =
     /// unbounded. Use `direction` to pick income or spending.
     pub amount_max: Option<Decimal>,
+    /// Normalized counterparty keys (`transaction.counterparty_key`), OR-ed.
+    /// Matches variants of one merchant that `counterpartyNames` would miss.
+    /// Omitted or empty = unconstrained.
+    pub counterparty_keys: Option<Vec<String>>,
 }
 
 #[derive(InputObject)]
