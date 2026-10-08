@@ -52,6 +52,7 @@ query ReviewQueue($page: PageInput) {
 			amount
 			currency
 			counterpartyName
+			counterpartyKey
 			description
 			label {
 				source
@@ -73,6 +74,47 @@ query ReviewQueue($page: PageInput) {
 			}
 		}
 		pendingRules {${RULE_FIELDS}
+		}
+		totalCount
+	}
+}`;
+
+/**
+ * Held transactions narrowed to one counterparty ("find similar"). The
+ * `reviewQueue` operation takes no filter, so this uses `transactions` with
+ * `needsReview: true`; the selection matches `REVIEW_QUEUE_WITH_SPLITS_QUERY`
+ * so `ReviewCard` renders either source.
+ */
+export const REVIEW_HELD_TRANSACTIONS_QUERY = `
+query ReviewHeldTransactions($filter: TransactionFilter, $page: PageInput) {
+	transactions(filter: $filter, page: $page) {
+		items {
+			id
+			accountId
+			bookingDate
+			amount
+			currency
+			counterpartyName
+			counterpartyKey
+			description
+			label {
+				source
+				status
+				reviewReason
+				proposedCategoryPath
+				reasoning
+				confidence
+			}
+			splits {
+				index
+				amount
+				category {
+					id
+					slug
+					name
+					kind
+				}
+			}
 		}
 		totalCount
 	}

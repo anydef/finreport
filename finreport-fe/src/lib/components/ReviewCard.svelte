@@ -9,6 +9,11 @@
 		onSetCategory: (categorySlug: string) => Promise<void>;
 		onCreateAndApplyProposed: (proposedPath: string) => Promise<void>;
 		onOpenSplitEditor: () => void;
+		/** Whether the card is ticked for a bulk edit. Omit `onselect` to hide the checkbox. */
+		selected?: boolean;
+		/** Ticked as part of "all matching": shown checked but not individually untickable. */
+		selectLocked?: boolean;
+		onselect?: () => void;
 	}
 
 	let {
@@ -16,7 +21,10 @@
 		categories,
 		onSetCategory,
 		onCreateAndApplyProposed,
-		onOpenSplitEditor
+		onOpenSplitEditor,
+		selected = false,
+		selectLocked = false,
+		onselect
 	}: Props = $props();
 
 	/**
@@ -55,6 +63,9 @@
 	let busy = $state(false);
 	let errorMessage = $state('');
 
+	const title = $derived(
+		transaction.counterpartyName ?? transaction.description ?? 'Unknown counterparty'
+	);
 	const label = $derived(transaction.label);
 	const reason = $derived(
 		label?.reviewReason ?? (label?.status === 'NEEDS_REVIEW' ? 'OTHER' : null)
@@ -95,13 +106,27 @@
 	}
 </script>
 
-<div class="flex flex-col gap-3 rounded-lg border border-slate-200 p-4">
+<div
+	class="flex flex-col gap-3 rounded-lg border p-4 {selected
+		? 'border-brand bg-slate-50'
+		: 'border-slate-200'}"
+>
 	<div class="flex flex-wrap items-start justify-between gap-2">
-		<div>
-			<p class="text-sm font-medium text-slate-900">
-				{transaction.counterpartyName ?? transaction.description ?? 'Unknown counterparty'}
-			</p>
-			<p class="text-xs text-slate-500">{formatDisplayDate(transaction.bookingDate)}</p>
+		<div class="flex items-start gap-3">
+			{#if onselect}
+				<input
+					type="checkbox"
+					checked={selected}
+					disabled={selectLocked}
+					onchange={onselect}
+					aria-label="Select {title}, {formatAmount(transaction.amount, transaction.currency)}"
+					class="focus-visible:outline-brand mt-0.5 h-4 w-4 cursor-pointer rounded border-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed"
+				/>
+			{/if}
+			<div>
+				<p class="text-sm font-medium text-slate-900">{title}</p>
+				<p class="text-xs text-slate-500">{formatDisplayDate(transaction.bookingDate)}</p>
+			</div>
 		</div>
 		<p class="text-sm font-semibold text-slate-900">
 			{formatAmount(transaction.amount, transaction.currency)}

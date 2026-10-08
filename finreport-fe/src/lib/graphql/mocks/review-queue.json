@@ -18,7 +18,8 @@
             "proposedCategoryPath": null,
             "reasoning": "fake provider: multiple plausible categories",
             "confidence": 0.6
-          }
+          },
+          "counterpartyKey": "amazon"
         },
         {
           "id": "3c2d1e0f-8a7b-4c6d-9e5f-1a2b3c4d5e6f",
@@ -35,6 +36,79 @@
             "proposedCategoryPath": "housing.coworking",
             "reasoning": "fake provider: proposing new category housing.coworking",
             "confidence": 0.8
+          },
+          "counterpartyKey": "acme co working"
+        },
+        {
+          "id": "6a1b2c3d-0001-4a5b-8c9d-0e1f2a3b4c01",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-21",
+          "amount": "-18.40",
+          "currency": "EUR",
+          "counterpartyName": "Amazon",
+          "counterpartyKey": "amazon",
+          "description": "Marketplace order",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.55
+          }
+        },
+        {
+          "id": "6a1b2c3d-0002-4a5b-8c9d-0e1f2a3b4c02",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-14",
+          "amount": "-72.15",
+          "currency": "EUR",
+          "counterpartyName": "Amazon",
+          "counterpartyKey": "amazon",
+          "description": "Prime Video and books",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.55
+          }
+        },
+        {
+          "id": "6a1b2c3d-0003-4a5b-8c9d-0e1f2a3b4c03",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-10",
+          "amount": "-9.99",
+          "currency": "EUR",
+          "counterpartyName": "Kleinanbieter Meyer",
+          "counterpartyKey": "kleinanbieter meyer",
+          "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.55
+          }
+        },
+        {
+          "id": "6a1b2c3d-0004-4a5b-8c9d-0e1f2a3b4c04",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-03",
+          "amount": "-33.00",
+          "currency": "EUR",
+          "counterpartyName": "Unknown shop",
+          "counterpartyKey": null,
+          "description": "POS purchase",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.55
           }
         }
       ],
@@ -48,7 +122,9 @@
             "name": "Gym",
             "kind": "EXPENSE"
           },
-          "conditions": { "counterpartyKey": "fitness first" },
+          "conditions": {
+            "counterpartyKey": "fitness first"
+          },
           "priority": 0,
           "state": "IN_REVIEW",
           "origin": "LEARNED",
@@ -58,7 +134,7 @@
           "createdAt": "2024-06-20T08:00:00Z"
         }
       ],
-      "totalCount": 3
+      "totalCount": 6
     }
   }
 }

@@ -4,6 +4,9 @@ import {
 	describeResult,
 	filterKey,
 	headerState,
+	pruneSelection,
+	reviewQueueFilter,
+	similarTarget,
 	isSelected,
 	selectAllMatching,
 	selectedCount,
@@ -103,5 +106,59 @@ describe('describeResult', () => {
 	});
 	it('flags total failure', () => {
 		expect(describeResult(r(0, 3)).tone).toBe('failed');
+	});
+});
+
+describe('pruneSelection', () => {
+	it('drops ids that are no longer loaded, keeping the same object when unchanged', () => {
+		const sel = { mode: 'ids' as const, ids: ['a', 'b'], withSplits: ['b'] };
+		expect(pruneSelection(sel, ['a', 'b', 'c'])).toBe(sel);
+		expect(pruneSelection(sel, ['a'])).toEqual({ mode: 'ids', ids: ['a'], withSplits: [] });
+	});
+	it('leaves all-matching alone', () => {
+		const all = selectAllMatching();
+		expect(pruneSelection(all, [])).toBe(all);
+	});
+});
+
+describe('reviewQueueFilter', () => {
+	it('always carries needsReview, adding the counterparty when given', () => {
+		expect(reviewQueueFilter()).toEqual({ needsReview: true });
+		expect(reviewQueueFilter('amazon')).toEqual({
+			needsReview: true,
+			counterpartyKeys: ['amazon']
+		});
+	});
+	it('keeps a bulk filter inside the queue', () => {
+		const f = selectionFilter(reviewQueueFilter('amazon'), {
+			mode: 'ids',
+			ids: ['a'],
+			withSplits: []
+		});
+		expect(f).toEqual({ needsReview: true, counterpartyKeys: ['amazon'], transactionIds: ['a'] });
+		expect(selectionFilter(reviewQueueFilter(), selectAllMatching())).toEqual({
+			needsReview: true
+		});
+	});
+});
+
+describe('similarTarget', () => {
+	const rows = [
+		{ id: 'a', counterpartyKey: 'amazon' },
+		{ id: 'b', counterpartyKey: null },
+		{ id: 'c' }
+	];
+	const ids = (...i: string[]) => ({ mode: 'ids' as const, ids: i, withSplits: [] });
+	it('is ready for exactly one keyed transaction', () => {
+		expect(similarTarget(ids('a'), rows)).toEqual({ kind: 'ready', counterpartyKey: 'amazon' });
+	});
+	it('reports a missing key rather than offering a dead action', () => {
+		expect(similarTarget(ids('b'), rows)).toEqual({ kind: 'no-key' });
+		expect(similarTarget(ids('c'), rows)).toEqual({ kind: 'no-key' });
+	});
+	it('needs exactly one selection', () => {
+		expect(similarTarget(EMPTY_SELECTION, rows)).toEqual({ kind: 'needs-one' });
+		expect(similarTarget(ids('a', 'b'), rows)).toEqual({ kind: 'needs-one' });
+		expect(similarTarget(selectAllMatching(), rows)).toEqual({ kind: 'needs-one' });
 	});
 });

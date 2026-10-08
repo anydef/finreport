@@ -85,6 +85,48 @@ export function splitCount(
 }
 
 /**
+ * Drop explicit ids that are no longer among the loaded rows (resolved by a
+ * per-card action, or paged away), so the count never claims rows that are
+ * gone. All-matching is left alone: its count comes from the live total.
+ * Returns the same object when nothing changed.
+ */
+export function pruneSelection(sel: Selection, existingIds: string[]): Selection {
+	if (sel.mode === 'all-matching') return sel;
+	const keep = new Set(existingIds);
+	if (sel.ids.every((id) => keep.has(id))) return sel;
+	return {
+		mode: 'ids',
+		ids: sel.ids.filter((id) => keep.has(id)),
+		withSplits: sel.withSplits.filter((id) => keep.has(id))
+	};
+}
+
+/** The filter that selects the held (review-queue) transactions, optionally one counterparty's. */
+export function reviewQueueFilter(counterpartyKey?: string | null): TransactionFilter {
+	return counterpartyKey
+		? { needsReview: true, counterpartyKeys: [counterpartyKey] }
+		: { needsReview: true };
+}
+
+export type SimilarTarget =
+	| { kind: 'ready'; counterpartyKey: string }
+	| { kind: 'no-key' }
+	| { kind: 'needs-one' };
+
+/**
+ * What "find similar" can do for the current selection: it needs exactly one
+ * ticked transaction, and that transaction needs a counterparty key.
+ */
+export function similarTarget(
+	sel: Selection,
+	rows: Pick<Transaction, 'id' | 'counterpartyKey'>[]
+): SimilarTarget {
+	if (sel.mode !== 'ids' || sel.ids.length !== 1) return { kind: 'needs-one' };
+	const key = rows.find((r) => r.id === sel.ids[0])?.counterpartyKey;
+	return key ? { kind: 'ready', counterpartyKey: key } : { kind: 'no-key' };
+}
+
+/**
  * Stable identity of a filter, key order and undefined/empty values ignored.
  * A selection is only valid for the key it was made under.
  */

@@ -129,6 +129,7 @@ function mockLogout(): GraphqlBackendResult {
 
 interface MockTransaction {
 	id: string;
+	counterpartyKey?: string | null;
 	accountId: string;
 	amount: string;
 	counterpartyName: string | null;
@@ -169,7 +170,11 @@ function applyInsightFilters(
 	const transfer = filter.transfer as boolean | undefined;
 	const needsReview = filter.needsReview as boolean | undefined;
 	const uncategorized = filter.uncategorized as boolean | undefined;
+	const counterpartyKeys = filter.counterpartyKeys as string[] | undefined;
 	return items.filter((item) => {
+		if (counterpartyKeys?.length && !counterpartyKeys.includes(item.counterpartyKey ?? '')) {
+			return false;
+		}
 		if (accountIds?.length && !accountIds.includes(item.accountId)) return false;
 		if (search) {
 			const haystack = `${item.counterpartyName ?? ''} ${item.description ?? ''}`.toLowerCase();
@@ -225,7 +230,9 @@ function mockFixtureItems(): MockTransaction[] {
 function mockBulkEdit(variables: Record<string, unknown> | undefined, field: string): unknown {
 	const filter = variables?.filter as Record<string, unknown> | undefined;
 	const ids = filter?.transactionIds as string[] | undefined;
-	let matchedItems = applyInsightFilters(mockFixtureItems(), filter);
+	// A `needsReview` edit targets the held queue, whose rows live in the review fixture.
+	const source = filter?.needsReview === true ? mockReviewItems() : mockFixtureItems();
+	let matchedItems = applyInsightFilters(source, filter);
 	if (ids) matchedItems = matchedItems.filter((item) => ids.includes(item.id));
 	const matched = ids ? ids.length : matchedItems.length;
 	const failed = matched >= 3 ? 1 : 0;
@@ -234,6 +241,44 @@ function mockBulkEdit(variables: Record<string, unknown> | undefined, field: str
 			? matchedItems.filter((item) => item.splits.length > 0).length
 			: 0;
 	return { [field]: { matched, applied: matched - failed, failed, splitsCleared } };
+}
+
+/** The review-queue fixture shaped like full transactions, so the shared filters apply to it. */
+function mockReviewItems(): MockTransaction[] {
+	return reviewQueueMock.data.reviewQueue.transactions.map((item) => ({
+		splits: [],
+		tags: [],
+		transfer: null,
+		recurring: { isRecurring: false },
+		...item
+	})) as unknown as MockTransaction[];
+}
+
+/** `ReviewQueue`: the held fixture, paged like the real query; the queue lists every held row. */
+function mockReviewQueue(variables: Record<string, unknown> | undefined): unknown {
+	const page = variables?.page as { limit?: number; offset?: number } | undefined;
+	const offset = page?.offset ?? 0;
+	const limit = page?.limit ?? Number.MAX_SAFE_INTEGER;
+	const all = reviewQueueMock.data.reviewQueue;
+	return {
+		reviewQueue: { ...all, transactions: mockReviewItems().slice(offset, offset + limit) }
+	};
+}
+
+/** `ReviewHeldTransactions`: held rows narrowed by the transaction filter (e.g. `counterpartyKeys`). */
+function mockReviewHeld(variables: Record<string, unknown> | undefined): unknown {
+	const page = variables?.page as { limit?: number; offset?: number } | undefined;
+	const filtered = applyInsightFilters(
+		mockReviewItems(),
+		variables?.filter as Record<string, unknown> | undefined
+	);
+	const offset = page?.offset ?? 0;
+	return {
+		transactions: {
+			items: filtered.slice(offset, offset + (page?.limit ?? filtered.length)),
+			totalCount: filtered.length
+		}
+	};
 }
 
 function mockTransactions(variables: Record<string, unknown> | undefined): unknown {
@@ -578,7 +623,13 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'Categories':
 			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
 		case 'ReviewQueue':
-			return { status: 200, body: { data: reviewQueueMock.data }, setCookies: [] };
+			return {
+				status: 200,
+				body: { data: mockReviewQueue(body.variables) },
+				setCookies: []
+			};
+		case 'ReviewHeldTransactions':
+			return { status: 200, body: { data: mockReviewHeld(body.variables) }, setCookies: [] };
 		case 'Rules':
 			return { status: 200, body: { data: rulesMock.data }, setCookies: [] };
 		case 'RecentlyAutoApprovedRules':

@@ -23,13 +23,24 @@
 		categories: Category[] | null;
 		onApplyCategory: (slug: string) => Promise<BulkEditResult>;
 		onApplyTags: (tags: string[]) => Promise<BulkEditResult>;
+		/** Extra explanation shown under the override note (e.g. what else the edit does). */
+		note?: string;
 		/** Called when the dialog closes after a result came back. */
 		ondone: () => void;
 		onclose: () => void;
 	}
 
-	let { kind, count, splits, categories, onApplyCategory, onApplyTags, ondone, onclose }: Props =
-		$props();
+	let {
+		kind,
+		count,
+		splits,
+		categories,
+		onApplyCategory,
+		onApplyTags,
+		note,
+		ondone,
+		onclose
+	}: Props = $props();
 
 	let slug = $state<string | null>(null);
 	let tags = $state<string[]>([]);
@@ -101,6 +112,9 @@
 			{/if}
 			There is no undo, but you can run another bulk edit to correct it.
 		</p>
+		{#if note}
+			<p class="text-sm text-slate-700" data-testid="bulk-note">{note}</p>
+		{/if}
 
 		{#if kind === 'category'}
 			{#if categories === null}

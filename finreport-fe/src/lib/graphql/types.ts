@@ -78,6 +78,8 @@ export interface Transaction {
 	counterpartyIban: string | null;
 	description: string | null;
 	transactionType: string | null;
+	/** Normalised counterparty; `null` until the labeler has processed the row. */
+	counterpartyKey?: string | null;
 	/** `null` = not labelled yet (distinct from `needsReview`). */
 	label: TransactionLabel | null;
 	/** Empty when not split. */
@@ -116,6 +118,8 @@ export interface TransactionFilter {
 	amountMax?: Decimal | null;
 	/** Exact ids, OR-ed among themselves and AND-ed with the other conditions. */
 	transactionIds?: UUID[] | null;
+	/** Normalised counterparty keys (`Transaction.counterpartyKey`), OR-ed. */
+	counterpartyKeys?: string[] | null;
 }
 
 export interface PageInput {
