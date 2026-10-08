@@ -696,6 +696,15 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 				body: { data: { createCategory: mockCreateOrUpdateCategory(body.variables) } },
 				setCookies: []
 			};
+		// `ensureCategory` is create-or-return-existing, so a mock that always
+		// echoes the requested category is faithful: the real mutation only
+		// differs from `createCategory` by not failing on a repeat.
+		case 'EnsureCategory':
+			return {
+				status: 200,
+				body: { data: { ensureCategory: mockCreateOrUpdateCategory(body.variables) } },
+				setCookies: []
+			};
 		case 'RenameCategory':
 			return {
 				status: 200,

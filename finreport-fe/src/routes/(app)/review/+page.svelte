@@ -2,7 +2,7 @@
 	import { invalidateAll } from '$app/navigation';
 	import { createGraphqlClient } from '$lib/graphqlClient';
 	import {
-		CREATE_CATEGORY_MUTATION,
+		ENSURE_CATEGORY_MUTATION,
 		SET_RULE_STATE_MUTATION,
 		SET_TRANSACTION_CATEGORY_MUTATION,
 		SPLIT_TRANSACTION_MUTATION,
@@ -51,7 +51,11 @@
 			.map((w) => w.charAt(0).toUpperCase() + w.slice(1))
 			.join(' ');
 		const parentSlug = segments.length > 1 ? segments.slice(0, -1).join('.') : undefined;
-		await mutate(CREATE_CATEGORY_MUTATION, {
+		// `ensureCategory`, not `createCategory`: the LLM proposes the same
+		// missing category for many held transactions, so the second approval
+		// must reuse the category the first one created rather than failing
+		// with "already exists".
+		await mutate(ENSURE_CATEGORY_MUTATION, {
 			input: { slug, name, kind: 'EXPENSE', parentSlug }
 		});
 		await setCategory(transactionId, slug);

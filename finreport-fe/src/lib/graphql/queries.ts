@@ -357,6 +357,25 @@ mutation CreateCategory($input: CategoryInput!) {
 	}
 }`;
 
+/** Review flow: create the proposed category if it is missing, otherwise
+ * return the existing one. `createCategory` stays strict, because on the
+ * admin page a duplicate really is a mistake — but the LLM proposes the same
+ * missing category for many held transactions, so approving the second one
+ * must not fail. */
+export const ENSURE_CATEGORY_MUTATION = `
+mutation EnsureCategory($input: CategoryInput!) {
+	ensureCategory(input: $input) {
+		id
+		slug
+		name
+		kind
+		parentId
+		depth
+		archived
+		origin
+	}
+}`;
+
 export const RENAME_CATEGORY_MUTATION = `
 mutation RenameCategory($id: UUID!, $name: String!) {
 	renameCategory(id: $id, name: $name) {
