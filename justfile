@@ -19,11 +19,26 @@ docker_image_name := "finreport-be"
 # CLAUDE.md for the directory layout this assumes. A `CARGO_TARGET_DIR`
 # already set in the calling shell overrides this.
 export CARGO_TARGET_DIR := env_var_or_default("CARGO_TARGET_DIR", `
-    here="$(pwd)"; parent="$(dirname "$here")"
-    if [ "$(basename "$parent")" = "finreport-worktrees" ]; then
-        echo "$parent/.cargo-target"
+    # Resolved from git, not from the path: every worktree of this repo shares
+    # one git-common-dir, which always points at the MAIN checkout regardless
+    # of where just runs from. Deriving it from pwd instead assumed every
+    # worktree is a sibling under finreport-worktrees/, and silently started a
+    # second full target dir for any that is not. Agent worktrees live under
+    # .claude/worktrees/agent-*/, so that assumption produced a 13G duplicate
+    # of a cache that already existed, and a cold compile each time.
+    common="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+    if [ -n "$common" ] && [ -d "$common" ]; then
+        main_checkout="$(dirname "$(cd "$common" && pwd)")"
+        echo "$(dirname "$main_checkout")/finreport-worktrees/.cargo-target"
     else
-        echo "$parent/finreport-worktrees/.cargo-target"
+        # Not a git checkout (an extracted tarball, say): keep the old
+        # sibling-layout guess rather than failing outright.
+        parent="$(dirname "$(pwd)")"
+        if [ "$(basename "$parent")" = "finreport-worktrees" ]; then
+            echo "$parent/.cargo-target"
+        else
+            echo "$parent/finreport-worktrees/.cargo-target"
+        fi
     fi
 `)
 
