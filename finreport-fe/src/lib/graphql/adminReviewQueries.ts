@@ -33,6 +33,7 @@ const RULE_FIELDS = `
 	autoApproved
 	confidence
 	evidenceCount
+	matchingTransactionCount
 	createdAt`;
 
 /**

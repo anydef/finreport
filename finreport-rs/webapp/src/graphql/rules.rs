@@ -11,12 +11,16 @@ use sea_orm::{
 };
 use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::OnceCell;
 use uuid::Uuid;
 
 use crate::graphql::categories::find_by_slug;
 use crate::graphql::events::{kafka_unavailable_error, publish_event};
 use crate::graphql::scalars::Uuid as GqlUuid;
 use crate::graphql::types::{Category, Rule, RuleInput, RuleOrigin as GqlRuleOrigin, RuleState as GqlRuleState};
+use crate::graphql::current_user::{current_user, scoped_account_ids};
+use crate::labeling::processor::rule_direction_str;
+use crate::labeling::rules::{count_matching, RuleMatchInput};
 use crate::kafka::labeling::{
     LabelRequestRecord, LabelRequestTarget, RuleConditions, RuleOrigin as KafkaRuleOrigin,
     RuleRecord, RuleState as KafkaRuleState, CURRENT_SCHEMA_VERSION, TOPIC_LABEL_REQUEST,
@@ -567,4 +571,186 @@ pub async fn reapply_rule(
         .ok_or_else(|| async_graphql::Error::new("count query returned no rows"))?;
     let count: i64 = row.try_get("", "count")?;
     Ok(count as i32)
+}
+
+// ---------------------------------------------------------------------------
+// `Rule.matchingTransactionCount`: a rule's reach over the caller's data
+// ---------------------------------------------------------------------------
+
+/// The fields of one transaction the rule matcher reads, owned.
+struct ReachRow {
+    counterparty_key: Option<String>,
+    counterparty_iban: Option<String>,
+    description: Option<String>,
+    transaction_type: Option<String>,
+    amount: rust_decimal::Decimal,
+    account_id: Uuid,
+}
+
+impl ReachRow {
+    fn as_input(&self) -> RuleMatchInput<'_> {
+        RuleMatchInput {
+            counterparty_key: self.counterparty_key.as_deref(),
+            counterparty_iban: self.counterparty_iban.as_deref(),
+            description: self.description.as_deref(),
+            transaction_type: self.transaction_type.as_deref(),
+            // Same derivation the labeler uses (`processor::resolve`).
+            direction: Some(rule_direction_str(self.amount)),
+            amount: self.amount,
+            account_id: Some(self.account_id),
+        }
+    }
+}
+
+/// Per-request cache (inserted by `request_with_auth`): the caller's
+/// matchable transaction fields, loaded by one query the first time any
+/// `Rule.matchingTransactionCount` resolves. Every other rule on the page
+/// then counts against the same in-memory rows, so a page of N rules costs
+/// one transaction query, not N.
+#[derive(Default)]
+pub struct RuleReachCache {
+    rows: OnceCell<Arc<Vec<ReachRow>>>,
+}
+
+type ReachTuple = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    rust_decimal::Decimal,
+    Uuid,
+);
+
+async fn load_reach_rows(
+    db: &DatabaseConnection,
+    account_ids: &[Uuid],
+) -> async_graphql::Result<Vec<ReachRow>> {
+    use entity::entities::transaction::{Column, Entity};
+    if account_ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let rows = Entity::find()
+        .select_only()
+        .columns([
+            Column::CounterpartyKey,
+            Column::CounterpartyIban,
+            Column::Description,
+            Column::TransactionType,
+            Column::Amount,
+            Column::AccountId,
+        ])
+        .filter(Column::AccountId.is_in(account_ids.to_vec()))
+        .into_tuple::<ReachTuple>()
+        .all(db)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(counterparty_key, counterparty_iban, description, transaction_type, amount, account_id)| {
+                ReachRow {
+                    counterparty_key,
+                    counterparty_iban,
+                    description,
+                    transaction_type,
+                    amount,
+                    account_id,
+                }
+            },
+        )
+        .collect())
+}
+
+/// Counts `conditions` over `rows` with the labeler's matcher. Unparseable
+/// stored conditions (cannot happen for rows written through
+/// `validate_conditions`) count as 0 rather than failing the whole page.
+fn reach(conditions: &serde_json::Value, rows: &[ReachRow]) -> i32 {
+    let parsed: RuleConditions = match serde_json::from_value(conditions.clone()) {
+        Ok(c) => c,
+        Err(error) => {
+            tracing::warn!(%error, "rule conditions do not parse; reach reported as 0");
+            return 0;
+        }
+    };
+    let inputs: Vec<RuleMatchInput<'_>> = rows.iter().map(ReachRow::as_input).collect();
+    count_matching(&parsed, &inputs) as i32
+}
+
+pub(crate) async fn matching_transaction_count(
+    ctx: &async_graphql::Context<'_>,
+    conditions: &serde_json::Value,
+) -> async_graphql::Result<i32> {
+    let user = current_user(ctx)?;
+    let db: &Arc<DatabaseConnection> = ctx.data()?;
+    let scoped = scoped_account_ids(user, None)?;
+    match ctx.data::<RuleReachCache>() {
+        Ok(cache) => {
+            let rows = cache
+                .rows
+                .get_or_try_init(|| async { load_reach_rows(db, &scoped).await.map(Arc::new) })
+                .await?;
+            Ok(reach(conditions, rows))
+        }
+        // No per-request cache (e.g. a test schema): load for this call.
+        Err(_) => Ok(reach(conditions, &load_reach_rows(db, &scoped).await?)),
+    }
+}
+
+#[cfg(test)]
+mod reach_tests {
+    use super::*;
+    use rust_decimal::Decimal;
+
+    fn row(key: Option<&str>, description: Option<&str>, amount: i64, account: u8) -> ReachRow {
+        ReachRow {
+            counterparty_key: key.map(str::to_string),
+            counterparty_iban: None,
+            description: description.map(str::to_string),
+            transaction_type: None,
+            amount: Decimal::from(amount),
+            account_id: Uuid::from_bytes([account; 16]),
+        }
+    }
+
+    fn rows() -> Vec<ReachRow> {
+        vec![
+            row(Some("lidl"), Some("LIDL 1"), -10, 1),
+            row(Some("lidl"), Some("LIDL 2"), -20, 1),
+            row(Some("rewe"), Some("REWE"), -30, 2),
+            row(None, Some("Salary"), 1000, 2),
+        ]
+    }
+
+    #[test]
+    fn counts_from_the_snake_case_json_the_api_stores() {
+        let rows = rows();
+        assert_eq!(reach(&serde_json::json!({"counterparty_key": "lidl"}), &rows), 2);
+        assert_eq!(
+            reach(
+                &serde_json::json!({"counterparty_key": "lidl", "direction": "INCOME"}),
+                &rows
+            ),
+            0
+        );
+        assert_eq!(
+            reach(&serde_json::json!({"description_contains": "re"}), &rows),
+            1
+        );
+    }
+
+    #[test]
+    fn a_rule_without_conditions_matches_every_transaction() {
+        assert_eq!(reach(&serde_json::json!({}), &rows()), 4);
+    }
+
+    #[test]
+    fn unparseable_conditions_count_zero() {
+        assert_eq!(reach(&serde_json::json!({"amount_min": "not a number"}), &rows()), 0);
+    }
+
+    #[test]
+    fn direction_is_derived_like_the_labeler_does() {
+        let rows = rows();
+        assert_eq!(reach(&serde_json::json!({"direction": "SPENDING"}), &rows), 3);
+        assert_eq!(reach(&serde_json::json!({"direction": "INCOME"}), &rows), 1);
+    }
 }

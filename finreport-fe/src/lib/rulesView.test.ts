@@ -4,7 +4,9 @@ import {
 	canHaveChildren,
 	flattenCategoryTreeWithPath,
 	groupRulesByState,
+	describeReach,
 	isAutoApproved,
+	mergeConditions,
 	MAX_CATEGORY_DEPTH,
 	sortByRecentlyCreated,
 	sortRulesBySpecificity,
@@ -33,28 +35,29 @@ function rule(overrides: Partial<Rule> & { id: string }): Rule {
 		autoApproved: false,
 		confidence: null,
 		evidenceCount: 0,
+		matchingTransactionCount: 0,
 		createdAt: '2024-01-01T00:00:00Z',
 		...overrides
 	};
 }
 
 describe('specificityScore', () => {
-	it('weighs counterpartyKey and counterpartyIban at 2', () => {
-		expect(specificityScore({ counterpartyKey: 'lidl' })).toBe(2);
-		expect(specificityScore({ counterpartyIban: 'DE12' })).toBe(2);
+	it('weighs counterparty_key and counterparty_iban at 2', () => {
+		expect(specificityScore({ counterparty_key: 'lidl' })).toBe(2);
+		expect(specificityScore({ counterparty_iban: 'DE12' })).toBe(2);
 	});
 
 	it('weighs a bounded amount range at 1, only when both bounds are present', () => {
-		expect(specificityScore({ amountMin: '0' })).toBe(0);
-		expect(specificityScore({ amountMin: '0', amountMax: '50' })).toBe(1);
+		expect(specificityScore({ amount_min: '0' })).toBe(0);
+		expect(specificityScore({ amount_min: '0', amount_max: '50' })).toBe(1);
 	});
 
 	it('sums every present condition', () => {
 		expect(
 			specificityScore({
-				counterpartyKey: 'lidl',
-				amountMin: '0',
-				amountMax: '50',
+				counterparty_key: 'lidl',
+				amount_min: '0',
+				amount_max: '50',
 				direction: 'SPENDING'
 			})
 		).toBe(4);
@@ -74,7 +77,7 @@ describe('sortRulesBySpecificity', () => {
 
 	it('breaks a priority tie by specificity descending', () => {
 		const vague = rule({ id: 'b', conditions: { direction: 'SPENDING' } });
-		const specific = rule({ id: 'a', conditions: { counterpartyKey: 'lidl' } });
+		const specific = rule({ id: 'a', conditions: { counterparty_key: 'lidl' } });
 		expect(sortRulesBySpecificity([vague, specific])).toEqual([specific, vague]);
 	});
 
@@ -88,7 +91,7 @@ describe('sortRulesBySpecificity', () => {
 describe('summarizeConditions', () => {
 	it('renders one line per present condition', () => {
 		expect(
-			summarizeConditions({ counterpartyKey: 'lidl', direction: 'SPENDING', amountMax: '50' })
+			summarizeConditions({ counterparty_key: 'lidl', direction: 'SPENDING', amount_max: '50' })
 		).toEqual(['counterparty = "lidl"', 'direction = SPENDING', 'amount … – 50']);
 	});
 
@@ -186,5 +189,93 @@ describe('flattenCategoryTreeWithPath', () => {
 		const tree = buildCategoryTree([food, groceries]);
 		const flat = flattenCategoryTreeWithPath(tree);
 		expect(flat.map((f) => f.path)).toEqual(['Food', 'Food / Groceries']);
+	});
+});
+
+describe('camelCase keys are not conditions', () => {
+	it('ignores the old camelCase spelling the backend would reject', () => {
+		expect(specificityScore({ counterpartyKey: 'lidl' })).toBe(0);
+		expect(summarizeConditions({ counterpartyKey: 'lidl' })).toEqual([]);
+	});
+
+	it('scores and summarizes account_ids and numeric amounts', () => {
+		const c = { account_ids: ['a', 'b'], amount_min: -80, amount_max: 0 };
+		expect(specificityScore(c)).toBe(2);
+		expect(summarizeConditions(c)).toEqual(['amount -80 – 0', 'account in [2]']);
+	});
+});
+
+describe('mergeConditions', () => {
+	const blank = {
+		counterparty_key: '',
+		counterparty_iban: '',
+		description_contains: '',
+		description_regex: '',
+		direction: '' as const,
+		amount_min: '',
+		amount_max: ''
+	};
+
+	it('creates snake_case keys, trimmed, omitting empty fields', () => {
+		expect(mergeConditions({}, { ...blank, counterparty_key: ' lidl ', amount_min: '-5' })).toEqual(
+			{ counterparty_key: 'lidl', amount_min: '-5' }
+		);
+	});
+
+	it('carries account_ids through an edit unchanged', () => {
+		const existing = { counterparty_key: 'lidl', account_ids: ['a1', 'a2'] };
+		expect(mergeConditions(existing, { ...blank, counterparty_key: 'rewe' })).toEqual({
+			counterparty_key: 'rewe',
+			account_ids: ['a1', 'a2']
+		});
+	});
+
+	it('removes a condition the user cleared', () => {
+		expect(
+			mergeConditions(
+				{ counterparty_key: 'lidl', direction: 'SPENDING' },
+				{ ...blank, direction: 'SPENDING' }
+			)
+		).toEqual({ direction: 'SPENDING' });
+	});
+
+	it('does not mutate the stored conditions', () => {
+		const existing = { counterparty_key: 'lidl' };
+		mergeConditions(existing, blank);
+		expect(existing).toEqual({ counterparty_key: 'lidl' });
+	});
+
+	it('only ever emits keys the backend accepts', () => {
+		const allowed = [
+			'counterparty_key',
+			'counterparty_iban',
+			'description_regex',
+			'description_contains',
+			'direction',
+			'amount_min',
+			'amount_max',
+			'account_ids'
+		];
+		const out = mergeConditions(
+			{ account_ids: ['x'] },
+			{
+				counterparty_key: 'a',
+				counterparty_iban: 'b',
+				description_contains: 'c',
+				description_regex: 'd',
+				direction: 'INCOME',
+				amount_min: '1',
+				amount_max: '2'
+			}
+		);
+		expect(Object.keys(out).every((k) => allowed.includes(k))).toBe(true);
+	});
+});
+
+describe('describeReach', () => {
+	it('spells out the zero state', () => {
+		expect(describeReach(0)).toBe('matches nothing');
+		expect(describeReach(1)).toBe('1 transaction');
+		expect(describeReach(37)).toBe('37 transactions');
 	});
 });

@@ -360,7 +360,7 @@ fn transaction_direction(amount: rust_decimal::Decimal) -> Direction {
 /// The rules engine's own, coarser direction string (`"SPENDING"`/`"INCOME"`,
 /// mirroring the GraphQL `Direction` enum) — distinct from
 /// [`transaction_direction`]'s `fingerprint::Direction`.
-fn rule_direction_str(amount: rust_decimal::Decimal) -> &'static str {
+pub(crate) fn rule_direction_str(amount: rust_decimal::Decimal) -> &'static str {
     if amount.is_sign_negative() {
         "SPENDING"
     } else {

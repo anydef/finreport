@@ -5,7 +5,12 @@
 	 * actions revoke / re-apply / edit.
 	 */
 	import Button from '../Button.svelte';
-	import { groupRulesByState, isAutoApproved, summarizeConditions } from '$lib/rulesView';
+	import {
+		describeReach,
+		groupRulesByState,
+		isAutoApproved,
+		summarizeConditions
+	} from '$lib/rulesView';
 	import type { Rule } from '$lib/graphql/types';
 
 	interface Props {
@@ -62,6 +67,12 @@
 			{rule.confidence !== null ? `${Math.round(rule.confidence * 100)}%` : '—'}
 			<span class="block text-xs text-slate-400">{rule.evidenceCount} evidence</span>
 		</td>
+		<td
+			class={`py-2 pr-4 whitespace-nowrap ${rule.matchingTransactionCount === 0 ? 'text-amber-600' : 'text-slate-600'}`}
+			title="Transactions in your accounts these conditions match, whatever their current label"
+		>
+			{describeReach(rule.matchingTransactionCount)}
+		</td>
 		<td class="py-2 pr-0 text-right whitespace-nowrap">
 			<Button variant="ghost" onclick={() => onedit(rule)}>Edit</Button>
 			{#if rule.state !== 'REVOKED'}
@@ -90,6 +101,7 @@
 								<th class="py-2 pr-4 font-medium">Category</th>
 								<th class="py-2 pr-4 font-medium">Match conditions</th>
 								<th class="py-2 pr-4 font-medium">Confidence</th>
+								<th class="py-2 pr-4 font-medium">Matches</th>
 								<th class="py-2 pr-0 text-right font-medium">Actions</th>
 							</tr>
 						</thead>

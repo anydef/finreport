@@ -1,5 +1,5 @@
 {
-  "query": "query Rules($state: RuleState) {\n  rules(state: $state) {\n    id\n    name\n    category {\n      id\n      slug\n      name\n      kind\n    }\n    conditions\n    priority\n    state\n    origin\n    autoApproved\n    confidence\n    evidenceCount\n    createdAt\n  }\n}",
+  "query": "query Rules($state: RuleState) {\n  rules(state: $state) {\n    id\n    name\n    category {\n      id\n      slug\n      name\n      kind\n    }\n    conditions\n    priority\n    state\n    origin\n    autoApproved\n    confidence\n    evidenceCount\n    matchingTransactionCount\n    createdAt\n  }\n}",
   "data": {
     "rules": [
       {
@@ -11,13 +11,14 @@
           "name": "Gym",
           "kind": "EXPENSE"
         },
-        "conditions": { "counterpartyKey": "fitness first" },
+        "conditions": { "counterparty_key": "fitness first" },
         "priority": 0,
         "state": "ACTIVE",
         "origin": "LEARNED",
         "autoApproved": true,
         "confidence": 0.95,
         "evidenceCount": 5,
+        "matchingTransactionCount": 12,
         "createdAt": "2024-06-01T08:00:00Z"
       },
       {
@@ -29,14 +30,40 @@
           "name": "Groceries",
           "kind": "EXPENSE"
         },
-        "conditions": { "counterpartyKey": "rewe" },
+        "conditions": { "counterparty_key": "rewe" },
         "priority": 0,
         "state": "ACTIVE",
         "origin": "USER",
         "autoApproved": false,
         "confidence": null,
         "evidenceCount": 0,
+        "matchingTransactionCount": 37,
         "createdAt": "2024-05-15T12:30:00Z"
+      },
+      {
+        "id": "8a6152c3-ce1f-4d0a-d192-5e6f7182939a",
+        "name": "Old gym (no matches) → personal.gym",
+        "category": {
+          "id": "5e4f3021-ac9d-4b8e-bf70-3c4d5e6f7182",
+          "slug": "personal.gym",
+          "name": "Gym",
+          "kind": "EXPENSE"
+        },
+        "conditions": {
+          "description_contains": "gold's gym",
+          "direction": "SPENDING",
+          "amount_min": "-80.00",
+          "amount_max": "-20.00",
+          "account_ids": ["9b7263d4-df20-4e1b-a2a3-6f718293a4ab"]
+        },
+        "priority": 0,
+        "state": "ACTIVE",
+        "origin": "USER",
+        "autoApproved": false,
+        "confidence": null,
+        "evidenceCount": 0,
+        "matchingTransactionCount": 0,
+        "createdAt": "2024-04-02T09:00:00Z"
       }
     ]
   }

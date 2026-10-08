@@ -40,9 +40,45 @@ pub struct RuleMatchInput<'a> {
 
 /// Whether `rule.conditions` all match `input` (AND of every *present*
 /// condition; an absent condition imposes no constraint). An uncompilable
-/// `description_regex` makes the condition **not match** (and is logged by
-/// the caller via the `Err` path) rather than panicking.
-fn conditions_match(conditions: &RuleConditions, input: &RuleMatchInput<'_>) -> bool {
+/// `description_regex` makes the condition **not match** (and is logged)
+/// rather than panicking.
+pub fn conditions_match(conditions: &RuleConditions, input: &RuleMatchInput<'_>) -> bool {
+    let regex = conditions
+        .description_regex
+        .as_deref()
+        .map(compile_description_regex);
+    conditions_match_precompiled(conditions, regex.as_ref(), input)
+}
+
+/// How many of `inputs` the `conditions` match, ignoring each transaction's
+/// current label and the rule's state: the rule's *reach*. Runs the very
+/// same [`conditions_match_precompiled`] the labeler's `most_specific_match`
+/// does, so the number cannot drift from what the labeler would do; the
+/// regex is compiled once rather than per transaction.
+///
+/// A rule with no conditions at all matches every input (an absent
+/// condition imposes no constraint, as in the labeler).
+pub fn count_matching<'a>(
+    conditions: &RuleConditions,
+    inputs: impl IntoIterator<Item = &'a RuleMatchInput<'a>>,
+) -> usize {
+    let regex = conditions
+        .description_regex
+        .as_deref()
+        .map(compile_description_regex);
+    inputs
+        .into_iter()
+        .filter(|input| conditions_match_precompiled(conditions, regex.as_ref(), input))
+        .count()
+}
+
+/// `regex` is `conditions.description_regex` already compiled: `None` when
+/// the rule has no regex condition, `Some(None)` when it failed to compile.
+fn conditions_match_precompiled(
+    conditions: &RuleConditions,
+    regex: Option<&Option<regex::Regex>>,
+    input: &RuleMatchInput<'_>,
+) -> bool {
     if let Some(key) = &conditions.counterparty_key
         && input.counterparty_key != Some(key.as_str())
     {
@@ -54,7 +90,7 @@ fn conditions_match(conditions: &RuleConditions, input: &RuleMatchInput<'_>) -> 
         return false;
     }
     if let Some(pattern) = &conditions.description_regex {
-        match compile_description_regex(pattern) {
+        match regex.and_then(|r| r.as_ref()) {
             Some(re) => {
                 if !input.description.is_some_and(|d| re.is_match(d)) {
                     return false;
@@ -411,5 +447,149 @@ mod tests {
     fn no_conditions_present_matches_everything_active() {
         let rules = vec![rule(1, 0, RuleConditions::default(), RuleState::Active)];
         assert!(most_specific_match(&rules, &input(None)).is_some());
+    }
+
+    fn corpus() -> Vec<RuleMatchInput<'static>> {
+        let account_a = Uuid::from_bytes([0xaa; 16]);
+        let account_b = Uuid::from_bytes([0xbb; 16]);
+        vec![
+            RuleMatchInput {
+                counterparty_key: Some("lidl"),
+                counterparty_iban: Some("DE01"),
+                description: Some("LIDL SAGT DANKE 1234"),
+                transaction_type: None,
+                direction: Some("SPENDING"),
+                amount: Decimal::from(-25),
+                account_id: Some(account_a),
+            },
+            RuleMatchInput {
+                counterparty_key: Some("lidl"),
+                counterparty_iban: None,
+                description: Some("Lidl refund"),
+                transaction_type: None,
+                direction: Some("INCOME"),
+                amount: Decimal::from(5),
+                account_id: Some(account_b),
+            },
+            RuleMatchInput {
+                counterparty_key: Some("rewe"),
+                counterparty_iban: None,
+                description: None,
+                transaction_type: None,
+                direction: Some("SPENDING"),
+                amount: Decimal::from(-60),
+                account_id: Some(account_a),
+            },
+            RuleMatchInput {
+                counterparty_key: None,
+                counterparty_iban: None,
+                description: Some("Salary"),
+                transaction_type: None,
+                direction: Some("INCOME"),
+                amount: Decimal::from(2000),
+                account_id: Some(account_b),
+            },
+        ]
+    }
+
+    #[test]
+    fn count_matching_agrees_with_the_labelers_per_transaction_verdict() {
+        let account_a = Uuid::from_bytes([0xaa; 16]);
+        let cases = vec![
+            // (conditions, expected reach over `corpus()`)
+            (RuleConditions::default(), 4),
+            (
+                RuleConditions {
+                    counterparty_key: Some("lidl".into()),
+                    ..Default::default()
+                },
+                2,
+            ),
+            (
+                RuleConditions {
+                    counterparty_key: Some("lidl".into()),
+                    direction: Some("SPENDING".into()),
+                    ..Default::default()
+                },
+                1,
+            ),
+            (
+                RuleConditions {
+                    description_contains: Some("LIDL".into()),
+                    ..Default::default()
+                },
+                2,
+            ),
+            (
+                RuleConditions {
+                    description_regex: Some(r"^lidl\b".into()),
+                    ..Default::default()
+                },
+                0,
+            ),
+            (
+                RuleConditions {
+                    description_regex: Some(r"LIDL SAGT DANKE \d+".into()),
+                    ..Default::default()
+                },
+                1,
+            ),
+            (
+                RuleConditions {
+                    amount_min: Some(Decimal::from(-30)),
+                    amount_max: Some(Decimal::from(10)),
+                    ..Default::default()
+                },
+                2,
+            ),
+            (
+                RuleConditions {
+                    account_ids: Some(vec![account_a]),
+                    ..Default::default()
+                },
+                2,
+            ),
+            (
+                RuleConditions {
+                    counterparty_iban: Some("DE01".into()),
+                    ..Default::default()
+                },
+                1,
+            ),
+            // Does not compile: matches nothing, never panics.
+            (
+                RuleConditions {
+                    description_regex: Some("(".into()),
+                    ..Default::default()
+                },
+                0,
+            ),
+        ];
+        let inputs = corpus();
+        for (conditions, expected) in cases {
+            let count = count_matching(&conditions, &inputs);
+            // The labeler's own verdict, transaction by transaction.
+            let rules = vec![rule(1, 0, conditions.clone(), RuleState::Active)];
+            let verdict = inputs
+                .iter()
+                .filter(|i| most_specific_match(&rules, i).is_some())
+                .count();
+            assert_eq!(count, verdict, "{conditions:?}");
+            assert_eq!(count, expected, "{conditions:?}");
+        }
+    }
+
+    #[test]
+    fn count_matching_ignores_rule_state() {
+        // Reach is independent of whether the rule is active: a revoked rule
+        // still has a reach even though the labeler would skip it.
+        let conditions = RuleConditions {
+            counterparty_key: Some("lidl".into()),
+            ..Default::default()
+        };
+        let revoked = vec![rule(1, 0, conditions.clone(), RuleState::Revoked)];
+        let inputs = corpus();
+        assert!(inputs.iter().all(|i| most_specific_match(&revoked, i).is_none()));
+        assert_eq!(count_matching(&conditions, &inputs), 2);
     }
 }

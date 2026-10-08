@@ -85,4 +85,5 @@ pub fn request_with_auth(
         .data(user)
         .data(raw_token)
         .data(LabelSplitCache::default())
+        .data(rules::RuleReachCache::default())
 }

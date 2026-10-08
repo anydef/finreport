@@ -442,6 +442,7 @@ function mockCreateOrUpdateRule(
 		autoApproved: existing?.autoApproved ?? false,
 		confidence: existing?.confidence ?? null,
 		evidenceCount: existing?.evidenceCount ?? 0,
+		matchingTransactionCount: existing?.matchingTransactionCount ?? 0,
 		createdAt: existing?.createdAt ?? new Date().toISOString()
 	};
 }

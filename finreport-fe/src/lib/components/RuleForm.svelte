@@ -7,7 +7,7 @@
 	 */
 	import Button from './Button.svelte';
 	import Field from './Field.svelte';
-	import { flattenCategoryTreeWithPath, buildCategoryTree } from '$lib/rulesView';
+	import { flattenCategoryTreeWithPath, buildCategoryTree, mergeConditions } from '$lib/rulesView';
 	import type { Category, Rule, RuleInput } from '$lib/graphql/types';
 	import type { RuleConditions } from '$lib/rulesView';
 
@@ -50,13 +50,13 @@
 		name = rule?.name ?? '';
 		categorySlug = rule?.category.slug ?? categoryOptions[0]?.category.slug ?? '';
 		priority = rule?.priority ?? 0;
-		counterpartyKey = c.counterpartyKey ?? '';
-		counterpartyIban = c.counterpartyIban ?? '';
-		descriptionContains = c.descriptionContains ?? '';
-		descriptionRegex = c.descriptionRegex ?? '';
+		counterpartyKey = c.counterparty_key ?? '';
+		counterpartyIban = c.counterparty_iban ?? '';
+		descriptionContains = c.description_contains ?? '';
+		descriptionRegex = c.description_regex ?? '';
 		direction = c.direction ?? '';
-		amountMin = c.amountMin ?? '';
-		amountMax = c.amountMax ?? '';
+		amountMin = c.amount_min != null ? String(c.amount_min) : '';
+		amountMax = c.amount_max != null ? String(c.amount_max) : '';
 	});
 
 	$effect(() => {
@@ -66,15 +66,15 @@
 	});
 
 	function buildConditions(): Record<string, unknown> {
-		const conditions: Record<string, unknown> = {};
-		if (counterpartyKey.trim()) conditions.counterpartyKey = counterpartyKey.trim();
-		if (counterpartyIban.trim()) conditions.counterpartyIban = counterpartyIban.trim();
-		if (descriptionContains.trim()) conditions.descriptionContains = descriptionContains.trim();
-		if (descriptionRegex.trim()) conditions.descriptionRegex = descriptionRegex.trim();
-		if (direction) conditions.direction = direction;
-		if (amountMin.trim()) conditions.amountMin = amountMin.trim();
-		if (amountMax.trim()) conditions.amountMax = amountMax.trim();
-		return conditions;
+		return mergeConditions(rule?.conditions ?? {}, {
+			counterparty_key: counterpartyKey,
+			counterparty_iban: counterpartyIban,
+			description_contains: descriptionContains,
+			description_regex: descriptionRegex,
+			direction,
+			amount_min: amountMin,
+			amount_max: amountMax
+		});
 	}
 
 	function handleSubmit(e: SubmitEvent) {

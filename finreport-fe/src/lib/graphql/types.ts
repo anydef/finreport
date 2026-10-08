@@ -212,6 +212,12 @@ export interface Rule {
 	autoApproved: boolean;
 	confidence: number | null;
 	evidenceCount: number;
+	/**
+	 * How many of the caller's own transactions the rule's `conditions` match
+	 * (its reach), whatever their current label and whatever the rule's state.
+	 * Not the number of transactions this rule currently labels.
+	 */
+	matchingTransactionCount: number;
 	/** RFC 3339 instant. */
 	createdAt: string;
 }

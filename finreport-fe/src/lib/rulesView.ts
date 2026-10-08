@@ -12,15 +12,22 @@ import type { Category, Json, Rule, RuleState } from './graphql/types';
 // Rule ordering (§2.7: "most specific wins")
 // ---------------------------------------------------------------------------
 
+/**
+ * The `conditions` JSON exactly as the backend stores and validates it:
+ * snake_case keys (`validate_conditions` rejects anything else), decimals as
+ * strings (a bare JSON number is tolerated on read). This is the one
+ * conditions type for the whole frontend: scoring, summaries and the form
+ * all read and write these keys.
+ */
 export interface RuleConditions {
-	counterpartyKey?: string;
-	counterpartyIban?: string;
-	descriptionRegex?: string;
-	descriptionContains?: string;
+	counterparty_key?: string;
+	counterparty_iban?: string;
+	description_regex?: string;
+	description_contains?: string;
 	direction?: 'INCOME' | 'SPENDING';
-	amountMin?: string;
-	amountMax?: string;
-	accountIds?: string[];
+	amount_min?: string | number;
+	amount_max?: string | number;
+	account_ids?: string[];
 }
 
 function asConditions(conditions: Json): RuleConditions {
@@ -28,20 +35,21 @@ function asConditions(conditions: Json): RuleConditions {
 }
 
 /**
- * Specificity score per §2.7: `counterpartyIban`/`counterpartyKey` weigh 2
- * each, a bounded amount range (`amountMin` *and* `amountMax` both present)
- * weighs 1, every other present condition weighs 1.
+ * Specificity score per §2.7: `counterparty_iban`/`counterparty_key` weigh 2
+ * each, a bounded amount range (`amount_min` *and* `amount_max` both
+ * present) weighs 1, every other present condition weighs 1.
  */
 export function specificityScore(conditions: Json): number {
 	const c = asConditions(conditions);
+	const present = (v: unknown) => v !== undefined && v !== null && v !== '';
 	let score = 0;
-	if (c.counterpartyIban) score += 2;
-	if (c.counterpartyKey) score += 2;
-	if (c.amountMin !== undefined && c.amountMax !== undefined) score += 1;
-	if (c.descriptionRegex) score += 1;
-	if (c.descriptionContains) score += 1;
+	if (c.counterparty_iban) score += 2;
+	if (c.counterparty_key) score += 2;
+	if (present(c.amount_min) && present(c.amount_max)) score += 1;
+	if (c.description_regex) score += 1;
+	if (c.description_contains) score += 1;
 	if (c.direction) score += 1;
-	if (c.accountIds && c.accountIds.length > 0) score += 1;
+	if (c.account_ids && c.account_ids.length > 0) score += 1;
 	return score;
 }
 
@@ -62,19 +70,58 @@ export function sortRulesBySpecificity(rules: Rule[]): Rule[] {
 /** One human-readable line per present condition, AND-ed together (§2.7). */
 export function summarizeConditions(conditions: Json): string[] {
 	const c = asConditions(conditions);
+	const present = (v: unknown) => v !== undefined && v !== null && v !== '';
 	const parts: string[] = [];
-	if (c.counterpartyKey) parts.push(`counterparty = "${c.counterpartyKey}"`);
-	if (c.counterpartyIban) parts.push(`IBAN = ${c.counterpartyIban}`);
-	if (c.descriptionContains) parts.push(`description contains "${c.descriptionContains}"`);
-	if (c.descriptionRegex) parts.push(`description matches /${c.descriptionRegex}/`);
+	if (c.counterparty_key) parts.push(`counterparty = "${c.counterparty_key}"`);
+	if (c.counterparty_iban) parts.push(`IBAN = ${c.counterparty_iban}`);
+	if (c.description_contains) parts.push(`description contains "${c.description_contains}"`);
+	if (c.description_regex) parts.push(`description matches /${c.description_regex}/`);
 	if (c.direction) parts.push(`direction = ${c.direction}`);
-	if (c.amountMin !== undefined || c.amountMax !== undefined) {
-		parts.push(`amount ${c.amountMin ?? '…'} – ${c.amountMax ?? '…'}`);
+	if (present(c.amount_min) || present(c.amount_max)) {
+		parts.push(
+			`amount ${present(c.amount_min) ? c.amount_min : '…'} – ${present(c.amount_max) ? c.amount_max : '…'}`
+		);
 	}
-	if (c.accountIds && c.accountIds.length > 0) {
-		parts.push(`account in [${c.accountIds.length}]`);
+	if (c.account_ids && c.account_ids.length > 0) {
+		parts.push(`account in [${c.account_ids.length}]`);
 	}
 	return parts;
+}
+
+/** The condition keys `RuleForm` has an input for; every other stored key is carried through an edit untouched. */
+export type EditableConditions = {
+	counterparty_key: string;
+	counterparty_iban: string;
+	description_contains: string;
+	description_regex: string;
+	direction: '' | 'INCOME' | 'SPENDING';
+	amount_min: string;
+	amount_max: string;
+};
+
+/**
+ * The `conditions` to submit for an edit: the rule's stored conditions with
+ * each form-editable key set (trimmed, non-empty) or removed (empty). Keys
+ * the form has no field for (`account_ids`) survive unchanged, so editing a
+ * rule never silently drops them. Keys are the backend's snake_case.
+ */
+export function mergeConditions(
+	existing: Json,
+	edited: EditableConditions
+): Record<string, unknown> {
+	const merged: Record<string, unknown> = { ...(existing as Record<string, unknown> | null) };
+	for (const [key, raw] of Object.entries(edited)) {
+		const value = raw.trim();
+		if (value) merged[key] = value;
+		else delete merged[key];
+	}
+	return merged;
+}
+
+/** The "matches N transactions" cell text; the zero state is spelled out, not a bare 0. */
+export function describeReach(count: number): string {
+	if (count === 0) return 'matches nothing';
+	return `${count} transaction${count === 1 ? '' : 's'}`;
 }
 
 // ---------------------------------------------------------------------------

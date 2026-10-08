@@ -235,6 +235,7 @@ const RULE_FIELDS = `
 	autoApproved
 	confidence
 	evidenceCount
+	matchingTransactionCount
 	createdAt`;
 
 export const RULES_QUERY = `

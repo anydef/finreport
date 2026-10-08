@@ -527,6 +527,7 @@ pub struct TransactionSplit {
 }
 
 #[derive(SimpleObject, Clone)]
+#[graphql(complex)]
 pub struct Rule {
     pub id: Uuid,
     pub name: String,
@@ -539,6 +540,25 @@ pub struct Rule {
     pub confidence: Option<f32>,
     pub evidence_count: i32,
     pub created_at: crate::graphql::scalars::DateTime,
+}
+
+#[ComplexObject]
+impl Rule {
+    /// How many of the caller's own transactions this rule's `conditions`
+    /// match: the rule's reach, counted over every transaction in the
+    /// caller's accounts regardless of how it is currently labelled and
+    /// regardless of this rule's `state`. It is NOT the number of
+    /// transactions this rule is currently the label source for (a more
+    /// specific or higher-priority rule, a user override or a split can
+    /// win a transaction this rule also matches). A rule with no
+    /// conditions matches every transaction. Evaluated by the labeler's own
+    /// condition matcher.
+    async fn matching_transaction_count(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<i32> {
+        crate::graphql::rules::matching_transaction_count(ctx, &self.conditions.0).await
+    }
 }
 
 #[derive(SimpleObject)]
