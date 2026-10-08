@@ -54,12 +54,17 @@ function readDrilldown(url: URL) {
 	const hasCounterpartyParam = url.searchParams.get('selHasCounterparty');
 	const categorySlugs = url.searchParams.get('selCategorySlugs')?.split(',').filter(Boolean);
 	const uncategorizedParam = url.searchParams.get('selUncategorized');
+	const needsReviewParam = url.searchParams.get('selNeedsReview');
 	return {
 		accountIds: accountIds?.length ? accountIds : undefined,
 		counterpartyNames: counterpartyNames?.length ? counterpartyNames : undefined,
 		hasCounterparty: hasCounterpartyParam === 'false' ? false : undefined,
 		categorySlugs: categorySlugs?.length ? categorySlugs : undefined,
-		uncategorized: uncategorizedParam === 'true' ? true : undefined
+		uncategorized: uncategorizedParam === 'true' ? true : undefined,
+		// Tri-state: an "Uncategorized" bar click sends `false` (held labels are
+		// a separate bar), a "Needs review" bar click sends `true`.
+		needsReview:
+			needsReviewParam === 'true' ? true : needsReviewParam === 'false' ? false : undefined
 	};
 }
 
@@ -154,6 +159,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		granularity,
 		drilldown,
 		panel,
+		/** The period + panel filter the breakdown ran with; expanding a row scopes a copy of it. */
+		breakdownFilter: periodFilter as Partial<TransactionFilter>,
 		sankeyDimension,
 		offset,
 		error,

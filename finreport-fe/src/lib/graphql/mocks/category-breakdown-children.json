@@ -1,0 +1,122 @@
+{
+  "query": "query CategoryBreakdown($filter: TransactionFilter!, $level: Int, $kind: CategoryKind) {\n  categoryBreakdown(filter: $filter, level: $level, kind: $kind) {\n    rows {\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      amount\n      transactionCount\n      share\n    }\n    uncategorized {\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      amount\n      transactionCount\n      share\n    }\n    needsReview {\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      amount\n      transactionCount\n      share\n    }\n    currency\n  }\n}",
+  "comment": "Mock-only: the categoryBreakdown payload served for an expanded dashboard row, keyed by the parent slug (a query scoped to one category with level > 1). Level 3 is reachable via personal -> personal.gym -> personal.gym.membership.",
+  "data": {
+    "food": {
+      "rows": [
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000101",
+            "slug": "food.groceries",
+            "name": "Groceries",
+            "kind": "EXPENSE"
+          },
+          "amount": "200.00",
+          "transactionCount": 8,
+          "share": 0.62
+        },
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000102",
+            "slug": "food.restaurants",
+            "name": "Restaurants",
+            "kind": "EXPENSE"
+          },
+          "amount": "90.00",
+          "transactionCount": 3,
+          "share": 0.28
+        },
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000103",
+            "slug": "food.takeaway",
+            "name": "Takeaway",
+            "kind": "EXPENSE"
+          },
+          "amount": "20.00",
+          "transactionCount": 1,
+          "share": 0.06
+        },
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000104",
+            "slug": "food",
+            "name": "Food",
+            "kind": "EXPENSE"
+          },
+          "amount": "10.50",
+          "transactionCount": 1,
+          "share": 0.03
+        }
+      ],
+      "uncategorized": null,
+      "needsReview": null,
+      "currency": "EUR"
+    },
+    "transportation": {
+      "rows": [
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000105",
+            "slug": "transportation.gas",
+            "name": "Gas",
+            "kind": "EXPENSE"
+          },
+          "amount": "120.00",
+          "transactionCount": 3,
+          "share": 0.67
+        },
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000106",
+            "slug": "transportation.car_insurance",
+            "name": "Car insurance",
+            "kind": "EXPENSE"
+          },
+          "amount": "60.00",
+          "transactionCount": 2,
+          "share": 0.33
+        }
+      ],
+      "uncategorized": null,
+      "needsReview": null,
+      "currency": "EUR"
+    },
+    "personal": {
+      "rows": [
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000107",
+            "slug": "personal.gym",
+            "name": "Gym",
+            "kind": "EXPENSE"
+          },
+          "amount": "90.00",
+          "transactionCount": 3,
+          "share": 1.0
+        }
+      ],
+      "uncategorized": null,
+      "needsReview": null,
+      "currency": "EUR"
+    },
+    "personal.gym": {
+      "rows": [
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000108",
+            "slug": "personal.gym.membership",
+            "name": "Membership",
+            "kind": "EXPENSE"
+          },
+          "amount": "90.00",
+          "transactionCount": 3,
+          "share": 1.0
+        }
+      ],
+      "uncategorized": null,
+      "needsReview": null,
+      "currency": "EUR"
+    }
+  }
+}

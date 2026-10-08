@@ -13,7 +13,15 @@
 	import Button from '$lib/components/Button.svelte';
 	import TransactionFilters from '$lib/components/TransactionFilters.svelte';
 	import NoMatchingTransactions from '$lib/components/NoMatchingTransactions.svelte';
-	import type { BreakdownBar } from '$lib/breakdownShaping';
+	import {
+		childBreakdownFilter,
+		childLevel,
+		drilldownForBar,
+		type BreakdownBar
+	} from '$lib/breakdownShaping';
+	import { createGraphqlClient } from '$lib/graphqlClient';
+	import { CATEGORY_BREAKDOWN_QUERY } from '$lib/graphql/queries';
+	import type { CategoryBreakdown as CategoryBreakdownData } from '$lib/graphql/types';
 	import {
 		drilldownFilterForLink,
 		drilldownFilterForNode,
@@ -53,6 +61,7 @@
 		hasCounterparty?: boolean;
 		categorySlugs?: string[];
 		uncategorized?: boolean;
+		needsReview?: boolean;
 		offset?: number;
 		/** The filter panel; omitted = keep the current one. */
 		panel?: PanelFilters;
@@ -71,6 +80,7 @@
 					hasCounterparty: data.drilldown.hasCounterparty,
 					categorySlugs: data.drilldown.categorySlugs,
 					uncategorized: data.drilldown.uncategorized,
+					needsReview: data.drilldown.needsReview,
 					offset: data.offset
 				};
 		const merged = { ...base, ...opts };
@@ -95,6 +105,7 @@
 		if (merged.categorySlugs?.length)
 			params.set('selCategorySlugs', merged.categorySlugs.join(','));
 		if (merged.uncategorized) params.set('selUncategorized', 'true');
+		if (merged.needsReview !== undefined) params.set('selNeedsReview', String(merged.needsReview));
 		if (merged.offset) params.set('offset', String(merged.offset));
 
 		const withPanel = writePanelFilters(opts.panel ?? data.panel, params);
@@ -154,8 +165,20 @@
 	}
 
 	function onBreakdownSelect(bar: BreakdownBar) {
-		if (!bar.slug) return;
-		navigate({ categorySlugs: [bar.slug], offset: 0, resetDrilldown: true });
+		navigate({ ...drilldownForBar(bar), offset: 0, resetDrilldown: true });
+	}
+
+	/** Fetch the children of an expanded breakdown row (scoped to it, one level deeper). */
+	async function loadBreakdownChildren(slug: string): Promise<CategoryBreakdownData> {
+		const result = await createGraphqlClient(fetch)
+			.query(CATEGORY_BREAKDOWN_QUERY, {
+				filter: childBreakdownFilter(data.breakdownFilter, slug, data.categories),
+				level: childLevel(slug, data.categories),
+				kind: 'EXPENSE'
+			})
+			.toPromise();
+		if (result.error || !result.data) throw result.error ?? new Error('No data');
+		return result.data.categoryBreakdown as CategoryBreakdownData;
 	}
 
 	function onSankeyDimensionChange(dimension: 'counterparty' | 'category') {
@@ -173,6 +196,7 @@
 				data.drilldown.hasCounterparty === false ||
 				data.drilldown.categorySlugs?.length ||
 				data.drilldown.uncategorized ||
+				data.drilldown.needsReview !== undefined ||
 				data.txStart !== data.start ||
 				data.txEnd !== data.end
 		)
@@ -245,7 +269,13 @@
 
 		{#if data.breakdown}
 			<Card title="Spending by category">
-				<CategoryBreakdown breakdown={data.breakdown} onSelect={onBreakdownSelect} />
+				<CategoryBreakdown
+					breakdown={data.breakdown}
+					categories={data.categories}
+					loadChildren={loadBreakdownChildren}
+					scopeKey={JSON.stringify(data.breakdownFilter)}
+					onSelect={onBreakdownSelect}
+				/>
 			</Card>
 		{/if}
 

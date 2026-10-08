@@ -223,4 +223,15 @@ describe('layerSelection', () => {
 			categorySlugs: ['a']
 		});
 	});
+
+	it('lets a needs-review selection (true or false) override the panel flag', () => {
+		expect(layerSelection({ needsReview: true }, { needsReview: false })).toEqual({
+			needsReview: false
+		});
+		expect(layerSelection({ search: 'x' }, { uncategorized: true, needsReview: false })).toEqual({
+			search: 'x',
+			uncategorized: true,
+			needsReview: false
+		});
+	});
 });

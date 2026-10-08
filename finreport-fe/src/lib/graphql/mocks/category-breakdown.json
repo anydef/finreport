@@ -24,6 +24,17 @@
           "amount": "180.00",
           "transactionCount": 5,
           "share": 0.23
+        },
+        {
+          "category": {
+            "id": "c3a1b2d4-0000-5000-8000-000000000003",
+            "slug": "personal",
+            "name": "Personal",
+            "kind": "EXPENSE"
+          },
+          "amount": "90.00",
+          "transactionCount": 3,
+          "share": 0.12
         }
       ],
       "uncategorized": {

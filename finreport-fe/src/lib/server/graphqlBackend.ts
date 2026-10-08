@@ -21,6 +21,7 @@ import cashflowGraphTruncatedMock from '$lib/graphql/mocks/cashflow-graph-trunca
 import transactionsMock from '$lib/graphql/mocks/transactions.json';
 import categoriesMock from '$lib/graphql/mocks/categories.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
+import categoryBreakdownChildrenMock from '$lib/graphql/mocks/category-breakdown-children.json';
 import cashflowGraphCategoryMock from '$lib/graphql/mocks/cashflow-graph-category.json';
 import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
@@ -531,6 +532,28 @@ function mockArchiveGoal(variables: Record<string, unknown> | undefined): unknow
 	return { ...existing, id: variables?.id ?? existing.id, archived: true };
 }
 
+/**
+ * A breakdown scoped to one category at a deeper level (an expanded dashboard
+ * row) gets that category's child fixture; anything else gets the top level.
+ * With several scoped slugs (a panel filter overlapping the parent) the
+ * shortest one present in the fixture is the parent.
+ */
+function mockCategoryBreakdown(variables: Record<string, unknown> | undefined): unknown {
+	const filter = variables?.filter as { categorySlugs?: string[] } | undefined;
+	const level = Number(variables?.level ?? 1);
+	if (level > 1 && filter?.categorySlugs?.length) {
+		const children = categoryBreakdownChildrenMock.data as Record<string, unknown>;
+		const parent = [...filter.categorySlugs]
+			.sort((a, b) => a.length - b.length)
+			.find((slug) => slug in children);
+		if (parent) return { categoryBreakdown: children[parent] };
+		return {
+			categoryBreakdown: { rows: [], uncategorized: null, needsReview: null, currency: 'EUR' }
+		};
+	}
+	return categoryBreakdownMock.data;
+}
+
 function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBackendResult | null {
 	switch (operationNameOf(body)) {
 		case 'Me':
@@ -551,7 +574,7 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		// build against a stable shape; resolvers on the real backend still
 		// return NOT_IMPLEMENTED until their owning WP lands.
 		case 'CategoryBreakdown':
-			return { status: 200, body: { data: categoryBreakdownMock.data }, setCookies: [] };
+			return { status: 200, body: { data: mockCategoryBreakdown(body.variables) }, setCookies: [] };
 		case 'Categories':
 			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
 		case 'ReviewQueue':
