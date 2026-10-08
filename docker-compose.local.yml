@@ -92,6 +92,10 @@ services:
         # goal's own UUID, same compaction posture as finreport.rule.
         $$RPK topic create finreport.goal \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        # Learning exemptions: keyed by counterparty_key, compacted; a tombstone
+        # lifts the exemption.
+        $$RPK topic create finreport.learning-exemption \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 
   finreport-be:

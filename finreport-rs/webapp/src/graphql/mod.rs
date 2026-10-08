@@ -12,6 +12,7 @@ pub mod goals;
 pub mod http;
 mod insights;
 mod labels;
+pub mod learning_exemptions;
 mod loaders;
 mod mutations;
 mod queries;

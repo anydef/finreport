@@ -57,3 +57,20 @@ pub async fn publish_event(
                 .extend_with(|_, ext| ext.set("code", "KAFKA_PUBLISH_FAILED"))
         })
 }
+
+/// Publishes a tombstone (null value) on `topic` under `key`, awaiting the
+/// broker ack: compaction's "this entity no longer exists", which the
+/// projections turn into a delete.
+pub async fn publish_tombstone(
+    publisher: &Arc<EventPublisher>,
+    topic: &str,
+    key: &str,
+) -> async_graphql::Result<()> {
+    publisher
+        .publish_tombstone_with_headers(topic, key, headers())
+        .await
+        .map_err(|e| {
+            async_graphql::Error::new(format!("failed to publish tombstone to {topic}: {e}"))
+                .extend_with(|_, ext| ext.set("code", "KAFKA_PUBLISH_FAILED"))
+        })
+}

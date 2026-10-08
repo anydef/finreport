@@ -462,6 +462,27 @@ enum LabelStatus {
 	NEEDS_REVIEW
 }
 
+"""
+One merchant the learner has been told to leave alone.
+"""
+type LearningExemption {
+	"""
+	The normalised merchant key rules and the learner index on.
+	"""
+	counterpartyKey: String!
+	"""
+	The merchant's name as it appears on the caller's transactions (the
+	most frequent spelling), falling back to the key when the caller has
+	none.
+	"""
+	displayName: String!
+	"""
+	How many of the caller's transactions carry this merchant key.
+	"""
+	transactionCount: Int!
+	exemptedAt: DateTime!
+}
+
 input LoginInput {
 	username: String!
 	password: String!
@@ -500,6 +521,16 @@ type Mutation {
 	updateRule(id: UUID!, input: RuleInput!): Rule!
 	setRuleState(id: UUID!, state: RuleState!): Rule!
 	reapplyRule(id: UUID!): Int!
+	"""
+	`exemptFromLearning`: never learn a rule for this merchant again, and
+	discard its learned rules unless the user has touched them.
+	"""
+	exemptFromLearning(counterpartyKey: String!): LearningExemption!
+	"""
+	`removeLearningExemption`: let the learner work on this merchant
+	again. True when an exemption existed.
+	"""
+	removeLearningExemption(counterpartyKey: String!): Boolean!
 	"""
 	`createGoal` (iteration 4 §4).
 	"""
@@ -563,6 +594,12 @@ type Query {
 	every account the labeler sees.
 	"""
 	rules(state: RuleState): [Rule!]!
+	"""
+	`learningExemptions`: merchants the user has told the learner to
+	leave alone. Like `rules`, the list itself is not tenant-scoped; the
+	per-merchant name and count are computed over the caller's accounts.
+	"""
+	learningExemptions: [LearningExemption!]!
 	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
 	reviewQueue(page: PageInput): ReviewQueue!
 	"""

@@ -206,6 +206,40 @@ impl MutationRoot {
         rules::reapply_rule(db, publisher, &scoped_ids, id.0).await
     }
 
+    /// `exemptFromLearning`: never learn a rule for this merchant again, and
+    /// discard its learned rules unless the user has touched them.
+    async fn exempt_from_learning(
+        &self,
+        ctx: &Context<'_>,
+        counterparty_key: String,
+    ) -> GqlResult<crate::graphql::learning_exemptions::LearningExemption> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        crate::graphql::learning_exemptions::exempt_from_learning(
+            db,
+            publisher,
+            &scoped_ids,
+            user.user_id,
+            &counterparty_key,
+        )
+        .await
+    }
+
+    /// `removeLearningExemption`: let the learner work on this merchant
+    /// again. True when an exemption existed.
+    async fn remove_learning_exemption(
+        &self,
+        ctx: &Context<'_>,
+        counterparty_key: String,
+    ) -> GqlResult<bool> {
+        current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        crate::graphql::learning_exemptions::remove_learning_exemption(db, publisher, &counterparty_key).await
+    }
+
     /// `createGoal` (iteration 4 §4).
     async fn create_goal(
         &self,

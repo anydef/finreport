@@ -72,7 +72,7 @@ const INGEST_PARTITION: i32 = 0;
 /// ever advanced. `transaction-insight` (iteration 3 §2.3/§3) is the
 /// detector's own output, consumed the same way, and `goal` (iteration 4
 /// §2.1) is the user's goal decisions, projected by `projection::goals`.
-pub const LABELING_PROJECTION_TOPICS: [&str; 7] = [
+pub const LABELING_PROJECTION_TOPICS: [&str; 8] = [
     crate::kafka::labeling::TOPIC_CATEGORY,
     crate::kafka::labeling::TOPIC_TRANSACTION_LABEL,
     crate::kafka::labeling::TOPIC_LLM_CACHE,
@@ -80,6 +80,7 @@ pub const LABELING_PROJECTION_TOPICS: [&str; 7] = [
     crate::kafka::labeling::TOPIC_RULE,
     crate::kafka::insights::TOPIC_TRANSACTION_INSIGHT,
     crate::kafka::goals::TOPIC_GOAL,
+    crate::kafka::labeling::TOPIC_LEARNING_EXEMPTION,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -122,6 +123,7 @@ pub enum LabelingTopic {
     Rule,
     TransactionInsight,
     Goal,
+    LearningExemption,
 }
 
 /// Maps a §2.2 topic name to the [`LabelingTopic`] WP3's projector dispatches
@@ -142,6 +144,7 @@ pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
         TOPIC_RULE => Some(LabelingTopic::Rule),
         TOPIC_TRANSACTION_INSIGHT => Some(LabelingTopic::TransactionInsight),
         TOPIC_GOAL => Some(LabelingTopic::Goal),
+        crate::kafka::labeling::TOPIC_LEARNING_EXEMPTION => Some(LabelingTopic::LearningExemption),
         _ => None,
     }
 }
@@ -503,6 +506,23 @@ async fn apply_labeling_record(
                 Ok(parsed) => goals::project_goal(txn, id, Some(parsed)).await,
                 Err(e) => {
                     error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison goal record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::LearningExemption => {
+            // Keyed by the normalised `counterparty_key`, not a UUID.
+            let Some(key) = record.key.as_deref() else {
+                warn!(topic = %record.topic, offset = record.offset, "projector: learning-exemption record with no key, skipped");
+                return Ok(());
+            };
+            if record.payload.is_empty() {
+                return labeling::project_learning_exemption(txn, key, None).await;
+            }
+            match serde_json::from_slice::<crate::kafka::labeling::LearningExemptionRecord>(&record.payload) {
+                Ok(parsed) => labeling::project_learning_exemption(txn, key, Some(parsed)).await,
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison learning-exemption record, skipped");
                     Ok(())
                 }
             }
@@ -917,5 +937,17 @@ mod goal_dispatch_tests {
             Some(LabelingTopic::Goal)
         );
         assert!(LABELING_PROJECTION_TOPICS.contains(&crate::kafka::goals::TOPIC_GOAL));
+    }
+}
+
+#[cfg(test)]
+mod learning_exemption_dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn learning_exemption_topic_is_projected_and_consumed() {
+        let topic = crate::kafka::labeling::TOPIC_LEARNING_EXEMPTION;
+        assert_eq!(labeling_topic_for(topic), Some(LabelingTopic::LearningExemption));
+        assert!(LABELING_PROJECTION_TOPICS.contains(&topic));
     }
 }

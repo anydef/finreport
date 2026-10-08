@@ -782,13 +782,20 @@ pub async fn build_label_record(
 /// them to `ops.consider`. Publishes (dual-write: Kafka then the projection)
 /// the candidate only when nothing exists yet for its deterministic id, or
 /// the stored rule is an untouched, in-review, learned one (§2.8 "the
-/// learner never overwrites a human").
+/// learner never overwrites a human"). A merchant with a learning exemption
+/// short-circuits to `None` before any of that.
 pub async fn maybe_learn_rule(
     db: &impl ConnectionTrait,
     publisher: &EventPublisher,
     ops: &LabelingOps,
     counterparty_key: &str,
 ) -> Result<Option<RuleRecord>, DbErr> {
+    // A merchant the user has exempted never gets a candidate at all - not
+    // even an `in_review` one, since the point is never to be asked. Checked
+    // before anything is considered, so nothing can reach `publish_rule`.
+    if proj::is_learning_exempt(db, counterparty_key).await? {
+        return Ok(None);
+    }
     let observations = proj::observations_for_counterparty_key(db, counterparty_key).await?;
     let observations: Vec<Observation<'_>> = observations
         .iter()

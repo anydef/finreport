@@ -5,6 +5,7 @@ pub use super::account_balance::Entity as AccountBalance;
 pub use super::app_user::Entity as AppUser;
 pub use super::category::Entity as Category;
 pub use super::goal::Entity as Goal;
+pub use super::learning_exemption::Entity as LearningExemption;
 pub use super::legacy_account::Entity as LegacyAccount;
 pub use super::legacy_account_balance::Entity as LegacyAccountBalance;
 pub use super::legacy_account_transactions::Entity as LegacyAccountTransactions;

@@ -818,3 +818,218 @@ async fn conflicting_user_decisions_learn_no_rule() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Learning exemptions: "never learn a rule for this merchant"
+// ---------------------------------------------------------------------------
+
+fn fitness_first_key() -> String {
+    webapp::labeling::normalize::normalize(Some("Fitness First"), None)
+}
+
+fn exemption_record(key: &str) -> webapp::kafka::labeling::LearningExemptionRecord {
+    webapp::kafka::labeling::LearningExemptionRecord {
+        schema_version: webapp::kafka::labeling::CURRENT_SCHEMA_VERSION,
+        counterparty_key: key.to_string(),
+        decided_by: None,
+        revision: Utc::now(),
+    }
+}
+
+async fn rule_rows(db: &sea_orm::DatabaseConnection) -> Vec<entity::entities::rule::Model> {
+    entity::entities::rule::Entity::find().all(db).await.expect("list rules")
+}
+
+/// A user decision at confidence 1.0 would auto-approve a rule at the default
+/// threshold; for an exempt merchant it produces no rule at all - not even an
+/// `in_review` one - and a sibling is labelled by the LLM tier, not a rule.
+#[tokio::test]
+async fn an_exempt_merchant_learns_no_rule_even_from_a_user_decision() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(3, 1, 0.9);
+    let cost_guard = CostGuard::new(10);
+
+    proj::project_learning_exemption(&db, &fitness_first_key(), Some(exemption_record(&fitness_first_key())))
+        .await
+        .expect("project exemption");
+
+    let corrected = seed_fitness_first(&db, "EXEMPT-A").await;
+    proj::project_user_label(&db, corrected.id, Some(user_override(&corrected, "food.restaurants")))
+        .await
+        .unwrap();
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &corrected)
+        .await
+        .expect("user override resolves");
+    let own = transaction_label::Entity::find_by_id(corrected.id).one(&db).await.unwrap().expect("label");
+    assert_eq!(own.label_source, "user", "the decision itself still applies");
+    assert!(rule_rows(&db).await.is_empty(), "no rule, not even in_review");
+
+    // The sibling is left to the rest of the chain (here the fake LLM), not
+    // silently rule-labelled with the user's category.
+    let sibling = seed_fitness_first(&db, "EXEMPT-B").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &sibling)
+        .await
+        .expect("sibling resolves");
+    let label = transaction_label::Entity::find_by_id(sibling.id).one(&db).await.unwrap().expect("sibling label");
+    assert_ne!(label.label_source, "rule");
+    assert_eq!(label.rule_id, None);
+    assert!(rule_rows(&db).await.is_empty());
+}
+
+/// Exempting discards the merchant's untouched learned rule (its labels fall
+/// back down the chain) but never a rule the user has touched.
+#[tokio::test]
+async fn exempting_discards_an_untouched_learned_rule_but_not_a_user_touched_one() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = std::sync::Arc::new(
+        EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer"),
+    );
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(3, 1, 0.9);
+    let cost_guard = CostGuard::new(10);
+    let key = fitness_first_key();
+
+    // A learned, active, untouched rule via one user decision; a sibling
+    // picks it up.
+    let corrected = seed_fitness_first(&db, "REVOKE-A").await;
+    proj::project_user_label(&db, corrected.id, Some(user_override(&corrected, "food.restaurants")))
+        .await
+        .unwrap();
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &corrected)
+        .await
+        .unwrap();
+    let rule_id = webapp::kafka::labeling::learned_rule_uuid(&key, "food.restaurants");
+    assert!(proj::find_rule(&db, rule_id).await.unwrap().is_some(), "rule learned");
+    let sibling = seed_fitness_first(&db, "REVOKE-B").await;
+    label_one_transaction(&db, &publisher, &ops, &PanicProvider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &sibling)
+        .await
+        .unwrap();
+    let before = transaction_label::Entity::find_by_id(sibling.id).one(&db).await.unwrap().unwrap();
+    assert_eq!(before.label_source, "rule");
+
+    // A user-touched learned-looking rule for the same merchant (another
+    // category), standing in for one the user approved or edited.
+    let touched_id = webapp::kafka::labeling::learned_rule_uuid(&key, "personal.gym");
+    let mut touched = proj::find_rule(&db, rule_id).await.unwrap().unwrap();
+    touched.id = touched_id;
+    touched.category_slug = "personal.gym".to_string();
+    touched.user_touched = true;
+    proj::project_rule(&db, touched_id, Some(touched)).await.unwrap();
+
+    webapp::graphql::learning_exemptions::exempt_from_learning(&db, Some(&publisher), &[], Uuid::new_v4(), &key)
+        .await
+        .expect("exempt");
+
+    assert!(proj::is_learning_exempt(&db, &key).await.unwrap());
+    assert!(proj::find_rule(&db, rule_id).await.unwrap().is_none(), "untouched learned rule discarded");
+    assert!(proj::find_rule(&db, touched_id).await.unwrap().is_some(), "user-touched rule kept");
+
+    // The discarded rule no longer labels anything: remove the kept rule from
+    // play so the sibling genuinely falls through to the next source.
+    entity::entities::rule::Entity::delete_by_id(touched_id).exec(&db).await.unwrap();
+    let after_provider = CountingProvider(std::sync::atomic::AtomicU32::new(0));
+    label_one_transaction(&db, &publisher, &ops, &after_provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &sibling)
+        .await
+        .unwrap();
+    let after = transaction_label::Entity::find_by_id(sibling.id).one(&db).await.unwrap().unwrap();
+    assert_ne!(after.label_source, "rule");
+    assert_eq!(after.rule_id, None);
+    assert!(rule_rows(&db).await.is_empty(), "nothing relearned while exempt");
+}
+
+/// Lifting the exemption lets the learner work again.
+#[tokio::test]
+async fn un_exempting_restores_normal_learning() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = std::sync::Arc::new(
+        EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer"),
+    );
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(3, 1, 0.9);
+    let cost_guard = CostGuard::new(10);
+    let key = fitness_first_key();
+
+    webapp::graphql::learning_exemptions::exempt_from_learning(&db, Some(&publisher), &[], Uuid::new_v4(), &key)
+        .await
+        .expect("exempt");
+    let existed = webapp::graphql::learning_exemptions::remove_learning_exemption(&db, Some(&publisher), &key)
+        .await
+        .expect("un-exempt");
+    assert!(existed);
+    assert!(!proj::is_learning_exempt(&db, &key).await.unwrap());
+
+    let corrected = seed_fitness_first(&db, "RESTORE-A").await;
+    proj::project_user_label(&db, corrected.id, Some(user_override(&corrected, "food.restaurants")))
+        .await
+        .unwrap();
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &corrected)
+        .await
+        .unwrap();
+    let rule = proj::find_rule(&db, webapp::kafka::labeling::learned_rule_uuid(&key, "food.restaurants"))
+        .await
+        .unwrap()
+        .expect("learning works again");
+    assert_eq!(rule.state, webapp::kafka::labeling::RuleState::Active);
+}
+
+type ExemptionLog = Vec<(&'static str, Option<webapp::kafka::labeling::LearningExemptionRecord>)>;
+
+async fn apply_exemption_log(db: &sea_orm::DatabaseConnection, log: &ExemptionLog) -> Vec<(String, Option<Uuid>)> {
+    for (key, record) in log {
+        proj::project_learning_exemption(db, key, record.clone()).await.unwrap();
+    }
+    let mut rows: Vec<_> = entity::entities::learning_exemption::Entity::find()
+        .all(db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.counterparty_key, r.decided_by))
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// Projection: a record projects, a stale one is ignored, a tombstone removes
+/// it, and replaying the same log from offset 0 into an empty table gives
+/// back the same rows.
+#[tokio::test]
+async fn learning_exemption_projects_tombstones_and_replays() {
+    let pg = TestPostgres::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+
+    let t0 = Utc::now();
+    let log: ExemptionLog = vec![
+        ("amazon", Some(webapp::kafka::labeling::LearningExemptionRecord { revision: t0, ..exemption_record("amazon") })),
+        ("paypal", Some(webapp::kafka::labeling::LearningExemptionRecord { revision: t0, ..exemption_record("paypal") })),
+        // Stale echo of amazon, older than what is stored: ignored.
+        ("amazon", Some(webapp::kafka::labeling::LearningExemptionRecord {
+            revision: t0 - chrono::Duration::seconds(60),
+            decided_by: Some(Uuid::new_v4()),
+            ..exemption_record("amazon")
+        })),
+        ("paypal", None),
+    ];
+
+    let first = apply_exemption_log(&db, &log).await;
+    assert_eq!(first, vec![("amazon".to_string(), None)], "stale ignored, tombstone removed paypal");
+
+    entity::entities::learning_exemption::Entity::delete_many().exec(&db).await.unwrap();
+    assert_eq!(apply_exemption_log(&db, &log).await, first, "replay from offset 0 reproduces the table");
+}

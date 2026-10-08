@@ -28,7 +28,7 @@
 //! WP3) is the only caller besides `category-seed`.
 
 use entity::entities::{
-    category, llm_label_cache, rule, transaction, transaction_label, transaction_split,
+    category, learning_exemption, llm_label_cache, rule, transaction, transaction_label, transaction_split,
     transaction_user_label,
 };
 use rust_decimal::prelude::FromPrimitive;
@@ -43,7 +43,7 @@ use uuid::Uuid;
 
 use crate::kafka::labeling::{
     category_uuid, split_uuid, CacheRecord, CategoryKind, CategoryOrigin, CategoryRecord,
-    LabelRecord, LabelSource, LabelStatus, ReviewReason, RuleOrigin, RuleRecord, RuleState,
+    LabelRecord, LabelSource, LabelStatus, LearningExemptionRecord, ReviewReason, RuleOrigin, RuleRecord, RuleState,
     UserLabelRecord, CURRENT_SCHEMA_VERSION,
 };
 
@@ -474,6 +474,83 @@ pub async fn project_rule(
         Err(DbErr::RecordNotInserted) => Ok(()),
         Err(e) => Err(e),
     }
+}
+
+// ---------------------------------------------------------------------------
+// Learning exemption
+// ---------------------------------------------------------------------------
+
+/// Upserts (or, on `None`, tombstone-deletes) one `learning_exemption` row,
+/// keyed by `counterparty_key`. Last-writer-wins on `revision` (§2.1).
+pub async fn project_learning_exemption(
+    txn: &impl ConnectionTrait,
+    counterparty_key: &str,
+    record: Option<LearningExemptionRecord>,
+) -> Result<(), DbErr> {
+    let Some(record) = record else {
+        learning_exemption::Entity::delete_by_id(counterparty_key.to_string())
+            .exec(txn)
+            .await?;
+        return Ok(());
+    };
+
+    let model = learning_exemption::ActiveModel {
+        counterparty_key: Set(counterparty_key.to_string()),
+        decided_by: Set(record.decided_by),
+        revision: Set(record.revision.into()),
+    };
+    let mut on_conflict = sea_orm::sea_query::OnConflict::column(learning_exemption::Column::CounterpartyKey);
+    on_conflict
+        .update_columns([
+            learning_exemption::Column::DecidedBy,
+            learning_exemption::Column::Revision,
+        ])
+        .action_cond_where(
+            Expr::col((learning_exemption::Entity, learning_exemption::Column::Revision))
+                .lte(Expr::cust("excluded.revision")),
+        );
+    match learning_exemption::Entity::insert(model)
+        .on_conflict(on_conflict.to_owned())
+        .exec(txn)
+        .await
+    {
+        Ok(_) => Ok(()),
+        // The conditional WHERE declined a stale record (see `project_rule`).
+        Err(DbErr::RecordNotInserted) => Ok(()),
+        Err(e) => Err(e),
+    }
+}
+
+/// Whether the learner must stay away from this merchant.
+pub async fn is_learning_exempt(
+    db: &impl ConnectionTrait,
+    counterparty_key: &str,
+) -> Result<bool, DbErr> {
+    Ok(learning_exemption::Entity::find_by_id(counterparty_key.to_string())
+        .one(db)
+        .await?
+        .is_some())
+}
+
+/// Learned, untouched rules whose only job is this merchant: the ones an
+/// exemption discards. A `user_touched` rule is the user's own work and is
+/// never returned.
+pub async fn discardable_learned_rule_ids(
+    db: &impl ConnectionTrait,
+    counterparty_key: &str,
+) -> Result<Vec<Uuid>, DbErr> {
+    let rows = rule::Entity::find()
+        .filter(rule::Column::Origin.eq("learned"))
+        .filter(rule::Column::UserTouched.eq(false))
+        .all(db)
+        .await?;
+    Ok(rows
+        .into_iter()
+        .filter(|r| {
+            r.conditions.get("counterparty_key").and_then(|v| v.as_str()) == Some(counterparty_key)
+        })
+        .map(|r| r.id)
+        .collect())
 }
 
 // ---------------------------------------------------------------------------

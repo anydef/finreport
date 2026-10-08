@@ -36,6 +36,10 @@ pub const TOPIC_USER_LABEL: &str = "finreport.user-label";
 pub const TOPIC_RULE: &str = "finreport.rule";
 /// Category tree nodes (§3). Keyed by the category's UUID, compacted.
 pub const TOPIC_CATEGORY: &str = "finreport.category";
+/// A human decision that no rule may ever be learned for a merchant ("learning
+/// exemption"). Keyed by the normalised `counterparty_key`, compacted; a
+/// tombstone lifts the exemption.
+pub const TOPIC_LEARNING_EXEMPTION: &str = "finreport.learning-exemption";
 /// Explicit re-resolution requests (§2.3): a work queue, not state. Keyed
 /// `<source>:<external_id>` or `reapply:<rule-id>`; time-retained (7 d) and
 /// replaceable, unlike the other five topics.
@@ -259,6 +263,28 @@ pub struct RuleRecord {
     pub confidence: Option<f32>,
     pub evidence: Option<serde_json::Value>,
     pub created_at: DateTime<Utc>,
+    /// RFC 3339; last-writer-wins (§2.1).
+    pub revision: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
+// Learning exemption
+// ---------------------------------------------------------------------------
+
+/// Published on [`TOPIC_LEARNING_EXEMPTION`], keyed by `counterparty_key`.
+/// Presence means "never learn a rule for this merchant" (an Amazon order is
+/// groceries *and* electronics; a counterparty-wide rule is wrong in
+/// principle). Lifting the exemption is a tombstone, not a flag, so the
+/// compacted topic holds exactly the merchants currently exempt.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LearningExemptionRecord {
+    pub schema_version: u32,
+    /// Normalised merchant key (`labeling::normalize`), the same one the
+    /// learner and recurring detector use.
+    pub counterparty_key: String,
+    /// The user who made the decision (audit only; the exemption applies to
+    /// the merchant globally, like rules).
+    pub decided_by: Option<Uuid>,
     /// RFC 3339; last-writer-wins (§2.1).
     pub revision: DateTime<Utc>,
 }
@@ -496,6 +522,19 @@ mod tests {
 
         let json = serde_json::to_string(&record).unwrap();
         let round_tripped: RuleRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(record, round_tripped);
+    }
+
+    #[test]
+    fn learning_exemption_record_round_trips_through_json() {
+        let record = LearningExemptionRecord {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            counterparty_key: "amazon".to_string(),
+            decided_by: Some(Uuid::new_v4()),
+            revision: Utc::now(),
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let round_tripped: LearningExemptionRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(record, round_tripped);
     }
 

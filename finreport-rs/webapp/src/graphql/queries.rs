@@ -150,6 +150,19 @@ impl QueryRoot {
         rules::fetch_rules(db, state).await
     }
 
+    /// `learningExemptions`: merchants the user has told the learner to
+    /// leave alone. Like `rules`, the list itself is not tenant-scoped; the
+    /// per-merchant name and count are computed over the caller's accounts.
+    async fn learning_exemptions(
+        &self,
+        ctx: &Context<'_>,
+    ) -> GqlResult<Vec<crate::graphql::learning_exemptions::LearningExemption>> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let scoped_ids = scoped_account_ids(user, None)?;
+        crate::graphql::learning_exemptions::fetch_learning_exemptions(db, &scoped_ids).await
+    }
+
     async fn recently_auto_approved_rules(
         &self,
         ctx: &Context<'_>,

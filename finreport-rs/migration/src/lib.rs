@@ -16,6 +16,7 @@ mod m20261201_000001_tags;
 mod m20261201_000002_insights;
 mod m20261201_000003_projection_offset_group;
 mod m20270101_000001_goals;
+mod m20270201_000001_learning_exemption;
 
 pub struct Migrator;
 
@@ -55,6 +56,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20261201_000003_projection_offset_group::Migration),
             // Iteration 4 §2.2: the goals projection (progress is derived, not stored).
             Box::new(m20270101_000001_goals::Migration),
+            // Merchants the user has exempted from rule learning.
+            Box::new(m20270201_000001_learning_exemption::Migration),
         ]
     }
 }

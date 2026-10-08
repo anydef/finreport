@@ -241,3 +241,20 @@ resource "kafka_topic" "goal" {
     prevent_destroy = true
   }
 }
+
+# Learning exemptions: merchants (by normalised counterparty_key) the user has
+# told the rule learner to leave alone. Compacted; a tombstone lifts the
+# exemption. Mirrored in docker-compose.local.yml's finreport-redpanda-init.
+resource "kafka_topic" "learning_exemption" {
+  name               = "finreport.learning-exemption"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

@@ -7,6 +7,7 @@ pub mod account_balance;
 pub mod app_user;
 pub mod category;
 pub mod goal;
+pub mod learning_exemption;
 pub mod legacy_account;
 pub mod legacy_account_balance;
 pub mod legacy_account_transactions;
