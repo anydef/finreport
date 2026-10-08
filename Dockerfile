@@ -51,6 +51,7 @@ RUN --mount=type=cache,id=finreport-cargo-registry,target=/usr/local/cargo/regis
         --bin fixture-replay \
         --bin labeler \
         --bin category-seed \
+        --bin category-reslug \
         --package migration \
         --bin migration && \
     cp /build/finreport-rs/target/release/webapp            /usr/local/bin/finreport-be && \
@@ -61,6 +62,7 @@ RUN --mount=type=cache,id=finreport-cargo-registry,target=/usr/local/cargo/regis
     cp /build/finreport-rs/target/release/fixture-replay     /usr/local/bin/fixture-replay && \
     cp /build/finreport-rs/target/release/labeler      /usr/local/bin/labeler && \
     cp /build/finreport-rs/target/release/category-seed /usr/local/bin/category-seed && \
+    cp /build/finreport-rs/target/release/category-reslug /usr/local/bin/category-reslug && \
     cp /build/finreport-rs/target/release/migration          /usr/local/bin/finreport-be-migrate
 
 # ── Runtime stage ─────────────────────────────────────────────────────
@@ -76,6 +78,7 @@ COPY --from=builder /usr/local/bin/user-admin             /usr/local/bin/user-ad
 COPY --from=builder /usr/local/bin/fixture-replay         /usr/local/bin/fixture-replay
 COPY --from=builder /usr/local/bin/labeler               /usr/local/bin/labeler
 COPY --from=builder /usr/local/bin/category-seed         /usr/local/bin/category-seed
+COPY --from=builder /usr/local/bin/category-reslug       /usr/local/bin/category-reslug
 COPY --from=builder /usr/local/bin/finreport-be-migrate   /usr/local/bin/finreport-be-migrate
 
 # webapp reads `../assets/*` relative to its cwd — mirror the source layout

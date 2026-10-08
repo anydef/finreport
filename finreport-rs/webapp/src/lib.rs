@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod category_reslug;
 pub mod cli;
 pub mod db;
 pub mod detect;

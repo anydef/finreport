@@ -147,6 +147,36 @@ services:
     labels:
       - "net.unraid.docker.managed=composeman"
 
+  # One-off repair of categories created with a bare leaf slug and a parent
+  # (e.g. `hobby` under `personal`), which every rollup, filter and goal
+  # misses. See docs/runbooks/category-reslug-repair.md.
+  #
+  # It rewrites the user's own overrides and rules on Kafka, so it ships in
+  # DRY-RUN mode: every deploy only logs what it would do and publishes
+  # nothing. Read that log, then drop "--dry-run" from `command` (leave
+  # `command: []`) and redeploy to apply it. Idempotent either way: once
+  # nothing is broken it reports zero, so it is safe to leave in place until
+  # the validation fix has been live for a while, then delete it.
+  finreport-be-category-reslug:
+    image: ${DOCKER_REGISTRY}/finreport-be:latest
+    pull_policy: always
+    container_name: finreport-be-category-reslug
+    entrypoint: ["category-reslug"]
+    command: ["--dry-run"]
+    restart: "no"
+    depends_on:
+      finreport-be-migrate:
+        condition: service_completed_successfully
+    environment:
+      RUST_LOG: info
+      APP_database_url: postgresql://finreport:${POSTGRES_PASSWORD}@192.168.100.46:5432/finreport
+      APP_kafka_brokers: kafka.lab.anydef.de:9092
+      APP_run_migrations: "false"
+    networks:
+      - services-lan
+    labels:
+      - "net.unraid.docker.managed=composeman"
+
   finreport-be-legacy-backfill:
     image: ${DOCKER_REGISTRY}/finreport-be:latest
     pull_policy: always

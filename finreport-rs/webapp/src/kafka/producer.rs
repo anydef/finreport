@@ -66,6 +66,25 @@ impl EventPublisher {
         }
     }
 
+    /// Publishes a tombstone (key, null value, headers): compaction's
+    /// "this entity no longer exists" marker, which the labeling
+    /// projections turn into a delete.
+    pub async fn publish_tombstone_with_headers(
+        &self,
+        topic: &str,
+        key: &str,
+        headers: OwnedHeaders,
+    ) -> Result<(), KafkaError> {
+        let record = FutureRecord::<str, [u8]>::to(topic)
+            .key(key)
+            .headers(headers);
+
+        match self.producer.send(record, PUBLISH_TIMEOUT).await {
+            Ok(_) => Ok(()),
+            Err((e, _)) => Err(e),
+        }
+    }
+
     /// Publishes one record verbatim, propagating a failure instead of
     /// swallowing it. Used wherever losing the publish must be visible to the
     /// caller — the transaction loop skips advancing the watermark on `Err`

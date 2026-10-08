@@ -87,6 +87,10 @@ name = "labeler"
 path = "src/bin/labeler.rs"
 
 [[bin]]
+name = "category-reslug"
+path = "src/bin/category_reslug.rs"
+
+[[bin]]
 name = "category-seed"
 path = "src/bin/category_seed.rs"
 
