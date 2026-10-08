@@ -4,7 +4,11 @@
 //! can call it directly instead of only reading the projection.
 //!
 //! **Ownership (frozen by WP0, see `docs/specs/iteration-2.md` §10):**
-//! - `normalize`, `fingerprint`, `resolve`, `rules`, `learn` — WP2.
+//! - `normalize`, `fingerprint`, `rules`, `learn` — WP2.
+//! - The §2.5 precedence chain lives only in `processor::resolve_transaction`;
+//!   a once-separate slug-based `resolve` module duplicated it, was called
+//!   from nowhere, and let the live path drift into trusting unvalidated
+//!   slugs, so it was deleted.
 //! - `processor` — WP3, depends on WP2's signatures.
 //!
 //! Every function below is a WP0 stub: a signature inferred from the prose in
@@ -17,5 +21,4 @@ pub mod fingerprint;
 pub mod learn;
 pub mod normalize;
 pub mod processor;
-pub mod resolve;
 pub mod rules;

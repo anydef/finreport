@@ -4,10 +4,9 @@
 //!
 //! Owned by WP3. Depends on WP0 (this crate's Kafka/entity contracts) and
 //! WP2 (`normalize`/`fingerprint`/`rules::most_specific_match`/`learn::consider`).
-//! WP2's own `resolve::resolve()` stub takes no parameters (an unusable
-//! placeholder, not a real entry point) — the §2.5 precedence chain is
-//! instead implemented directly in [`resolve_transaction`] below, calling
-//! WP2's four other, independently usable primitives through the injectable
+//! The §2.5 precedence chain is implemented directly in
+//! [`resolve_transaction`] below (the only copy), calling WP2's four
+//! independently usable primitives through the injectable
 //! [`LabelingOps`] (real implementations in production, fakes in this
 //! module's own unit tests, so they never depend on WP2's still-`todo!()`
 //! bodies).
@@ -64,8 +63,7 @@ fn offset_topic_key(topic: &str) -> String {
 // Injectable WP2 primitives (§2.5/§2.7/§2.8)
 // ---------------------------------------------------------------------------
 
-/// Wraps WP2's four independently callable primitives (everything but the
-/// unusable, parameterless `resolve::resolve()` stub) behind function
+/// Wraps WP2's four independently callable primitives behind function
 /// pointers/closures, so the processor's own unit tests can fake them out
 /// instead of hitting WP2's still-`todo!()` bodies. [`LabelingOps::real`]
 /// wires the actual WP2 functions for production.
@@ -471,7 +469,18 @@ pub async fn resolve_transaction(
     );
 
     if let Some(cached) = proj::find_cache(db, &fp).await? {
-        return Ok(Some(cache_hit_to_resolution(&cached, llm_min_confidence)));
+        if cache_entry_is_usable(&cached, catalog) {
+            return Ok(Some(cache_hit_to_resolution(&cached, llm_min_confidence)));
+        }
+        // A row written before slugs were validated: its `category_id` names
+        // no catalog entry. Serving it would resolve to a NULL category, so
+        // treat it as a miss and let the fresh answer overwrite it.
+        warn!(
+            transaction_id = %txn.id,
+            fingerprint = %fp,
+            category_id = ?cached.category_id,
+            "labeler: ignoring llm-cache entry whose category_id is not in the catalog; re-asking the provider"
+        );
     }
 
     if !cost_guard.try_consume() {
@@ -508,6 +517,22 @@ pub async fn resolve_transaction(
         }
     };
 
+    let suggestion = validate_suggestion(suggestion, catalog);
+    if let Some(rejected) = &suggestion.rejected_slug {
+        warn!(
+            transaction_id = %txn.id,
+            slug = %rejected,
+            "labeler: provider returned a category slug that is not in the catalog; holding for review as a new_category proposal"
+        );
+    }
+
+    // Caching decision: a rejected slug IS cached, but as a *proposal*
+    // (`category_slug: None`, `proposed_path: Some(slug)`), never as a
+    // category id. Replaying it is safe (it re-serves the same
+    // `needs_review`/`new_category` hold) and spares re-paying for an answer
+    // the model will just repeat, while the dangling id can no longer be
+    // written. Bumping `prompt_version` invalidates it, as for any entry.
+    let suggestion = suggestion.suggestion;
     let cache_record = CacheRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
         fingerprint: fp.clone(),
@@ -530,6 +555,46 @@ pub async fn resolve_transaction(
         &fp,
         llm_min_confidence,
     )))
+}
+
+/// A provider answer after checking its slug against the catalog.
+struct ValidatedSuggestion {
+    /// `category_slug` is `Some` only if the catalog contains it. An unknown
+    /// slug is moved into `proposed_path` (unless the model already supplied
+    /// one), so `classify_llm_answer` sees it as a `new_category` proposal.
+    suggestion: categorizer::provider::LabelSuggestion,
+    /// The slug that was rejected, for logging.
+    rejected_slug: Option<String>,
+}
+
+/// The single place a provider's `category_slug` is trusted: only a slug the
+/// catalog contains survives as `category_slug` (and later a `category_id`).
+fn validate_suggestion(
+    mut suggestion: categorizer::provider::LabelSuggestion,
+    catalog: &CategoryCatalog,
+) -> ValidatedSuggestion {
+    let rejected_slug = match suggestion.category_slug.as_deref() {
+        Some(slug) if !catalog.contains_slug(slug) => suggestion.category_slug.take(),
+        _ => None,
+    };
+    if let Some(slug) = &rejected_slug
+        && suggestion.proposed_path.is_none()
+    {
+        suggestion.proposed_path = Some(slug.clone());
+    }
+    ValidatedSuggestion { suggestion, rejected_slug }
+}
+
+/// A cache entry is usable if it holds no category id (a proposal / decline)
+/// or an id that names a catalog entry.
+fn cache_entry_is_usable(cached: &entity::entities::llm_label_cache::Model, catalog: &CategoryCatalog) -> bool {
+    match cached.category_id {
+        None => true,
+        Some(id) => catalog
+            .entries
+            .iter()
+            .any(|entry| crate::kafka::labeling::category_uuid(&entry.slug) == id),
+    }
 }
 
 fn cache_hit_to_resolution(
@@ -578,9 +643,9 @@ fn suggestion_to_resolution(
     ResolvedLabel {
         status,
         source: LabelSource::Llm,
-        // Resolved against a slug the *provider* chose from the catalog —
-        // turned into a real `category_id` at publish time (deterministic,
-        // no DB lookup needed: `category_uuid(slug)`).
+        // The caller has already run `validate_suggestion`, so any slug left
+        // here is in the catalog; `category_uuid(slug)` is therefore a real
+        // category's id (deterministic, no DB lookup needed).
         category_id: suggestion
             .category_slug
             .as_deref()
@@ -1700,7 +1765,7 @@ mod tests {
         use entity::entities::llm_label_cache;
         use sea_orm::{DatabaseBackend, MockDatabase};
 
-        let category_id = Uuid::new_v4();
+        let category_id = crate::kafka::labeling::category_uuid("food.groceries");
         let cache_row = llm_label_cache::Model {
             fingerprint: "deterministic-fp".to_string(),
             category_id: Some(category_id),
@@ -1761,7 +1826,7 @@ mod tests {
             counterparty_key: None,
             booking_date: chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
         };
-        let catalog = CategoryCatalog::default();
+        let catalog = catalog_of(&["food.groceries"]);
         let cost_guard = CostGuard::new(10);
 
         let result = resolve_transaction(&db, &ops, &PanicProvider, &catalog, "1", 0.5, &cost_guard, &txn)
@@ -1771,5 +1836,204 @@ mod tests {
         let resolved = result.expect("a cache hit resolves to Some");
         assert_eq!(resolved.source, LabelSource::LlmCache);
         assert_eq!(resolved.category_id, Some(category_id));
+    }
+
+    fn catalog_of(slugs: &[&str]) -> CategoryCatalog {
+        CategoryCatalog::new(
+            slugs
+                .iter()
+                .map(|slug| categorizer::provider::CatalogEntry {
+                    slug: slug.to_string(),
+                    name: slug.to_string(),
+                    kind: "expense".to_string(),
+                })
+                .collect(),
+        )
+    }
+
+    fn suggestion(
+        slug: Option<&str>,
+        proposed: Option<&str>,
+        confidence: f32,
+        ambiguous: bool,
+    ) -> categorizer::provider::LabelSuggestion {
+        categorizer::provider::LabelSuggestion {
+            category_slug: slug.map(str::to_string),
+            proposed_path: proposed.map(str::to_string),
+            confidence,
+            ambiguous,
+            reasoning: Some("because".to_string()),
+        }
+    }
+
+    fn resolve_suggestion(s: categorizer::provider::LabelSuggestion, catalog: &CategoryCatalog) -> ResolvedLabel {
+        let validated = validate_suggestion(s, catalog);
+        suggestion_to_resolution(&validated.suggestion, "fake", "m", "1", "fp", 0.5)
+    }
+
+    #[test]
+    fn a_slug_in_the_catalog_resolves_with_its_category_id() {
+        let catalog = catalog_of(&["food.groceries"]);
+        let r = resolve_suggestion(suggestion(Some("food.groceries"), None, 0.9, false), &catalog);
+        assert_eq!(r.status, LabelStatus::Resolved);
+        assert_eq!(r.review_reason, None);
+        assert_eq!(r.category_id, Some(crate::kafka::labeling::category_uuid("food.groceries")));
+        assert_eq!(r.proposed_category_path, None);
+    }
+
+    #[test]
+    fn a_slug_absent_from_the_catalog_is_a_new_category_proposal_with_no_category_id() {
+        let catalog = catalog_of(&["food.groceries"]);
+        let r = resolve_suggestion(suggestion(Some("food.invented"), None, 0.95, false), &catalog);
+        assert_eq!(r.status, LabelStatus::NeedsReview);
+        assert_eq!(r.review_reason, Some(ReviewReason::NewCategory));
+        assert_eq!(r.proposed_category_path.as_deref(), Some("food.invented"));
+        assert_eq!(r.category_id, None, "a rejected slug must never become a category_id");
+    }
+
+    #[test]
+    fn an_explicit_proposed_path_is_kept_over_the_rejected_slug() {
+        let catalog = catalog_of(&["food.groceries"]);
+        let r = resolve_suggestion(suggestion(Some("food.invented"), Some("food.new.path"), 0.9, false), &catalog);
+        assert_eq!(r.review_reason, Some(ReviewReason::NewCategory));
+        assert_eq!(r.proposed_category_path.as_deref(), Some("food.new.path"));
+        assert_eq!(r.category_id, None);
+    }
+
+    #[test]
+    fn an_empty_catalog_makes_every_answer_a_proposal() {
+        let catalog = CategoryCatalog::default();
+        let r = resolve_suggestion(suggestion(Some("food.groceries"), None, 0.99, false), &catalog);
+        assert_eq!(r.status, LabelStatus::NeedsReview);
+        assert_eq!(r.review_reason, Some(ReviewReason::NewCategory));
+        assert_eq!(r.proposed_category_path.as_deref(), Some("food.groceries"));
+        assert_eq!(r.category_id, None);
+    }
+
+    #[test]
+    fn ambiguous_low_confidence_and_declined_answers_behave_as_before() {
+        let catalog = catalog_of(&["food.groceries"]);
+        let ambiguous = resolve_suggestion(suggestion(Some("food.groceries"), None, 0.9, true), &catalog);
+        assert_eq!(ambiguous.review_reason, Some(ReviewReason::Ambiguous));
+        let low = resolve_suggestion(suggestion(Some("food.groceries"), None, 0.2, false), &catalog);
+        assert_eq!(low.status, LabelStatus::NeedsReview);
+        assert_eq!(low.review_reason, Some(ReviewReason::Ambiguous));
+        let declined = resolve_suggestion(suggestion(None, None, 0.9, false), &catalog);
+        assert_eq!(declined.review_reason, Some(ReviewReason::Ambiguous));
+        assert_eq!(declined.category_id, None);
+    }
+
+    #[test]
+    fn validation_reports_the_rejected_slug_only_when_it_rejects() {
+        let catalog = catalog_of(&["a.b"]);
+        assert_eq!(validate_suggestion(suggestion(Some("a.b"), None, 0.9, false), &catalog).rejected_slug, None);
+        assert_eq!(
+            validate_suggestion(suggestion(Some("x.y"), None, 0.9, false), &catalog)
+                .rejected_slug
+                .as_deref(),
+            Some("x.y")
+        );
+        assert_eq!(validate_suggestion(suggestion(None, None, 0.9, false), &catalog).rejected_slug, None);
+    }
+
+    fn cache_model(category_id: Option<Uuid>, proposed: Option<&str>) -> entity::entities::llm_label_cache::Model {
+        entity::entities::llm_label_cache::Model {
+            fingerprint: "deterministic-fp".to_string(),
+            category_id,
+            proposed_path: proposed.map(str::to_string),
+            confidence: rust_decimal::Decimal::new(900, 3),
+            provider: "fake".to_string(),
+            model: "fake-v1".to_string(),
+            prompt_version: "1".to_string(),
+            reasoning: None,
+            created_at: Utc::now().into(),
+        }
+    }
+
+    #[test]
+    fn a_dangling_cache_entry_is_unusable_but_proposals_and_valid_ids_are() {
+        let catalog = catalog_of(&["food.groceries"]);
+        let valid = crate::kafka::labeling::category_uuid("food.groceries");
+        assert!(cache_entry_is_usable(&cache_model(Some(valid), None), &catalog));
+        assert!(cache_entry_is_usable(&cache_model(None, Some("food.invented")), &catalog));
+        assert!(!cache_entry_is_usable(&cache_model(Some(Uuid::new_v4()), None), &catalog));
+        assert!(!cache_entry_is_usable(&cache_model(Some(valid), None), &CategoryCatalog::default()));
+    }
+
+    /// Caching decision: a rejected slug is cached as a proposal, never as a
+    /// dangling `category_id`. Drives `resolve_transaction` end to end and
+    /// inspects the cache upsert it issued.
+    #[tokio::test]
+    async fn a_rejected_slug_is_cached_as_a_proposal_not_a_category_id() {
+        use sea_orm::{DatabaseBackend, MockDatabase};
+
+        let db = MockDatabase::new(DatabaseBackend::Postgres)
+            .append_query_results([Vec::<entity::entities::transaction_split::Model>::new()])
+            .append_query_results([Vec::<entity::entities::transaction_user_label::Model>::new()])
+            .append_query_results([Vec::<entity::entities::rule::Model>::new()])
+            .append_query_results([Vec::<entity::entities::llm_label_cache::Model>::new()])
+            .append_exec_results([sea_orm::MockExecResult { last_insert_id: 0, rows_affected: 1 }])
+            .into_connection();
+        let ops = LabelingOps::fake(
+            |_, _| "k".to_string(),
+            |_, _, _, _, _, _| "deterministic-fp".to_string(),
+            |_, _| None,
+            |_| None,
+        );
+
+        struct InventingProvider;
+        #[async_trait::async_trait]
+        impl LabelProvider for InventingProvider {
+            fn id(&self) -> &'static str {
+                "fake"
+            }
+            fn model(&self) -> &str {
+                "fake-v1"
+            }
+            async fn suggest(
+                &self,
+                _req: &LabelRequest<'_>,
+            ) -> Result<categorizer::provider::LabelSuggestion, categorizer::provider::ProviderError> {
+                Ok(categorizer::provider::LabelSuggestion {
+                    category_slug: Some("food.invented".to_string()),
+                    proposed_path: None,
+                    confidence: 0.95,
+                    ambiguous: false,
+                    reasoning: Some("sounded right".to_string()),
+                })
+            }
+        }
+
+        let txn = TransactionForLabeling {
+            id: Uuid::new_v4(),
+            source: "comdirect".to_string(),
+            external_id: "ACC1-TEST".to_string(),
+            account_id: Uuid::new_v4(),
+            amount: rust_decimal::Decimal::new(-1000, 2),
+            currency: "EUR".to_string(),
+            counterparty_name: Some("Some Merchant".to_string()),
+            counterparty_iban: None,
+            description: None,
+            transaction_type: None,
+            counterparty_key: None,
+            booking_date: chrono::NaiveDate::from_ymd_opt(2024, 1, 1).unwrap(),
+        };
+        let catalog = catalog_of(&["food.groceries"]);
+        let resolved =
+            resolve_transaction(&db, &ops, &InventingProvider, &catalog, "1", 0.5, &CostGuard::new(10), &txn)
+                .await
+                .expect("resolves")
+                .expect("Some");
+
+        assert_eq!(resolved.status, LabelStatus::NeedsReview);
+        assert_eq!(resolved.review_reason, Some(ReviewReason::NewCategory));
+        assert_eq!(resolved.proposed_category_path.as_deref(), Some("food.invented"));
+        assert_eq!(resolved.category_id, None);
+
+        let log = format!("{:?}", db.into_transaction_log());
+        let invented_id = crate::kafka::labeling::category_uuid("food.invented").to_string();
+        assert!(log.contains("INSERT INTO") && log.contains("llm_label_cache"), "the answer is cached: {log}");
+        assert!(!log.contains(&invented_id), "the cache must not carry the rejected slug's id: {log}");
+        assert!(log.contains("food.invented"), "the rejected slug is preserved as proposed path: {log}");
     }
 }
