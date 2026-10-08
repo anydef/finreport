@@ -197,21 +197,39 @@ impl MutationRoot {
     }
 
     /// `createGoal` (iteration 4 §4).
-    async fn create_goal(&self, input: goals::GoalInput) -> GqlResult<goals::Goal> {
-        goals::create_goal(input).await
+    async fn create_goal(
+        &self,
+        ctx: &Context<'_>,
+        input: goals::GoalInput,
+    ) -> GqlResult<goals::Goal> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let settings = ctx.data::<Arc<Settings>>()?;
+        goals::create_goal(db, publisher(ctx), user, settings.max_tags_per_transaction, input).await
     }
 
     /// `updateGoal` (iteration 4 §4): read-modify-write on `finreport.goal`.
     async fn update_goal(
         &self,
+        ctx: &Context<'_>,
         id: crate::graphql::scalars::Uuid,
         input: goals::GoalInput,
     ) -> GqlResult<goals::Goal> {
-        goals::update_goal(id, input).await
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let settings = ctx.data::<Arc<Settings>>()?;
+        goals::update_goal(db, publisher(ctx), user, settings.max_tags_per_transaction, id, input)
+            .await
     }
 
-    async fn archive_goal(&self, id: crate::graphql::scalars::Uuid) -> GqlResult<goals::Goal> {
-        goals::archive_goal(id).await
+    async fn archive_goal(
+        &self,
+        ctx: &Context<'_>,
+        id: crate::graphql::scalars::Uuid,
+    ) -> GqlResult<goals::Goal> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        goals::archive_goal(db, publisher(ctx), user, id).await
     }
 
     /// Replaces the whole tag set; `[]` clears (§4).

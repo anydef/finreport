@@ -177,34 +177,45 @@ impl QueryRoot {
     /// `goals` (iteration 4 §4): the caller's own goals.
     async fn goals(
         &self,
+        ctx: &Context<'_>,
         #[graphql(default = false)] include_archived: bool,
     ) -> GqlResult<Vec<goals::Goal>> {
-        goals::goals(include_archived).await
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        goals::goals(db, user, include_archived).await
     }
 
-    async fn goal(&self, id: Uuid) -> GqlResult<Option<goals::Goal>> {
-        goals::goal(id).await
+    async fn goal(&self, ctx: &Context<'_>, id: Uuid) -> GqlResult<Option<goals::Goal>> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        goals::goal(db, user, id).await
     }
 
     /// Window defaults to the goal's own period for FIXED, last 12 periods for RECURRING.
     async fn goal_progress(
         &self,
+        ctx: &Context<'_>,
         id: Uuid,
         start_date: Option<Date>,
         end_date: Option<Date>,
     ) -> GqlResult<goals::GoalProgress> {
-        goals::goal_progress(id, start_date, end_date).await
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        goals::goal_progress(db, user, id, start_date, end_date).await
     }
 
     /// The contribution rows behind a bucket, for drill-down.
     async fn goal_transactions(
         &self,
+        ctx: &Context<'_>,
         id: Uuid,
         start_date: Date,
         end_date: Date,
         page: Option<PageInput>,
     ) -> GqlResult<TransactionPage> {
-        goals::goal_transactions(id, start_date, end_date, page).await
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        goals::goal_transactions(db, user, id, start_date, end_date, page).await
     }
 
     /// `recurringSeries` (§4).

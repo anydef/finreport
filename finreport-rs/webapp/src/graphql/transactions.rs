@@ -293,6 +293,26 @@ fn category_match_condition(ids: &[Uuid]) -> Condition {
         ))
 }
 
+/// Maps one `transaction` row onto the GraphQL type; shared with
+/// `goals::goal_transactions` so both lists render identical rows.
+pub(crate) fn to_graphql_transaction(row: transaction::Model) -> Transaction {
+    Transaction {
+        id: GqlUuid(row.id),
+        account_id: GqlUuid(row.account_id),
+        source: row.source,
+        external_id: row.external_id,
+        booking_date: GqlDate(row.booking_date),
+        valuta_date: row.valuta_date.map(GqlDate),
+        booking_status: row.booking_status,
+        amount: GqlDecimal(row.amount),
+        currency: row.currency,
+        counterparty_name: row.counterparty_name,
+        counterparty_iban: row.counterparty_iban,
+        description: row.description,
+        transaction_type: row.transaction_type,
+    }
+}
+
 pub async fn fetch_transactions(
     db: &DatabaseConnection,
     scoped_ids: &[Uuid],
@@ -329,24 +349,7 @@ pub async fn fetch_transactions(
         .all(db)
         .await?;
 
-    let items = rows
-        .into_iter()
-        .map(|row| Transaction {
-            id: GqlUuid(row.id),
-            account_id: GqlUuid(row.account_id),
-            source: row.source,
-            external_id: row.external_id,
-            booking_date: GqlDate(row.booking_date),
-            valuta_date: row.valuta_date.map(GqlDate),
-            booking_status: row.booking_status,
-            amount: GqlDecimal(row.amount),
-            currency: row.currency,
-            counterparty_name: row.counterparty_name,
-            counterparty_iban: row.counterparty_iban,
-            description: row.description,
-            transaction_type: row.transaction_type,
-        })
-        .collect();
+    let items = rows.into_iter().map(to_graphql_transaction).collect();
 
     Ok(TransactionPage {
         items,
