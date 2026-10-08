@@ -33,6 +33,7 @@
 	let nameInput = $state('');
 	let kindInput = $state<CategoryKind>('EXPENSE');
 	let statusMessage = $state<string | null>(null);
+	let errorMessage = $state<string | null>(null);
 
 	$effect(() => {
 		if (!dialogEl) return;
@@ -62,9 +63,21 @@
 		dialogTarget = null;
 	}
 
+	/** A mutation's error must never read as success: the list then refetches
+	 * correctly without the category, which looks like "creating it did
+	 * nothing" rather than "the server rejected it". */
+	function errorOf(result: { error?: { message?: string } | null }): string | null {
+		return result.error ? (result.error.message ?? 'The server rejected the change.') : null;
+	}
+
 	async function archive(node: CategoryNode) {
 		const client = createGraphqlClient(fetch);
-		await client.mutation(ARCHIVE_CATEGORY_MUTATION, { id: node.id }).toPromise();
+		const result = await client.mutation(ARCHIVE_CATEGORY_MUTATION, { id: node.id }).toPromise();
+		const failure = errorOf(result);
+		if (failure) {
+			errorMessage = failure;
+			return;
+		}
 		statusMessage = `"${node.name}" archived.`;
 		await invalidateAll();
 	}
@@ -72,8 +85,9 @@
 	async function submitDialog(e: SubmitEvent) {
 		e.preventDefault();
 		const client = createGraphqlClient(fetch);
+		errorMessage = null;
 		if (dialogMode === 'create') {
-			await client
+			const result = await client
 				.mutation(CREATE_CATEGORY_MUTATION, {
 					input: {
 						slug: slugInput.trim(),
@@ -83,11 +97,23 @@
 					}
 				})
 				.toPromise();
+			const failure = errorOf(result);
+			if (failure) {
+				// Keep the dialog open with the input intact, so the slug can be
+				// corrected rather than retyped.
+				errorMessage = failure;
+				return;
+			}
 			statusMessage = `"${nameInput}" created.`;
 		} else if (dialogMode === 'rename' && dialogTarget) {
-			await client
+			const result = await client
 				.mutation(RENAME_CATEGORY_MUTATION, { id: dialogTarget.id, name: nameInput.trim() })
 				.toPromise();
+			const failure = errorOf(result);
+			if (failure) {
+				errorMessage = failure;
+				return;
+			}
 			statusMessage = `Renamed to "${nameInput}".`;
 		}
 		closeDialog();
@@ -108,6 +134,12 @@
 	{#if statusMessage}
 		<p class="rounded-md bg-slate-100 px-3 py-2 text-sm text-slate-700" role="status">
 			{statusMessage}
+		</p>
+	{/if}
+
+	{#if errorMessage}
+		<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+			{errorMessage}
 		</p>
 	{/if}
 
