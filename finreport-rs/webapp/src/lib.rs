@@ -2,6 +2,7 @@ pub mod auth;
 pub mod cli;
 pub mod db;
 pub mod detect;
+pub mod goals;
 pub mod graphql;
 pub mod institute;
 pub mod kafka;

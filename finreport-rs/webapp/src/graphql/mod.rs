@@ -1,7 +1,7 @@
 mod accounts;
 mod breakdown;
 mod bulk;
-mod cashflow;
+pub(crate) mod cashflow;
 mod categories;
 pub mod cookies;
 pub mod current_user;
