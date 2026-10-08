@@ -16,57 +16,56 @@ See `docs/runbooks/iteration-1-deploy.md`.
 
 ## Next, in order
 
-Agreed work, in priority order. Reprioritised 2026-10-08 around getting the
-user's own data categorised, tagged and browsable; the goals backend is paused
-behind it.
+Agreed work, in priority order. Feature requests land in the Backlog below
+first; they move up here only once their priority is settled.
 
-1. **Spending by category must exclude income.** The dashboard card asks
-   `categoryBreakdown` for `level: 1` with no `kind`, so the resolver returns
-   every kind — only `transfer` is dropped by default — and income categories
-   appear under a card titled "Spending by category". Savings should be out
-   too, since requirements count them as saving rather than spending. XS: pass
-   `kind: EXPENSE` from the dashboard query.
-2. **Month-to-date period.** Already exists, mislabelled: the "This month"
-   preset runs from the 1st to *today*, so it is month-to-date, not the whole
-   month. XS: either rename the label to "Month to date", or keep the name and
-   add a separate full-month preset. Decide which the user meant.
-3. **Get the existing transactions categorised** — the reason "a lot of
-   transactions don't get categorized". Two parts:
-   (a) deploy `finreport-be-category-seed`, since the deployed `category` table
-   is empty and the labeler cannot assign from an empty taxonomy;
-   (b) confirm the labeler re-labels the *existing* backlog and not only newly
-   arriving transactions — check what `run_sweep` selects as candidates, and if
-   it skips already-labelled or already-swept rows, provide a way to re-run
-   over everything (changing `APP_projection_group` replays the labeler, which
-   may already be enough).
-   Note: the "-" the user sees is not a category. `TransactionTable` renders a
-   missing category as an em dash, so "-" means uncategorised.
-4. **Transaction detail modal** — M, frontend only. Clicking a transaction
-   anywhere opens a modal that edits its category and tags (and splits and the
-   recurring flag, which the same mutations already cover). Promoted from the
-   backlog; also extracts the shared `TransactionItem` that items 5 and 6 both
-   need, so it comes first.
-5. **Filters on every transaction table** — M. Account, category, tag, amount
-   and flags beside every list, not just `/transactions`. Needs
-   `amountMin`/`amountMax` on `TransactionFilter`; the rest exists. This is
-   half of the "centralized place where I can browse, filter, select and assign"
-   the user asked for.
-6. **Multi-select and bulk edit** — L, needs backend work. Select one, several
-   or all filtered transactions; action buttons then appear in the table header
-   for "edit categories" and "edit tags", each **overriding** the existing
-   values (confirmed 2026-10-08). Override semantics mean bulk tagging can
-   reuse `setTransactionTags`' whole-set replace after all, so the add/remove
-   operations noted earlier are not needed — simpler than previously planned.
-   Together with item 5 this is the centralized categorisation workspace.
-7. Iteration 4: savings and spending goals — **paused**. WP0 contracts and the
-   UI (on mocks, approved) are merged; WP-A (evaluation) and WP-B (GraphQL)
-   resume after the items above.
-8. Admin user management in the UI.
-9. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
-   decision about credential storage** (security-critical).
-10. C24, PayPal and Scalable Capital integrations. First research the access
+**Done 2026-10-08** — the categorisation/tagging/browsability batch:
+
+1. ~~Spending by category excludes income and savings~~ — the dashboard now
+   asks `categoryBreakdown` for `kind: EXPENSE`.
+2. ~~Rolling 30-day period~~ — "Last 30 days", distinct from "This month",
+   which was already month-to-date.
+3. ~~Make the labeler able to clear a backlog~~ — `APP_llm_max_requests_per_run`
+   defaulted to 200 *per process* and was never reset, and the long-running
+   labeler only swept at startup, so it went silent after 200 uncached calls
+   until someone restarted the container. It now sweeps on a timer
+   (`APP_labeler_sweep_interval_secs`, default hourly), refills per sweep, and
+   defaults to **no cap** (0 = unlimited). Sweeps and live records have
+   separate budgets so neither starves the other.
+4. ~~`uncategorized` means no category, not no label row~~ — it tested for the
+   absence of a `transaction_label` row, so with every transaction labelled it
+   matched nothing while the breakdown reported a large uncategorised total.
+5. ~~Transaction detail modal~~ — click any row to edit category, tags and the
+   recurring flag; shared `TransactionItem` extracted.
+6. ~~Filters on every transaction table~~ — one shared panel on the dashboard
+   and `/transactions`: accounts, categories, tags, amount range, search,
+   tri-state flags, linkable via search params.
+7. ~~Multi-select and bulk edit~~ — select rows or everything matching the
+   filter, then override categories or tags from the table header. Filter-based
+   mutations, so "all matching" means all of them and not the loaded page.
+
+Still open:
+
+8. Iteration 4: savings and spending goals (`docs/specs/iteration-4.md`).
+   WP0 contracts and WP-C (UI on mocks, approved) are merged; WP-A (evaluation)
+   and WP-B (GraphQL) are in progress.
+9. Admin user management in the UI.
+10. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+    decision about credential storage** (security-critical).
+11. C24, PayPal and Scalable Capital integrations. First research the access
     method for each (API vs. CSV fallback).
-11. Sankey cash-flow views.
+12. Sankey cash-flow views.
+
+### Deployment / data actions outstanding (user)
+
+- Redeploy for the labeler and bulk-edit backend changes.
+- Clear the empty-taxonomy residue so the labeler can re-label: delete the
+  poisoned LLM cache entries (`DELETE FROM llm_label_cache WHERE category_id
+  IS NULL`, ~148) and the stuck labels (`DELETE FROM transaction_label WHERE
+  category_id IS NULL`, ~610), then restart the labeler. Canary one
+  transaction first. Do **not** change `APP_projection_group` afterwards: the
+  deleted rows still exist as records on `finreport.transaction-label`, and a
+  projector replay would resurrect exactly what was deleted.
 
 ## Backlog
 
@@ -78,6 +77,13 @@ by agreeing where it goes.
   and `needs-review` rows are rendered as buttons but do nothing; category rows
   already work. Cheapest item here and fixes something that currently looks
   broken, so a reasonable candidate to pull forward.
+- **"All matching except these" in bulk selection** — S backend, S frontend.
+  Once "select all matching" is on, a row cannot be unticked: the bulk
+  mutations take a `TransactionFilter`, which has `transactionIds` but no
+  exclusion, so the only way back is to clear and re-tick by hand. Adding
+  `excludeTransactionIds` to the filter closes it. Worth settling before more
+  is built on the filter contract.
+
 - **Clickable affordances** — S, frontend-only. Clickable things should look
   clickable: `cursor-pointer`, a hover state, and a visible focus ring. Today
   the frontend has only 3 `cursor-pointer` usages against ~10 components with
