@@ -71,21 +71,26 @@ impl TestKafka {
             .create()
             .expect("create Kafka admin client");
 
-        let topics = [
-            TOPIC_ACCOUNT,
-            TOPIC_ACCOUNT_BALANCE,
-            TOPIC_TRANSACTION,
-            TOPIC_IMPORT_WATERMARK,
-            TOPIC_CATEGORY,
-            TOPIC_TRANSACTION_LABEL,
-            TOPIC_LLM_CACHE,
-            TOPIC_USER_LABEL,
-            TOPIC_RULE,
-            TOPIC_LABEL_REQUEST,
-            // Iteration 3 §2.2 detector output, owned by WP-A.
-            TOPIC_TRANSACTION_INSIGHT,
-        ]
-        .map(|name| NewTopic::new(name, 1, TopicReplication::Fixed(1)));
+        // Derived from the projector's and labeler's own topic lists, not
+        // hand-listed: a hand-listed copy drifts every time a topic is added,
+        // and the failure is obscure. `finreport.goal` (iteration 4) was
+        // missing here, so `projection::run` subscribed to a topic this broker
+        // had never created and the whole replay test died with
+        // "Metadata fetch error: UnknownPartition" — nothing to do with the
+        // code under test.
+        //
+        // `import-watermark` and `label-request` are listed separately because
+        // nothing projects them: the importer and the labeler use them
+        // directly, so they appear in neither list.
+        let names: Vec<&str> = webapp::projection::INGEST_TOPICS
+            .into_iter()
+            .chain(webapp::projection::LABELING_PROJECTION_TOPICS)
+            .chain([TOPIC_IMPORT_WATERMARK, TOPIC_LABEL_REQUEST])
+            .collect();
+        let topics: Vec<NewTopic<'_>> = names
+            .iter()
+            .map(|name| NewTopic::new(name, 1, TopicReplication::Fixed(1)))
+            .collect();
 
         admin
             .create_topics(&topics, &AdminOptions::new().request_timeout(Some(Duration::from_secs(10))))
