@@ -707,3 +707,42 @@ async fn ensure_category_rejects_a_conflicting_definition() {
     let orphan = w.run(ensure_category(&child, "EXPENSE", None)).await;
     assert_eq!(error_code(&orphan).as_deref(), Some("CONFLICT"), "{:?}", orphan.errors);
 }
+
+#[tokio::test]
+async fn child_category_slug_must_be_parent_slug_plus_one_segment() {
+    let w = world().await;
+    let parent = format!("par_{}", Uuid::new_v4().simple());
+    w.run_ok(ensure_category(&parent, "EXPENSE", None)).await;
+    let create = |slug: String, parent: Option<String>| {
+        let p = parent.map(|p| format!(r#", parentSlug: "{p}""#)).unwrap_or_default();
+        format!(
+            r#"mutation {{ createCategory(input: {{ slug: "{slug}", name: "X", kind: EXPENSE{p} }}) {{ id slug }} }}"#
+        )
+    };
+
+    // Parent + one segment: accepted, and findable as a descendant by prefix.
+    let ok = w.run_ok(create(format!("{parent}.gym"), Some(parent.clone()))).await;
+    assert_eq!(ok["createCategory"]["slug"], format!("{parent}.gym"));
+
+    // A bare leaf: rejected with the slug it should have been.
+    let bare = w.run(create("gym".into(), Some(parent.clone()))).await;
+    assert_eq!(error_code(&bare).as_deref(), Some("VALIDATION"), "{:?}", bare.errors);
+    assert!(
+        bare.errors[0].message.contains(&format!("e.g. '{parent}.gym'")),
+        "{:?}",
+        bare.errors
+    );
+
+    // Two segments below the parent: rejected.
+    let deep = w.run(create(format!("{parent}.a.b"), Some(parent.clone()))).await;
+    assert_eq!(error_code(&deep).as_deref(), Some("VALIDATION"), "{:?}", deep.errors);
+
+    // A dotted slug with no parent: rejected, naming the parent to pass.
+    let orphan = w.run(create(format!("{parent}.other"), None)).await;
+    assert_eq!(error_code(&orphan).as_deref(), Some("VALIDATION"), "{:?}", orphan.errors);
+    assert!(orphan.errors[0].message.contains("parentSlug"), "{:?}", orphan.errors);
+
+    // ensureCategory enforces the same rule when it has to create.
+    let ensured = w.run(ensure_category("gym2", "EXPENSE", Some(&parent))).await;
+    assert_eq!(error_code(&ensured).as_deref(), Some("VALIDATION"), "{:?}", ensured.errors);
+}

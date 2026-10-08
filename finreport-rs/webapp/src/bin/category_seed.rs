@@ -176,6 +176,10 @@ mod tests {
             } else {
                 assert!(parent_slug.is_some(), "child {} must have a parent", node.slug);
             }
+            // The seeder bypasses `create_category`, but its output must
+            // still satisfy the slug/parent rule that mutation enforces.
+            webapp::graphql::categories::check_slug_matches_parent(&node.slug, parent_slug.as_deref())
+                .unwrap_or_else(|e| panic!("{e}"));
             // `category_uuid` is deterministic by slug alone: re-running the
             // seed twice must compute the same id for the same slug.
             assert_eq!(category_uuid(&node.slug), category_uuid(&node.slug));

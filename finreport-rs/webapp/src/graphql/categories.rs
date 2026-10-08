@@ -47,6 +47,40 @@ pub fn slug_depth(slug: &str) -> i16 {
     (slug.matches('.').count() + 1) as i16
 }
 
+/// A category's place in the tree is encoded in its slug, and descendant
+/// matching everywhere is a dotted whole-segment prefix match on it, so the
+/// slug and `parent_slug` must agree: a child's slug is exactly its parent's
+/// slug plus one segment. A dotted slug with no `parent_slug` is rejected
+/// (rather than inferring the parent) so the hierarchy has one source of
+/// truth: the caller states the parent, the slug must match it. Pure, so it
+/// is unit-tested without a database.
+pub fn check_slug_matches_parent(
+    slug: &str,
+    parent_slug: Option<&str>,
+) -> Result<(), String> {
+    match parent_slug {
+        Some(parent) => {
+            let is_direct_child = slug
+                .strip_prefix(parent)
+                .and_then(|rest| rest.strip_prefix('.'))
+                .is_some_and(|leaf| !leaf.is_empty() && !leaf.contains('.'));
+            if is_direct_child {
+                return Ok(());
+            }
+            let leaf = slug.rsplit('.').next().unwrap_or(slug);
+            Err(format!(
+                "'{slug}' is not a child of '{parent}': a subcategory's slug must be the parent's slug plus one segment, e.g. '{parent}.{leaf}'"
+            ))
+        }
+        None => match slug.rsplit_once('.') {
+            Some((implied_parent, _)) => Err(format!(
+                "'{slug}' has a parent segment but no parent was given: pass parentSlug '{implied_parent}', or use a slug without dots for a top-level category"
+            )),
+            None => Ok(()),
+        },
+    }
+}
+
 fn gql_kind_to_kafka(kind: GqlCategoryKind) -> KafkaCategoryKind {
     match kind {
         GqlCategoryKind::Income => KafkaCategoryKind::Income,
@@ -194,6 +228,8 @@ pub async fn create_category(
             input.slug
         )));
     }
+    check_slug_matches_parent(&input.slug, input.parent_slug.as_deref())
+        .map_err(validation_error)?;
     if find_by_slug(db, &input.slug).await?.is_some() {
         return Err(validation_error(format!(
             "a category with slug '{}' already exists",
@@ -298,6 +334,8 @@ pub async fn ensure_category(
     publisher: Option<&Arc<EventPublisher>>,
     input: CategoryInput,
 ) -> async_graphql::Result<Category> {
+    // The slug/parent rule is enforced by `create_category` for the missing
+    // case; an existing slug is compared by `definition_conflict` (CONFLICT).
     let Some(existing) = find_by_slug(db, &input.slug).await? else {
         return create_category(db, publisher, input).await;
     };
@@ -476,6 +514,40 @@ mod tests {
         assert!(!is_valid_slug("food."));
         assert!(!is_valid_slug(".food"));
         assert!(!is_valid_slug("food..groceries"));
+    }
+
+    #[test]
+    fn child_slug_must_be_parent_plus_one_segment() {
+        assert_eq!(check_slug_matches_parent("leisure.gym", Some("leisure")), Ok(()));
+        assert_eq!(check_slug_matches_parent("a.b.c", Some("a.b")), Ok(()));
+        assert_eq!(check_slug_matches_parent("leisure", None), Ok(()));
+    }
+
+    #[test]
+    fn bare_leaf_with_parent_is_rejected_naming_the_expected_slug() {
+        assert_eq!(
+            check_slug_matches_parent("gym", Some("leisure")).unwrap_err(),
+            "'gym' is not a child of 'leisure': a subcategory's slug must be the parent's slug plus one segment, e.g. 'leisure.gym'"
+        );
+    }
+
+    #[test]
+    fn grandchild_slug_under_a_top_level_parent_is_rejected() {
+        let e = check_slug_matches_parent("leisure.hobbies.games", Some("leisure")).unwrap_err();
+        assert!(e.contains("e.g. 'leisure.games'"), "{e}");
+    }
+
+    #[test]
+    fn prefix_must_match_whole_segments_and_the_right_parent() {
+        assert!(check_slug_matches_parent("leisurex.gym", Some("leisure")).is_err());
+        assert!(check_slug_matches_parent("food.gym", Some("leisure")).is_err());
+        assert!(check_slug_matches_parent("leisure", Some("leisure")).is_err());
+    }
+
+    #[test]
+    fn dotted_slug_without_parent_is_rejected_naming_the_parent() {
+        let e = check_slug_matches_parent("leisure.gym", None).unwrap_err();
+        assert!(e.contains("parentSlug 'leisure'"), "{e}");
     }
 
     #[test]

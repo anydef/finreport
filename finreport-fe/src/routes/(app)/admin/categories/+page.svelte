@@ -15,6 +15,7 @@
 		CREATE_CATEGORY_MUTATION,
 		RENAME_CATEGORY_MUTATION
 	} from '$lib/graphql/adminRulesQueries';
+	import { composeSlug, SEGMENT_HINT, validateLeaf } from '$lib/categorySlug';
 	import { buildCategoryTree, type CategoryNode } from '$lib/rulesView';
 	import type { CategoryKind } from '$lib/graphql/types';
 	import type { PageData } from './$types';
@@ -34,6 +35,10 @@
 	let kindInput = $state<CategoryKind>('EXPENSE');
 	let statusMessage = $state<string | null>(null);
 	let errorMessage = $state<string | null>(null);
+
+	const parentSlug = $derived(dialogParent?.slug ?? null);
+	const fullSlug = $derived(composeSlug(parentSlug, slugInput));
+	const slugProblem = $derived(validateLeaf(parentSlug, slugInput));
 
 	$effect(() => {
 		if (!dialogEl) return;
@@ -87,10 +92,14 @@
 		const client = createGraphqlClient(fetch);
 		errorMessage = null;
 		if (dialogMode === 'create') {
+			if (slugProblem) {
+				errorMessage = slugProblem;
+				return;
+			}
 			const result = await client
 				.mutation(CREATE_CATEGORY_MUTATION, {
 					input: {
-						slug: slugInput.trim(),
+						slug: fullSlug,
 						name: nameInput.trim(),
 						kind: kindInput,
 						parentSlug: dialogParent?.slug ?? null
@@ -169,14 +178,32 @@
 
 		{#if dialogMode === 'create'}
 			<Field label="Slug" for="category-slug">
-				<input
-					id="category-slug"
-					required
-					pattern={'^[a-z0-9_]+(\\.[a-z0-9_]+){0,2}$'}
-					bind:value={slugInput}
-					class="rounded-md border-slate-300 text-sm"
-				/>
+				<div class="flex items-center gap-1">
+					{#if parentSlug}
+						<span class="font-mono text-sm text-slate-500" data-testid="slug-prefix"
+							>{parentSlug}.</span
+						>
+					{/if}
+					<input
+						id="category-slug"
+						required
+						autocomplete="off"
+						aria-describedby="category-slug-hint"
+						bind:value={slugInput}
+						class="min-w-0 flex-1 rounded-md border-slate-300 font-mono text-sm"
+					/>
+				</div>
 			</Field>
+			<p id="category-slug-hint" class="-mt-2 text-xs text-slate-500">
+				{SEGMENT_HINT}
+				{#if slugInput.trim() !== '' && !slugProblem}
+					Will be created as <code class="font-mono text-slate-700" data-testid="slug-preview"
+						>{fullSlug}</code
+					>
+				{:else if slugInput.trim() !== ''}
+					<span class="text-red-600">{slugProblem}</span>
+				{/if}
+			</p>
 		{/if}
 
 		<Field label="Name" for="category-name">
@@ -200,6 +227,12 @@
 					{/each}
 				</select>
 			</Field>
+		{/if}
+
+		{#if errorMessage}
+			<p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">
+				{errorMessage}
+			</p>
 		{/if}
 
 		<div class="flex justify-end gap-2">
