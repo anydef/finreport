@@ -79,6 +79,53 @@ pub(crate) fn reimbursement_sql(alias: &str, filter: &TransactionFilter) -> Opti
     }
 }
 
+/// The `search` predicate, shared by [`build_condition`] and every
+/// hand-rolled cashflow twin so the list and the charts cannot disagree
+/// about a search term (they did once). A row matches on the bank's
+/// counterparty string, the description, or - when the filter knows its
+/// viewer - that viewer's alias for the row's counterparty key.
+///
+/// The alias arm is a correlated `EXISTS` on `display_alias`'s primary key
+/// `(user_id, kind, key)`: one index probe per row, evaluated only for rows
+/// the two cheaper arms did not already accept, and only when a search term
+/// is present. The viewer id is inlined as a typed `uuid` literal (a
+/// `Uuid`'s text form cannot carry SQL), which keeps every twin's positional
+/// parameter numbering unchanged. Scoping to the viewer is what stops one
+/// user's nickname matching another's rows.
+pub(crate) fn search_sql(
+    alias: &str,
+    filter: &TransactionFilter,
+    name_param: &str,
+    description_param: &str,
+    alias_param: &str,
+) -> String {
+    let mut sql = format!(
+        "({alias}.counterparty_name ILIKE {name_param} OR {alias}.description ILIKE {description_param}"
+    );
+    if let Some(viewer) = filter.viewer {
+        sql.push_str(&format!(
+            " OR EXISTS (SELECT 1 FROM display_alias da WHERE da.user_id = '{viewer}'::uuid \
+             AND da.kind = 'counterparty' AND da.key = {alias}.counterparty_key \
+             AND da.alias ILIKE {alias_param})"
+        ));
+    }
+    sql.push(')');
+    sql
+}
+
+/// ORDER BY key for `COUNTERPARTY_NAME`: the name the list *displays* - the
+/// viewer's alias when there is one, else the bank's string - lower-cased.
+pub(crate) fn counterparty_sort_key(viewer: Option<Uuid>) -> String {
+    match viewer {
+        Some(viewer) => format!(
+            "LOWER(COALESCE((SELECT da.alias FROM display_alias da WHERE da.user_id = '{viewer}'::uuid \
+             AND da.kind = 'counterparty' AND da.key = transaction.counterparty_key), \
+             transaction.counterparty_name))"
+        ),
+        None => "LOWER(transaction.counterparty_name)".to_string(),
+    }
+}
+
 /// Hand-rolled SQL twin of the `transactionIds`/`counterpartyKeys`/`categorySlugsExact`/`amountMin`/`amountMax`
 /// predicates in [`build_condition`], for the aggregation queries in
 /// `cashflow` that do not go through sea-orm. `alias` is the transaction
@@ -174,8 +221,9 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
         // Raw expression because sea-orm's `ColumnTrait` offers only `like`.
         let pattern = format!("%{search}%");
         condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
-            "(transaction.counterparty_name ILIKE $1 OR transaction.description ILIKE $2)",
+            search_sql("transaction", filter, "$1", "$2", "$3"),
             vec![
+                sea_orm::Value::from(pattern.clone()),
                 sea_orm::Value::from(pattern.clone()),
                 sea_orm::Value::from(pattern),
             ],
@@ -408,6 +456,7 @@ const CATEGORY_SORT_KEY: &str = "(CASE WHEN EXISTS (SELECT 1 FROM transaction_sp
 pub(crate) fn apply_order(
     select: sea_orm::Select<transaction::Entity>,
     sort: Option<TransactionSort>,
+    viewer: Option<Uuid>,
 ) -> sea_orm::Select<transaction::Entity> {
     use sea_orm::sea_query::{Expr, NullOrdering};
     let Some(sort) = sort else {
@@ -431,7 +480,7 @@ pub(crate) fn apply_order(
         }
         TransactionSortField::Amount => select.order_by(transaction::Column::Amount, dir),
         TransactionSortField::CounterpartyName => select.order_by_with_nulls(
-            Expr::cust("LOWER(transaction.counterparty_name)"),
+            Expr::cust(counterparty_sort_key(viewer)),
             dir,
             NullOrdering::Last,
         ),
@@ -470,7 +519,7 @@ pub async fn fetch_transactions(
         .count(db)
         .await?;
 
-    let rows = apply_order(transaction::Entity::find().filter(condition), sort)
+    let rows = apply_order(transaction::Entity::find().filter(condition), sort, filter.viewer)
         .limit(limit)
         .offset(offset)
         .all(db)
@@ -643,7 +692,7 @@ mod tests {
 
     fn order_sql(sort: Option<TransactionSort>) -> String {
         use sea_orm::{DbBackend, QueryTrait};
-        let sql = apply_order(transaction::Entity::find(), sort)
+        let sql = apply_order(transaction::Entity::find(), sort, None)
             .build(DbBackend::Postgres)
             .to_string();
         sql[sql.find("ORDER BY").expect("ordered")..].to_string()
@@ -667,6 +716,30 @@ mod tests {
                 assert!(sql.trim_end().ends_with("\"id\" ASC") || sql.trim_end().ends_with("\"id\" DESC"), "{sql}");
             }
         }
+    }
+
+    #[test]
+    fn search_matches_the_viewers_alias_only_when_the_viewer_is_known() {
+        let anon = TransactionFilter { search: Some("x".into()), ..Default::default() };
+        let sql = search_sql("t", &anon, "$1", "$2", "$3");
+        assert!(!sql.contains("display_alias"), "{sql}");
+        assert!(sql.contains("t.counterparty_name ILIKE $1") && sql.contains("t.description ILIKE $2"));
+
+        let viewer = Uuid::from_u128(0xabc);
+        let known = TransactionFilter { viewer: Some(viewer), ..anon };
+        let sql = search_sql("t", &known, "$1", "$2", "$3");
+        assert!(sql.contains(&format!("da.user_id = '{viewer}'::uuid")), "{sql}");
+        assert!(sql.contains("da.key = t.counterparty_key") && sql.contains("da.alias ILIKE $3"), "{sql}");
+    }
+
+    #[test]
+    fn counterparty_sort_orders_by_the_displayed_name() {
+        assert_eq!(counterparty_sort_key(None), "LOWER(transaction.counterparty_name)");
+        let viewer = Uuid::from_u128(0xabc);
+        let key = counterparty_sort_key(Some(viewer));
+        assert!(key.starts_with("LOWER(COALESCE((SELECT da.alias"), "{key}");
+        assert!(key.contains(&format!("da.user_id = '{viewer}'::uuid")), "{key}");
+        assert!(key.ends_with("transaction.counterparty_name))"), "{key}");
     }
 
     #[test]

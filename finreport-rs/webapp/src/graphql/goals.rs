@@ -606,7 +606,7 @@ pub async fn goal_transactions(
             let select = transaction::Entity::find()
                 .filter(transaction::Column::Id.is_in(ids))
                 .filter(transaction::Column::AccountId.is_in(scoped));
-            crate::graphql::transactions::apply_order(select, Some(sort))
+            crate::graphql::transactions::apply_order(select, Some(sort), Some(user.user_id))
                 .limit(limit as u64)
                 .offset(offset as u64)
                 .all(db)

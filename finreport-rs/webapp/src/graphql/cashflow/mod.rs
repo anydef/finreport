@@ -180,7 +180,14 @@ fn build_graph_sql(
 
     if let Some(search) = filter.search.as_ref().filter(|s| !s.is_empty()) {
         sql.push_str(&format!(
-            " AND (counterparty_name ILIKE ${idx} OR description ILIKE ${idx})"
+            " AND {}",
+            crate::graphql::transactions::search_sql(
+                "transaction",
+                filter,
+                &format!("${idx}"),
+                &format!("${idx}"),
+                &format!("${idx}"),
+            )
         ));
         params.push(format!("%{search}%").into());
         idx += 1;
@@ -250,7 +257,14 @@ fn build_category_outcome_sql(
     let mut idx = 4;
     if let Some(search) = filter.search.as_ref().filter(|s| !s.is_empty()) {
         extra.push_str(&format!(
-            " AND (t.counterparty_name ILIKE ${idx} OR t.description ILIKE ${idx})"
+            " AND {}",
+            crate::graphql::transactions::search_sql(
+                "t",
+                filter,
+                &format!("${idx}"),
+                &format!("${idx}"),
+                &format!("${idx}"),
+            )
         ));
         params.push(format!("%{search}%").into());
         idx += 1;

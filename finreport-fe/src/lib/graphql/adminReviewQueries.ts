@@ -130,6 +130,7 @@ query HeldMerchantGroups($page: PageInput) {
 		groups {
 			counterpartyKey
 			displayName
+			rawName
 			heldCount
 			totalAmount
 			currency

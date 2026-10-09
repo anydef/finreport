@@ -146,7 +146,14 @@ pub fn build_summary_sql(
 
     if let Some(search) = filter.search.as_ref().filter(|s| !s.is_empty()) {
         sql.push_str(&format!(
-            " AND (counterparty_name ILIKE ${idx} OR description ILIKE ${idx})"
+            " AND {}",
+            crate::graphql::transactions::search_sql(
+                "transaction",
+                filter,
+                &format!("${idx}"),
+                &format!("${idx}"),
+                &format!("${idx}"),
+            )
         ));
         params.push(format!("%{search}%").into());
         idx += 1;

@@ -19,6 +19,7 @@ use async_graphql::SimpleObject;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, QueryResult, Statement};
 use uuid::Uuid;
 
+use crate::graphql::display_aliases::AliasBook;
 use crate::graphql::scalars::Decimal as GqlDecimal;
 use crate::graphql::transactions::clamp_limit;
 use crate::graphql::types::ReviewReason;
@@ -33,10 +34,15 @@ pub struct HeldMerchantGroup {
     /// bucket of held transactions that have no key; no filter can address
     /// that bucket, only individual transaction ids can.
     pub counterparty_key: Option<String>,
-    /// The most common `counterpartyName` among the group's held
-    /// transactions (ties broken alphabetically, so it is stable). Falls back
-    /// to the key; the ungrouped bucket is named "No merchant key".
+    /// What the caller sees for the merchant: their alias for
+    /// `counterpartyKey` when they set one, else `rawName`. The ungrouped
+    /// bucket is named "No merchant key" and is never aliased.
     pub display_name: String,
+    /// The bank's own name: the most common `counterpartyName` among the
+    /// group's held transactions (ties broken alphabetically, so it is
+    /// stable), falling back to the key. Shown as secondary detail next to an
+    /// alias, as on a transaction row.
+    pub raw_name: String,
     /// How many held transactions the group has.
     pub held_count: i32,
     /// Signed sum of the group's amounts (negative = net spending), in
@@ -117,12 +123,16 @@ fn review_reasons(raw: &[String]) -> Vec<ReviewReason> {
     out
 }
 
-fn group_from_row(row: &QueryResult) -> Result<HeldMerchantGroup, DbErr> {
+fn group_from_row(row: &QueryResult, aliases: &AliasBook) -> Result<HeldMerchantGroup, DbErr> {
     let key: Option<String> = row.try_get("", "key")?;
     let name: String = row.try_get("", "name")?;
     let reasons: Vec<String> = row.try_get("", "reasons")?;
+    let raw_name = if key.is_none() { UNGROUPED_NAME.to_string() } else { name };
     Ok(HeldMerchantGroup {
-        display_name: if key.is_none() { UNGROUPED_NAME.to_string() } else { name },
+        display_name: aliases
+            .counterparty_display(key.as_deref(), Some(&raw_name))
+            .unwrap_or_else(|| raw_name.clone()),
+        raw_name,
         counterparty_key: key,
         held_count: row.try_get::<i64>("", "held")? as i32,
         total_amount: GqlDecimal(row.try_get::<rust_decimal::Decimal>("", "total")?),
@@ -136,6 +146,7 @@ fn group_from_row(row: &QueryResult) -> Result<HeldMerchantGroup, DbErr> {
 pub async fn fetch_held_merchant_groups(
     db: &DatabaseConnection,
     scoped_ids: &[Uuid],
+    aliases: &AliasBook,
     limit: i32,
     offset: i32,
 ) -> async_graphql::Result<HeldMerchantGroups> {
@@ -154,7 +165,7 @@ pub async fn fetch_held_merchant_groups(
             ],
         ))
         .await?;
-    let groups = rows.iter().map(group_from_row).collect::<Result<Vec<_>, _>>()?;
+    let groups = rows.iter().map(|r| group_from_row(r, aliases)).collect::<Result<Vec<_>, _>>()?;
 
     // Totals are their own (single) statement so they stay right for a page
     // past the end, where the groups query returns no rows to carry them.

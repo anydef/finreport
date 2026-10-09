@@ -64,7 +64,7 @@ async fn run(schema: &webapp::graphql::AppSchema, user: &AuthenticatedUser, quer
     response.data.into_json().unwrap()
 }
 
-const GROUPS: &str = "{ heldMerchantGroups { groupCount heldCount groups { counterpartyKey displayName \
+const GROUPS: &str = "{ heldMerchantGroups { groupCount heldCount groups { counterpartyKey displayName rawName \
     heldCount totalAmount currency reviewReasons proposedCategoryPath proposedCategoryVotes } } \
     reviewQueue { totalCount } }";
 
@@ -129,6 +129,56 @@ async fn groups_count_sum_scope_and_bucket_the_keyless() {
     let data_b = run(&schema, &b.user, GROUPS).await;
     assert_eq!(data_b["heldMerchantGroups"]["heldCount"], 2);
     assert_eq!(data_b["heldMerchantGroups"]["groupCount"], 2);
+}
+
+#[tokio::test]
+async fn a_group_shows_the_callers_alias_and_still_exposes_the_bank_name() {
+    use webapp::kafka::labeling::{AliasKind, DisplayAliasRecord, CURRENT_SCHEMA_VERSION};
+    use webapp::projection::display_alias::project_display_alias;
+
+    let db = common::db().await;
+    let a = tenant(&db, "held-alias-a").await;
+    let b = tenant(&db, "held-alias-b").await;
+    held(&db, a.account, Some("amazon"), Some("Amazon Payments"), "-10.00", "ambiguous", None).await;
+    held(&db, a.account, Some("kiosk"), Some("Kiosk"), "-2.00", "ambiguous", None).await;
+    held(&db, a.account, None, Some("Mystery"), "-7.00", "ambiguous", None).await;
+    held(&db, b.account, Some("amazon"), Some("Amazon Payments"), "-1.00", "ambiguous", None).await;
+    let record = DisplayAliasRecord {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        user_id: a.user.user_id,
+        kind: AliasKind::Counterparty,
+        key: "amazon".to_string(),
+        alias: "Shopping".to_string(),
+        revision: Utc::now(),
+    };
+    project_display_alias(db.as_ref(), a.user.user_id, AliasKind::Counterparty, "amazon", Some(record))
+        .await
+        .unwrap();
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let groups = run(&schema, &a.user, GROUPS).await["heldMerchantGroups"]["groups"].clone();
+    let by_key = |key: Option<&str>| {
+        groups
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|g| g["counterpartyKey"].as_str() == key)
+            .unwrap_or_else(|| panic!("no group for {key:?}: {groups}"))
+            .clone()
+    };
+    let amazon = by_key(Some("amazon"));
+    assert_eq!(amazon["displayName"], "Shopping");
+    assert_eq!(amazon["rawName"], "Amazon Payments", "the bank name stays available");
+    let kiosk = by_key(Some("kiosk"));
+    assert_eq!((&kiosk["displayName"], &kiosk["rawName"]), (&Value::from("Kiosk"), &Value::from("Kiosk")));
+    let ungrouped = by_key(None);
+    assert_eq!(ungrouped["displayName"], "No merchant key");
+    assert_eq!(ungrouped["rawName"], "No merchant key");
+
+    // Another user's alias for the same key does not show up for Bob.
+    let bobs = run(&schema, &b.user, GROUPS).await["heldMerchantGroups"]["groups"].clone();
+    assert_eq!(bobs[0]["displayName"], "Amazon Payments");
+    assert_eq!(bobs[0]["rawName"], "Amazon Payments");
 }
 
 #[tokio::test]
