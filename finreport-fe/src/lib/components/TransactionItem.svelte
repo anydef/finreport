@@ -3,9 +3,14 @@
 	 * One transaction row, shared by every transaction table. The whole row is
 	 * the click target (mouse); the counterparty cell holds a real button so
 	 * keyboard and screen-reader users get the same action and focus has
-	 * somewhere to return to when the detail modal closes. Links inside the
-	 * row (the "needs review" pill) keep their own behaviour.
+	 * somewhere to return to when the editor collapses. Clicking toggles the
+	 * editor, rendered through the `editor` snippet in a full-width sub-row
+	 * directly below. That sub-row is the row's single expansion area: the
+	 * split pill is just another way to open it, and the split parts are
+	 * listed inside the editor rather than in a second sub-row. Links inside
+	 * the row (the "needs review" pill) keep their own behaviour.
 	 */
+	import type { Snippet } from 'svelte';
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 	import { labelSourceBadge, needsReviewBadge } from '$lib/labelBadge';
 	import { splitIndicator } from '$lib/splitView';
@@ -15,7 +20,12 @@
 	interface Props {
 		transaction: Transaction;
 		currency: string;
-		onopen: (transaction: Transaction) => void;
+		expanded?: boolean;
+		/** Row clicked or activated from the keyboard: the owner opens or collapses the editor. */
+		ontoggle: (transaction: Transaction) => void;
+		/** Renders the editor; call `close` to collapse it and return focus to this row. */
+		editor?: Snippet<[close: () => void]>;
+		onclose?: () => void;
 		/** Bulk-edit mode: render a checkbox cell. Omit `onselect` and there is none. */
 		selected?: boolean;
 		/** Ticked as part of "all matching": shown checked, not individually untickable. */
@@ -26,20 +36,29 @@
 	let {
 		transaction: tx,
 		currency,
-		onopen,
+		expanded = false,
+		ontoggle,
+		editor,
+		onclose,
 		selected = false,
 		selectLocked = false,
 		onselect
 	}: Props = $props();
 
+	const uid = $props.id();
 	let opener = $state<HTMLButtonElement | null>(null);
 
 	function onRowClick(event: MouseEvent) {
-		if ((event.target as HTMLElement).closest('a, input, [data-select-cell], [data-split-toggle]'))
-			return;
-		// Focus first so the modal records this row's button as the element to return to.
+		if ((event.target as HTMLElement).closest('a, input, [data-select-cell]')) return;
+		// Focus first so a mouse click leaves focus on this row's button too.
 		opener?.focus();
-		onopen(tx);
+		ontoggle(tx);
+	}
+
+	/** Collapse from inside the editor (Esc, Close): focus goes back to the row. */
+	function collapse() {
+		opener?.focus();
+		onclose?.();
 	}
 
 	const sourceBadge = $derived(labelSourceBadge(tx.label));
@@ -48,13 +67,14 @@
 	// shows the split pill instead of "—". Its label source is always "you", so
 	// that badge is dropped for splits: one pill, not two, keeps the row calm.
 	const split = $derived(splitIndicator(tx.splits));
-	let partsOpen = $state(false);
 </script>
 
 <!-- The counterparty button below is the keyboard/AT equivalent of this row click. -->
 <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <tr
-	class="cursor-pointer border-b border-slate-100 last:border-0 focus-within:bg-slate-50 hover:bg-slate-50"
+	class="cursor-pointer border-b border-slate-100 last:border-0 focus-within:bg-slate-50 hover:bg-slate-50 {expanded
+		? 'border-b-0 bg-slate-50'
+		: ''}"
 	onclick={onRowClick}
 >
 	{#if onselect}
@@ -76,7 +96,8 @@
 		<button
 			bind:this={opener}
 			type="button"
-			aria-haspopup="dialog"
+			aria-expanded={expanded}
+			aria-controls={expanded ? `${uid}-editor` : undefined}
 			class="focus-visible:outline-brand rounded-sm text-left font-medium text-slate-900 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
 		>
 			{tx.counterpartyName ?? 'Unknown'}
@@ -97,13 +118,11 @@
 			{#if split}
 				<button
 					type="button"
-					data-split-toggle
-					aria-expanded={partsOpen}
+					aria-expanded={expanded}
 					aria-label={split.ariaLabel}
-					onclick={() => (partsOpen = !partsOpen)}
 					class="focus-visible:outline-brand inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800 hover:bg-violet-200 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
 				>
-					<span aria-hidden="true">{partsOpen ? '▾' : '▸'}</span>
+					<span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
 					{split.text}
 				</button>
 			{:else}
@@ -148,23 +167,10 @@
 	</td>
 </tr>
 
-{#if split && partsOpen}
-	<tr class="border-b border-slate-100 bg-violet-50/50" data-testid="split-parts">
-		<td colspan={onselect ? 8 : 7} class="py-2 pr-0 pl-8">
-			<p class="mb-1 text-xs text-slate-500">
-				Split into {split.count}
-				{split.count === 1 ? 'part' : 'parts'} — totals count each part under its own category.
-			</p>
-			<ul class="flex flex-col gap-0.5">
-				{#each tx.splits as part (part.index)}
-					<li class="flex max-w-md items-center justify-between gap-4 text-sm">
-						<span class="text-slate-700">{part.category.name}</span>
-						<span class="font-medium whitespace-nowrap text-slate-700">
-							{formatAmount(part.amount, currency)}
-						</span>
-					</li>
-				{/each}
-			</ul>
+{#if expanded && editor}
+	<tr id="{uid}-editor" class="border-b border-slate-100 bg-slate-50" data-testid="row-editor">
+		<td colspan={onselect ? 8 : 7} class="p-0">
+			{@render editor(collapse)}
 		</td>
 	</tr>
 {/if}

@@ -1,17 +1,20 @@
 <script lang="ts">
 	/**
-	 * Transaction list. Rows are `TransactionItem`s; clicking one opens the
-	 * detail modal where category, tags, the recurring flag and the note are edited.
+	 * Transaction list. Rows are `TransactionItem`s; clicking one expands the
+	 * editor (category, tags, the recurring flag, the note) in a sub-row below
+	 * it. One row is expanded at a time (`expansion.ts`).
 	 * The table owns the mutations: each response is folded into a local
 	 * override of that row (see `transactionEdit.ts`), so the list shows the
 	 * change at once without a refetch. Overrides are dropped whenever the
 	 * parent hands in fresh `transactions`.
 	 */
 	import TransactionItem from './TransactionItem.svelte';
-	import TransactionDetailModal from './TransactionDetailModal.svelte';
+	import TransactionEditor from './TransactionEditor.svelte';
 	import BulkEditDialog from './BulkEditDialog.svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { untrack } from 'svelte';
+	import { pruneExpanded, toggleExpanded } from '$lib/expansion';
+	import { withCategory } from '$lib/categoryCreate';
 	import {
 		EMPTY_SELECTION,
 		filterKey,
@@ -57,7 +60,7 @@
 		/**
 		 * The filter the rows were loaded with. Giving it (with `totalCount`)
 		 * turns on multi-select and bulk edit; without it the table is read-only
-		 * apart from the detail modal.
+		 * apart from the row editor.
 		 */
 		filter?: TransactionFilter;
 		/** Rows matching `filter` across all pages, not just the loaded ones. */
@@ -162,12 +165,23 @@
 		categories = (result.data?.categories ?? []) as Category[];
 	}
 
-	function open(tx: Transaction) {
-		selectedId = tx.id;
-		loadCategories();
+	function toggle(tx: Transaction) {
+		selectedId = toggleExpanded(selectedId, tx.id);
+		if (selectedId) loadCategories();
 	}
 
-	/** Run a mutation and return its payload, or throw so the modal can show it. */
+	// An expanded row that leaves the list (new page or filter) collapses.
+	$effect(() => {
+		const ids = transactions.map((tx) => tx.id);
+		untrack(() => (selectedId = pruneExpanded(selectedId, ids)));
+	});
+
+	/** A category created in place joins the list every row's editor shares. */
+	function categoryCreated(created: Category) {
+		categories = withCategory(categories ?? [], created);
+	}
+
+	/** Run a mutation and return its payload, or throw so the editor can show it. */
 	async function mutate<T>(
 		query: string,
 		variables: Record<string, unknown>,
@@ -294,11 +308,27 @@
 					<TransactionItem
 						transaction={tx}
 						{currency}
-						onopen={open}
+						expanded={tx.id === selectedId}
+						ontoggle={toggle}
+						onclose={() => (selectedId = null)}
 						selected={isSelected(selection, tx.id)}
 						selectLocked={selection.mode === 'all-matching'}
 						onselect={bulkEnabled ? () => (selection = toggleRow(selection, tx)) : undefined}
-					/>
+					>
+						{#snippet editor(close)}
+							<TransactionEditor
+								transaction={tx}
+								{currency}
+								{categories}
+								onSetCategory={setCategory}
+								onSetTags={setTags}
+								onSetRecurring={setRecurring}
+								onSetNote={setNote}
+								onCategoryCreated={categoryCreated}
+								onclose={close}
+							/>
+						{/snippet}
+					</TransactionItem>
 				{/each}
 			</tbody>
 		</table>
@@ -315,18 +345,5 @@
 		onApplyTags={applyBulkTags}
 		ondone={bulkDone}
 		onclose={() => (bulkKind = null)}
-	/>
-{/if}
-
-{#if selected}
-	<TransactionDetailModal
-		transaction={selected}
-		{currency}
-		{categories}
-		onSetCategory={setCategory}
-		onSetTags={setTags}
-		onSetRecurring={setRecurring}
-		onSetNote={setNote}
-		onclose={() => (selectedId = null)}
 	/>
 {/if}

@@ -1,5 +1,5 @@
 /**
- * Pure helpers for the transaction detail modal: folding a mutation's
+ * Pure helpers for the transaction editor: folding a mutation's
  * response back into the `Transaction` the list rendered, and the
  * "this will clear your splits" warning.
  */

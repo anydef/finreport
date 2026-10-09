@@ -408,8 +408,14 @@ interface MockCategory {
  * against in mock mode.
  */
 function findMockCategory(slug: unknown): MockCategory | undefined {
-	return (categoriesMock.data.categories as MockCategory[]).find((c) => c.slug === slug);
+	return (
+		(categoriesMock.data.categories as MockCategory[]).find((c) => c.slug === slug) ??
+		mockEnsuredCategories.get(slug as string)
+	);
 }
+
+/** Categories made through `ensureCategory` in mock mode, so a later pick of one resolves. */
+const mockEnsuredCategories = new Map<string, MockCategory>();
 
 /** Placeholder used when a mutation is given a slug the fixture doesn't know about. */
 function placeholderCategory(slug: string | undefined): MockCategory {
@@ -621,6 +627,14 @@ function mockCreateOrUpdateCategory(
 		archived: false,
 		origin: 'user'
 	};
+}
+
+function mockEnsureCategory(variables: Record<string, unknown> | undefined): unknown {
+	const made = mockCreateOrUpdateCategory(variables) as MockCategory;
+	const existing = findMockCategory(made.slug);
+	if (existing) return existing;
+	mockEnsuredCategories.set(made.slug, made);
+	return made;
 }
 
 function mockRenameCategory(variables: Record<string, unknown> | undefined): unknown {
@@ -937,7 +951,7 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'EnsureCategory':
 			return {
 				status: 200,
-				body: { data: { ensureCategory: mockCreateOrUpdateCategory(body.variables) } },
+				body: { data: { ensureCategory: mockEnsureCategory(body.variables) } },
 				setCookies: []
 			};
 		case 'RenameCategory':
