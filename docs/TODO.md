@@ -48,6 +48,28 @@ then the things that make the tool worth opening when nothing is broken.
   find-similar~~; ~~the labeler's LLM cap removed~~ and ~~its slug validated
   against the taxonomy~~.
 
+### Done 2026-10-09
+
+- ~~Compare months, by category and in total~~ — a month/year picker
+  (`preset=month:YYYY-MM`, linkable) plus a `/compare` route with per-category
+  and total deltas, absolute and percentage, drilling into any cell. A category
+  that appears or disappears reads "new"/"gone" rather than a meaningless
+  +/-100%, and the current partial month is excluded by default, or
+  October-so-far against September would read as a collapse in spending.
+- ~~Free-text note on a transaction~~ — and it exposed a live data-loss bug:
+  `setTransactionCategory`, `clearTransactionCategory`, `splitTransaction` and
+  the bulk category edit all republished the whole-state record with
+  `note: None`, so every category change or split would have erased the note.
+  Fixed with the note preserved through all of them.
+- ~~The "(no subcategory)" row is clickable~~ — via a new `categorySlugsExact`
+  filter honoured by the list, the cashflow SQL twins, the breakdown, recurring
+  and the bulk mutations.
+- ~~Inline transaction editor~~ replacing the modal, with ~~in-place category
+  creation~~ and ~~tag autocomplete~~ over `Query.tags` with usage counts.
+- ~~Description-qualified rule learning~~ for ambiguous merchants, and
+  ~~retiring the broad merchant-wide rule once narrow rules exist~~ — without
+  which the first PayPal decision left a blanket rule labelling everything.
+
 ### In progress
 
 1. **Review queue groups by merchant.** 196 held transactions are nowhere near
@@ -64,43 +86,26 @@ then the things that make the tool worth opening when nothing is broken.
 
 ### Next, in this order
 
-5. **Compare months, by category and in total.** The user's own framing: browse
-   past months, then recognise trends across them, analysable per category and
-   as a whole. Every figure today is a snapshot of one period, while the
-   question people actually ask is comparative. Two halves, and the first is
-   worth shipping alone:
-   (a) a month picker — pick September, August, May without typing dates;
-   (b) period-over-period deltas per category and in total, with drill-down.
-   The recurring detector and the history already exist. This is the only
-   genuinely new feature here rather than a reshaping of what is there, and it
-   is what makes the dashboard worth opening when nothing is wrong.
-6. **Free-text note on a transaction.** Explicitly not part of labelling.
-   Cheaper than it looks: `UserLabelRecord.note` is already published and
-   projected, so this is a missing UI, not a new concept. Mind the
-   read-modify-write rule — the record is whole-state, so saving a note must
-   preserve the category, tags, splits and recurring override.
-7. **The "(no subcategory)" row must be clickable.** When a parent category is
-   expanded, transactions labelled with the parent *itself* get their own row,
-   currently rendered inert. Needs a filter for "this category exactly, not its
-   descendants" — `categorySlugs` always includes descendants today — so it is
-   a small backend addition plus wiring.
-8. **Progress feedback while curating** — the uncategorised count falling, and
+
+
+
+1. **Progress feedback while curating** — the uncategorised count falling, and
    "N rules learned from your decisions". Cheap once item 3's counts exist, and
    meaningful now that one decision learns a rule.
-9. Accounts as a multi-select dropdown in the filter panel (needs a
+2. Accounts as a multi-select dropdown in the filter panel (needs a
    multi-select mode on `SearchMenu`, which would also serve categories and
    tags there).
-10. A Counterparty tab on the breakdown table, matching the chart's dimension
+3. A Counterparty tab on the breakdown table, matching the chart's dimension
     tabs. Needs a backend decision: `categoryBreakdown` is category-specific
     and `CashflowDimension` belongs to the Sankey; generalising the breakdown
     to take a dimension probably beats a second query, since `TAG` is already
     declared in that enum.
-11. Admin user management in the UI.
-12. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
+4. Admin user management in the UI.
+5. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
     decision about credential storage** (security-critical).
-13. C24, PayPal and Scalable Capital integrations. First research the access
+6. C24, PayPal and Scalable Capital integrations. First research the access
     method for each (API vs. CSV fallback).
-14. Sankey cash-flow views.
+8. Sankey cash-flow views.
 
 ### Deployment / data actions outstanding (user)
 
