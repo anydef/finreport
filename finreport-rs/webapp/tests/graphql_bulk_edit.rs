@@ -866,7 +866,8 @@ async fn a_note_on_a_transaction_without_a_label_row_creates_a_commentary_only_o
     let w = world().await;
     let tx = w.tx("-5.00").await;
     assert!(w.user_label(tx).await.is_none());
-    assert!(w.set_note(tx, "just a thought").await.errors.is_empty());
+    let r = w.set_note(tx, "just a thought").await;
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
     let label = w.user_label(tx).await.unwrap();
     assert_eq!(label.note.as_deref(), Some("just a thought"));
     assert_eq!(label.category_id, None, "a note must never pin a category");
