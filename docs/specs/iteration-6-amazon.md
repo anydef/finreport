@@ -76,9 +76,14 @@ What this gives us, and it is enough to build on:
 ```
 
 So matching is a **string join on the order id**, not a heuristic. Extract with
-`\b(\d{3}-\d{7}-\d{7})\b`; the leading `01` is Comdirect's remittance-field
-marker (the same `01`/`02`/`03` prefixes seen on other descriptions), not part
-of the id.
+`\b(?:0[1-9])?(\d{3}-\d{7}-\d{7})\b`. The leading `01` is Comdirect's
+remittance-field marker (the same `01`/`02`/`03` prefixes seen on other
+descriptions), not part of the id.
+
+**The obvious regex does not work here.** A plain `\b(\d{3}-\d{7}-\d{7})\b`
+matches nothing in `01303-9169011-8123555`, because `01` and `303` are both
+digits and there is no word boundary between them - so the id must be found
+with the marker consumed explicitly, not merely trimmed afterwards.
 
 This resolves the ambiguity §1.2 warned about. The two distinct `7.99 EUR`
 orders, which amount-and-date could never separate, each join cleanly to their
@@ -121,7 +126,7 @@ do not appear in the orders CSV at all. They must not be reported as unmatched
 orders. They are also recurring and better served by the existing recurring
 detection and a rule than by this pipeline.
 
-### 1.3 Two things to note about the file
+### 1.6 Two things to note about the file
 
 **It is not Amazon's own export.** `Details URL` carries
 `ref=ppx_yo2ov_dt_b_fed_order_details`, a web-UI tracking parameter, and the
@@ -251,3 +256,45 @@ second pipeline.
 
 The parser is where a provider's surprises surface, so fixtures come from a
 real export rather than a hand-written sample.
+
+## 5. Built so far (2026-10-09)
+
+The `amazon-orders` crate holds the parser and matcher as pure functions, with
+no database, Kafka or GraphQL dependency, so the risky logic is testable in
+isolation before anything touches real data. 36 tests.
+
+Public surface the ingest work will call:
+
+```rust
+parse_orders<R: Read>(R) -> Result<Vec<Order>, ParseError>
+merge_orders<I: IntoIterator<Item = Vec<Order>>>(I) -> Vec<Order>
+match_orders(&[Order], &[Candidate]) -> MatchReport
+classify_description(&str) -> DescriptionKind  // OrderId | Subscription | NoId
+```
+
+`MatchStatus` is `Apply` or `NeedsReview(Vec<ReviewReason>)`, and each reason
+carries user-facing text, so the review UI does not have to invent
+explanations.
+
+**Open questions the real data could not settle**, all flagged by the
+implementation rather than assumed away:
+
+- **Whether `Item Price` is the unit price or the line total.** Every sample
+  row has quantity 1, so both readings reconcile identically. The parser
+  resolves it per order - trying line total, then price x quantity, then each
+  with discounts netted - and records `PriceBasis::Indistinguishable` for the
+  real rows. The quantity > 1 behaviour is covered only by invented fixtures.
+- **Non-English order statuses.** Return detection substring-matches return and
+  refund stems across seven languages with a guard list so "Return window
+  closed" does not count. Only English statuses were available to check.
+- **Promotion and discount wording**, and whether they apply per order or per
+  item. Only per-item discounts are netted; an unparseable value is logged and
+  ignored rather than failing the order.
+- **Whether a refund carries the order id as a positive amount.** Assumed.
+
+Each should be revisited against a larger real export before the matcher is
+allowed to apply splits unattended.
+
+**Still to build:** the `finreport.purchase-order` topic and its projection,
+the upload mutation and UI, and turning an `Apply` match into actual split
+parts through the existing labelling chain.
