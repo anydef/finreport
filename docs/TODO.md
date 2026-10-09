@@ -121,6 +121,28 @@ Recorded feature requests, not yet prioritised. The estimate is effort, the
 note is what makes it worth more or less than its cost. Pull one into "Next"
 by agreeing where it goes.
 
+- **Display nicknames for merchants and for own accounts** — S–M, needs a
+  decision on scope first. The user: "I want to be able to give some merchants
+  nicknames, e.g. all my accounts have my names on them, and it is hard to
+  track which one is which." Two related but distinct wants hide in that
+  sentence:
+  - **Own accounts.** `Account.label` already exists and is documented "login
+    label, display only" — but it comes from `APP_accounts__<n>__name`, so it
+    labels the *login*, and every account that login imports gets the same
+    string. Two accounts behind one Comdirect login are therefore
+    indistinguishable, which is exactly the reported symptom. There is also no
+    mutation to rename an account: the SDL has no account mutations at all. The
+    fix is a per-account, user-editable nickname, which also fixes the
+    transfer-counterpart display ("Eigenes Tagesgeldkonto" vs. the holder's
+    name).
+  - **Merchants.** A display alias per `counterparty_key`, shown wherever the
+    raw bank counterparty is rendered, so "SumUp .Baeckerei Mueller" can read
+    "Bakery". Keyed on the normalised key, so it covers every spelling variant
+    at once — the same key the learner and recurring detection use.
+  Both are the same shape: a user-declared alias, so an event on a compacted
+  topic and a projection, like every other decision. Worth doing together
+  rather than twice.
+
 - **Spending-by-category drill-down** — S, frontend-only. The `uncategorized`
   and `needs-review` rows are rendered as buttons but do nothing; category rows
   already work. Cheapest item here and fixes something that currently looks
