@@ -44,6 +44,10 @@ function readDrilldown(url: URL) {
 	const counterpartyNames = url.searchParams.get('selCounterparties')?.split(',').filter(Boolean);
 	const hasCounterpartyParam = url.searchParams.get('selHasCounterparty');
 	const categorySlugs = url.searchParams.get('selCategorySlugs')?.split(',').filter(Boolean);
+	const categorySlugsExact = url.searchParams
+		.get('selCategorySlugsExact')
+		?.split(',')
+		.filter(Boolean);
 	const uncategorizedParam = url.searchParams.get('selUncategorized');
 	const needsReviewParam = url.searchParams.get('selNeedsReview');
 	return {
@@ -51,6 +55,8 @@ function readDrilldown(url: URL) {
 		counterpartyNames: counterpartyNames?.length ? counterpartyNames : undefined,
 		hasCounterparty: hasCounterpartyParam === 'false' ? false : undefined,
 		categorySlugs: categorySlugs?.length ? categorySlugs : undefined,
+		// The category itself, not its descendants (a breakdown's "(no subcategory)" row).
+		categorySlugsExact: categorySlugsExact?.length ? categorySlugsExact : undefined,
 		uncategorized: uncategorizedParam === 'true' ? true : undefined,
 		// Tri-state: an "Uncategorized" bar click sends `false` (held labels are
 		// a separate bar), a "Needs review" bar click sends `true`.

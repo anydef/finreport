@@ -65,6 +65,7 @@
 		counterpartyNames?: string[];
 		hasCounterparty?: boolean;
 		categorySlugs?: string[];
+		categorySlugsExact?: string[];
 		uncategorized?: boolean;
 		needsReview?: boolean;
 		offset?: number;
@@ -86,6 +87,7 @@
 					counterpartyNames: data.drilldown.counterpartyNames,
 					hasCounterparty: data.drilldown.hasCounterparty,
 					categorySlugs: data.drilldown.categorySlugs,
+					categorySlugsExact: data.drilldown.categorySlugsExact,
 					uncategorized: data.drilldown.uncategorized,
 					needsReview: data.drilldown.needsReview,
 					offset: data.offset
@@ -111,6 +113,8 @@
 		if (merged.hasCounterparty === false) params.set('selHasCounterparty', 'false');
 		if (merged.categorySlugs?.length)
 			params.set('selCategorySlugs', merged.categorySlugs.join(','));
+		if (merged.categorySlugsExact?.length)
+			params.set('selCategorySlugsExact', merged.categorySlugsExact.join(','));
 		if (merged.uncategorized) params.set('selUncategorized', 'true');
 		if (merged.needsReview !== undefined) params.set('selNeedsReview', String(merged.needsReview));
 		// Written before the offset: `writeSort` drops paging, a sort change restarts it.
@@ -208,6 +212,7 @@
 				data.drilldown.counterpartyNames?.length ||
 				data.drilldown.hasCounterparty === false ||
 				data.drilldown.categorySlugs?.length ||
+				data.drilldown.categorySlugsExact?.length ||
 				data.drilldown.uncategorized ||
 				data.drilldown.needsReview !== undefined ||
 				data.txStart !== data.start ||
