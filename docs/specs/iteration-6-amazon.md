@@ -11,23 +11,107 @@ Inputs: `docs/requirements.md` (Split transactions; More bank/broker
 integrations), `docs/specs/iteration-2.md` §2.2–§2.9 (label precedence),
 `docs/specs/iteration-5-paypal.md` §2.1 (source extension), `docs/architecture.md`.
 
-## 1. Access method (researched 2026-10-09)
+## 1. Access method (researched 2026-10-09; sample seen 2026-10-09)
 
-**There is no consumer Amazon order API.** Confirmed: the Order History Reports
-CSV download was removed (reported March 2023), and the only programmatic
-option, the Amazon Business Reporting API, is restricted to managed *business*
+**There is no consumer Amazon order API.** The Order History Reports CSV
+download was removed (reported March 2023), and the only programmatic option,
+the Amazon Business Reporting API, is restricted to managed *business*
 accounts. Nothing exists to poll as a private customer.
 
-The available route is the account data export: **Your Account → Privacy
-Central → Request your data → Your Orders**, which emails a ZIP within roughly
-6–72 hours containing a `Retail.OrderHistory` dataset. Browser extensions that
-scrape the orders page exist; they require handing a third party an
-authenticated Amazon session, so they are out.
+So finreport **accepts a push**: a CSV upload. That is the only workable
+direction, not a compromise.
 
-**Consequence — and why the user's instinct is right.** finreport cannot pull
-from Amazon, so it must *accept* a push. The user: *"I will go the other way
-around. You need to build an api to allow import the purchase history from
-amazon."* That is the only workable direction, not a compromise.
+### 1.1 The actual file
+
+A real sample was supplied. Columns, in order:
+
+```
+Order ID, Order Date, Total Amount, Total Savings, Status,
+Item ASIN, Item Quantity, Item Price, Item Discount, Promotions,
+Item Title, Item URL, Details URL,
+Recipient Name, Recipient Street, Recipient City,
+Recipient State, Recipient Zip, Recipient Country
+```
+
+**One row per item**, with the order id, order date and *order* total repeated
+on every row of that order. Grouping by `Order ID` reconstructs the order.
+
+What this gives us, and it is enough to build on:
+
+- `Order ID` — the dedup key.
+- `Order Date` — ISO, e.g. `2026-10-08`.
+- `Total Amount` — the order total, as `"5.98 EUR"`: amount and currency in one
+  string, so it must be split, not parsed as a number.
+- `Item ASIN`, `Item Title`, `Item Quantity`, `Item Price` — the split parts,
+  and the title is what makes categorisation possible at all.
+- `Item Discount`, `Promotions` (e.g. `Additional discount: €1`) — why items
+  may not sum to the total.
+- `Status` — per item, e.g. `Delivered 7 October`, `Return started`,
+  `Arriving today`. Free text, and **localised**, so match loosely and never
+  branch on an exact string.
+
+### 1.2 What it does NOT give us
+
+- **No shipment grouping and no charge information.** There is no charged
+  amount, no payment instrument, no transaction reference. §2.3's problem
+  therefore stands in full: Amazon charges per shipment, this file only knows
+  orders, so the order total frequently matches no single bank line. Matching
+  must stay confirmable.
+- **No tax breakdown**, and no statement of whether `Item Price` is the unit
+  price or the line total. Every row in the sample has quantity 1, so the file
+  itself cannot settle it. **Resolve it per order at parse time:** compare
+  `sum(price)` and `sum(price x quantity)` against `Total Amount` and take
+  whichever reconciles. If neither does, treat the difference as the §2.4
+  remainder rather than guessing.
+- **No payment method**, so a gift-card-funded order is not identifiable from
+  this file.
+
+### 1.3 Is it enough to match bank transactions?
+
+Available on the CSV side: order id, order date, order total. Available on the
+bank side: booking date, amount, description.
+
+**Mostly yes, decisively so if the order id appears in the bank description.**
+German Amazon debits often carry the order number in the reference text. Where
+they do, matching is an exact string lookup and every other heuristic is
+unnecessary. This is the first thing to check against real data, because it
+changes the matcher from a guess to a join.
+
+**Where they do not, amount plus date is enough for the common case but
+provably not for all.** The 15-row sample already contains a collision: two
+different orders, both `7.99 EUR`, two days apart (`2026-10-04` and
+`2026-10-02`). Two Amazon charges of equal value in the same week are not an
+edge case for anyone who orders regularly, and an amount-and-date matcher
+cannot tell them apart. Picking either one at random would attach the wrong
+item titles - and therefore the wrong categories - to a transaction.
+
+This is why §2.3 keeps matching confirmable. The resolution is not a cleverer
+heuristic; it is that an ambiguous match is *shown* rather than guessed. Note
+the mis-match is also mostly harmless when caught, since both candidates cost
+the same - but the categories differ, which is the entire point of the feature.
+
+**Multi-shipment orders remain the hard case** and cannot be solved from this
+file at all: it carries no per-shipment amount, so when one order becomes three
+charges, no subset sum is derivable from the data. Those go to review by
+construction.
+
+### 1.3 Two things to note about the file
+
+**It is not Amazon's own export.** `Details URL` carries
+`ref=ppx_yo2ov_dt_b_fed_order_details`, a web-UI tracking parameter, and the
+recipient-address columns are not part of Amazon's Privacy Central dataset.
+This file comes from a browser extension that reads the orders page. That is
+the user's call to make and the parser does not care — but the format is a
+third party's and can change without notice, so the parser must fail loudly on
+an unrecognised header rather than silently mis-column.
+
+**It contains the user's home address on every row.** `Recipient Name`,
+`Street`, `City`, `State`, `Zip` and `Country` have no analytical value here.
+**Drop them at the parser boundary**: never publish them to Kafka and never
+store them. Kafka topics here are compacted and long-lived, so anything
+published is effectively permanent; a postal address is exactly the kind of
+data not to write into an event log by accident. The parser reads those columns
+and discards them.
 
 ## 2. Design
 
