@@ -1159,6 +1159,7 @@ async fn an_exempt_paypal_learns_no_narrow_rule_either() {
 
     decide_paypal_by_hand(&db, &publisher, &ops, &catalog).await;
     assert!(rule_rows(&db).await.is_empty(), "exempt merchant: no rule of any kind");
+}
 
 /// A note is commentary, not an input to labelling: a note-only user-label
 /// record re-runs the chain, but the resolution is identical, so compare-before-
