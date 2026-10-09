@@ -66,34 +66,60 @@ What this gives us, and it is enough to build on:
 - **No payment method**, so a gift-card-funded order is not identifiable from
   this file.
 
-### 1.3 Is it enough to match bank transactions?
+### 1.3 Matching: an exact join, confirmed against real data
 
-Available on the CSV side: order id, order date, order total. Available on the
-bank side: booking date, amount, description.
+**The bank description carries the Amazon order id.** Real lines:
 
-**Mostly yes, decisively so if the order id appears in the bank description.**
-German Amazon debits often carry the order number in the reference text. Where
-they do, matching is an exact string lookup and every other heuristic is
-unnecessary. This is the first thing to check against real data, because it
-changes the matcher from a guess to a join.
+```
+2026-10-08,-13.4500,AMAZON PAYMENTS EUROPE S.C.A.,01303-9169011-8123555 AMZN Mktp DE 60...
+2026-10-07, -7.9900,AMAZON PAYMENTS EUROPE S.C.A.,01304-9906711-7622713 AMZN Mktp DE 79...
+```
 
-**Where they do not, amount plus date is enough for the common case but
-provably not for all.** The 15-row sample already contains a collision: two
-different orders, both `7.99 EUR`, two days apart (`2026-10-04` and
-`2026-10-02`). Two Amazon charges of equal value in the same week are not an
-edge case for anyone who orders regularly, and an amount-and-date matcher
-cannot tell them apart. Picking either one at random would attach the wrong
-item titles - and therefore the wrong categories - to a transaction.
+So matching is a **string join on the order id**, not a heuristic. Extract with
+`\b(\d{3}-\d{7}-\d{7})\b`; the leading `01` is Comdirect's remittance-field
+marker (the same `01`/`02`/`03` prefixes seen on other descriptions), not part
+of the id.
 
-This is why §2.3 keeps matching confirmable. The resolution is not a cleverer
-heuristic; it is that an ambiguous match is *shown* rather than guessed. Note
-the mis-match is also mostly harmless when caught, since both candidates cost
-the same - but the categories differ, which is the entire point of the feature.
+This resolves the ambiguity §1.2 warned about. The two distinct `7.99 EUR`
+orders, which amount-and-date could never separate, each join cleanly to their
+own bank line by id. **Amount-and-date matching is therefore demoted to a
+fallback**, used only when no id is present, and never applied silently.
 
-**Multi-shipment orders remain the hard case** and cannot be solved from this
-file at all: it carries no per-shipment amount, so when one order becomes three
-charges, no subset sum is derivable from the data. Those go to review by
-construction.
+### 1.4 Multi-shipment is real, and the id makes it tractable
+
+Order `304-9357930-8158714`, total `22.59 EUR`, appears as **two** bank charges:
+
+```
+2026-09-24, -13.6000, ... 01304-9357930-8158714 AMZN Mktp DE ...
+2026-09-23,  -8.9900, ... 01304-9357930-8158714 AMZN Mktp DE ...
+```
+
+`13.60 + 8.99 = 22.59`. Exactly the per-shipment charging §2.3 predicted, in
+the user's own data - and it is tractable, because **both charges carry the
+order id**, so they group without any subset-sum guessing.
+
+What the CSV still cannot say is *which item shipped in which charge*. So:
+
+- An order joining to **one** charge splits by its items directly.
+- An order joining to **several** charges has its items assigned per charge
+  only where item prices reconcile to a charge amount unambiguously; otherwise
+  the order is attached to the charges for display and the split goes to
+  review. Do not guess an assignment: a plausible-looking wrong one is worse
+  than none, because it is not visibly wrong.
+- Verify the charges sum to the order total, and surface it when they do not
+  rather than splitting anyway.
+
+### 1.5 Digital and subscription charges are a separate family
+
+```
+2026-10-07, -8.9900, AMAZON EU S.A R.L. ..., 01D01-8109513-9170236 AMZNPrime DE ...
+2026-09-30, -9.9900, AMAZON DIGITAL GERMANY GMBH, 01D01-9627715-6965427 Amazon Music ...
+```
+
+These carry a `D01-` prefixed id and are Prime and Music subscriptions, which
+do not appear in the orders CSV at all. They must not be reported as unmatched
+orders. They are also recurring and better served by the existing recurring
+detection and a rule than by this pipeline.
 
 ### 1.3 Two things to note about the file
 
