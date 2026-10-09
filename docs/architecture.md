@@ -147,3 +147,74 @@ sequenceDiagram
 - **Deployed** (`docker-compose.yml`): a new `finreport-be-labeler` service joins `finreport-be-projector` — same prebuilt image, same central broker, static LAN IP `192.168.100.49`, no new port. `APP_anthropic_api_key` flows from 1Password (`.env.tpl`'s `TF_VAR_anthropic_api_key`) through `terraform/variables.tf`; see the "Anthropic key wiring" note in `CLAUDE.md` for the one open gap in that chain.
 - **`just dev-demo`** reaches a populated review queue and a learned rule by alternating `projector --until-caught-up` and `labeler --until-caught-up` until a round changes nothing (max 5 rounds) — a single pass can't work, because categories are only *published*, not yet *projected*, when the labeler would first need them. See the recipe's own comment in `justfile` for the round-by-round reasoning.
 - **Shared `CARGO_TARGET_DIR`**: every worktree and the main checkout build into one directory (`finreport-worktrees/.cargo-target`), exported by the `justfile`; see "Shared `CARGO_TARGET_DIR`" in `CLAUDE.md`.
+
+## 6. The user layer (iterations 3–4, plus 2026-10-09)
+
+Everything in §2 derives a category from evidence. This layer is what the user
+asserts *on top of* that, and the rule throughout is the same: a human decision
+is an event on a compacted topic, projected like any other read model, so it
+survives a replay and outranks anything derived.
+
+```mermaid
+flowchart TB
+    subgraph User decisions
+        UL[(finreport.user-label)]
+        DA[(finreport.display-alias)]
+        EX[(finreport.learning-exemption)]
+    end
+    subgraph Derived
+        TL[(finreport.transaction-label)]
+        RU[(finreport.rule)]
+    end
+    UL -->|outranks| RES[resolve_transaction]
+    RU --> RES
+    RES --> TL
+    UL -->|a decision teaches| LEARN[rule learning]
+    LEARN --> RU
+    EX -->|suppresses learning| LEARN
+    DA -.->|presentation only| API[GraphQL display fields]
+```
+
+**The precedence chain** is `split > user override > rule > llm-cache > llm`.
+A split outranks a plain override because splitting is the more specific
+statement about the same transaction.
+
+**`finreport.user-label` carries whole state** — category, tags, recurring
+override, splits and the free-text note in one record. Every mutation that
+touches it is therefore a read-modify-write, and forgetting that is a live
+source of data loss: four mutations once republished the record with
+`note: None` and silently erased it. New fields on this record must be
+preserved by *every* mutation, not just the one that owns them.
+
+**Display aliases are presentation only.** A nickname for a merchant is keyed
+by the normalised `counterparty_key`, so one alias covers every spelling
+variant, and it is resolved into a GraphQL display field rather than rewritten
+into the data. The raw bank name stays untouched, because the labeler's
+fingerprints, the rules and the learner all key off it — aliasing the stored
+value would quietly change how categorisation behaves. Aliases are per user,
+unlike rules and categories, because they change nothing the shared labeler
+does.
+
+**Learning exemptions and narrow rules** are the two halves of controlling what
+a single decision teaches. A catch-all merchant (Amazon, PayPal) would
+otherwise have one correction learn a merchant-wide rule; an exemption
+suppresses that entirely, while description-qualified learning instead derives
+a token that separates the observed cases and verifies it against them before
+publishing. When narrow rules are learned, the broad rule for that merchant is
+retired, or it would keep labelling everything the narrow rules do not match.
+
+## 7. What the data cannot tell you
+
+Two limits worth stating, because both were discovered the expensive way and
+both shape planned work (`docs/specs/iteration-5-paypal.md`, `iteration-6-amazon.md`).
+
+- **A PayPal bank line identifies nothing.** It reads
+  `01INSTANT TRANSFER 02End-to-End-Ref.: 03<digits>`, where the reference
+  encodes only a date. There is no merchant, so no inference on the bank record
+  can recover one and the data must come from PayPal directly.
+- **An Amazon bank line identifies the order, not the goods.**
+  `01303-9169011-8123555 AMZN Mktp DE ...` carries the order id, which makes
+  matching an imported order an exact join rather than a heuristic — but the
+  items, and therefore the categories, only exist in Amazon's own export. Note
+  that one order can appear as several charges, since Amazon bills per
+  shipment.
