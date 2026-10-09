@@ -133,3 +133,140 @@ export function bucketLabel(
 			return start.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
 	}
 }
+
+/**
+ * Calendar month / year selection. Carried in the same `preset` URL param as
+ * the presets above, as `month:YYYY-MM` or `year:YYYY`, so a month view is
+ * linkable and survives a reload without any new param to keep in step.
+ */
+export type MonthSelection = `month:${string}`;
+export type YearSelection = `year:${string}`;
+export type PeriodSelection = PeriodPresetId | MonthSelection | YearSelection;
+
+export interface SelectableMonth {
+	id: MonthSelection;
+	label: string;
+	year: number;
+	/** 1-12. */
+	month: number;
+}
+
+export interface SelectableYear {
+	id: YearSelection;
+	label: string;
+	year: number;
+}
+
+const DEFAULT_SELECTION: PeriodSelection = 'this-month';
+
+export function monthSelection(year: number, month: number): MonthSelection {
+	return `month:${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}`;
+}
+
+export function yearSelection(year: number): YearSelection {
+	return `year:${String(year).padStart(4, '0')}`;
+}
+
+/** Inclusive bounds of a calendar month (`month` is 1-12); handles leap Februaries. */
+export function monthRange(year: number, month: number): DateRange {
+	return {
+		start: toDateInputValue(new Date(year, month - 1, 1)),
+		// Day 0 of the next month is the last day of this one.
+		end: toDateInputValue(new Date(year, month, 0))
+	};
+}
+
+export function yearRange(year: number): DateRange {
+	return {
+		start: toDateInputValue(new Date(year, 0, 1)),
+		end: toDateInputValue(new Date(year, 11, 31))
+	};
+}
+
+/** "September 2026". */
+export function monthLabel(year: number, month: number): string {
+	return new Date(year, month - 1, 1).toLocaleDateString('en-US', {
+		month: 'long',
+		year: 'numeric'
+	});
+}
+
+/**
+ * The months worth listing, newest first, starting with the month BEFORE
+ * today's (the current month is the `this-month` preset). Crosses year
+ * boundaries correctly because the day is pinned to the 1st before `Date`
+ * normalises a negative month.
+ */
+export function selectableMonths(today: Date, count = 24): SelectableMonth[] {
+	const months: SelectableMonth[] = [];
+	for (let back = 1; back <= count; back++) {
+		const d = new Date(today.getFullYear(), today.getMonth() - back, 1);
+		const year = d.getFullYear();
+		const month = d.getMonth() + 1;
+		months.push({ id: monthSelection(year, month), label: monthLabel(year, month), year, month });
+	}
+	return months;
+}
+
+/** Completed calendar years, newest first (the current one is `this-year`). */
+export function selectableYears(today: Date, count = 3): SelectableYear[] {
+	const years: SelectableYear[] = [];
+	for (let back = 1; back <= count; back++) {
+		const year = today.getFullYear() - back;
+		years.push({ id: yearSelection(year), label: String(year), year });
+	}
+	return years;
+}
+
+const MONTH_RE = /^month:(\d{4})-(\d{2})$/;
+const YEAR_RE = /^year:(\d{4})$/;
+
+/**
+ * Validate a raw `preset` search param. Anything unrecognised (a hand-edited
+ * URL, `month:2026-13`) falls back to the default instead of crashing the load.
+ */
+export function parsePeriodSelection(raw: string | null | undefined): PeriodSelection {
+	if (!raw) return DEFAULT_SELECTION;
+	if (PERIOD_PRESETS.some((p) => p.id === raw)) return raw as PeriodPresetId;
+	const m = MONTH_RE.exec(raw);
+	if (m && Number(m[2]) >= 1 && Number(m[2]) <= 12) return raw as MonthSelection;
+	if (YEAR_RE.test(raw)) return raw as YearSelection;
+	return DEFAULT_SELECTION;
+}
+
+/** The inclusive range for any non-custom selection. */
+export function selectionRange(selection: PeriodSelection, today: Date): DateRange {
+	const m = MONTH_RE.exec(selection);
+	if (m) return monthRange(Number(m[1]), Number(m[2]));
+	const y = YEAR_RE.exec(selection);
+	if (y) return yearRange(Number(y[1]));
+	return presetRange(selection as PeriodPresetId, today);
+}
+
+/** Display label for any selection, e.g. for a heading or a select's current value. */
+export function selectionLabel(selection: PeriodSelection): string {
+	const m = MONTH_RE.exec(selection);
+	if (m) return monthLabel(Number(m[1]), Number(m[2]));
+	const y = YEAR_RE.exec(selection);
+	if (y) return y[1];
+	return PERIOD_PRESETS.find((p) => p.id === selection)?.label ?? selection;
+}
+
+/**
+ * The range a page loads for a URL: the selection's own range, or for
+ * `custom` the explicit `start`/`end` params (defaulting to this month).
+ */
+export function rangeFromParams(
+	params: URLSearchParams,
+	selection: PeriodSelection,
+	today: Date
+): DateRange {
+	if (selection === 'custom') {
+		const fallback = presetRange('this-month', today);
+		return {
+			start: params.get('start') ?? fallback.start,
+			end: params.get('end') ?? fallback.end
+		};
+	}
+	return selectionRange(selection, today);
+}

@@ -8,10 +8,9 @@ import {
 import type { Account, Category, TagCount, TransactionPage } from '$lib/graphql/types';
 import {
 	defaultGranularity,
-	presetRange,
-	toDateInputValue,
-	type DateRange,
-	type PeriodPresetId
+	parsePeriodSelection,
+	rangeFromParams,
+	toDateInputValue
 } from '$lib/period';
 import { parsePanelFilters, toTransactionFilter } from '$lib/transactionFilters';
 import { parseSort, sortVariable } from '$lib/transactionSort';
@@ -19,21 +18,10 @@ import type { PageLoad } from './$types';
 
 const PAGE_LIMIT = 50;
 
-function readRange(url: URL, preset: PeriodPresetId, today: Date): DateRange {
-	if (preset === 'custom') {
-		const fallback = presetRange('this-month', today);
-		return {
-			start: url.searchParams.get('start') ?? fallback.start,
-			end: url.searchParams.get('end') ?? fallback.end
-		};
-	}
-	return presetRange(preset, today);
-}
-
 export const load: PageLoad = async ({ fetch, url }) => {
 	const today = new Date();
-	const preset = (url.searchParams.get('preset') as PeriodPresetId | null) ?? 'this-month';
-	const range = readRange(url, preset, today);
+	const preset = parsePeriodSelection(url.searchParams.get('preset'));
+	const range = rangeFromParams(url.searchParams, preset, today);
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
 	const panel = parsePanelFilters(url.searchParams);
 	const sort = parseSort(url.searchParams);

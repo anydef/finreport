@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { PERIOD_PRESETS, type Granularity, type PeriodPresetId } from '$lib/period';
+	import type { Granularity, PeriodSelection } from '$lib/period';
+	import PeriodOptions from './PeriodOptions.svelte';
 	import Field from './Field.svelte';
 
 	interface Props {
-		preset: PeriodPresetId;
+		preset: PeriodSelection;
 		startDate: string;
 		endDate: string;
 		granularity: Granularity;
@@ -33,9 +34,7 @@
 			onchange={() => onchange()}
 			class="rounded-md border-slate-300 text-sm"
 		>
-			{#each PERIOD_PRESETS as p (p.id)}
-				<option value={p.id}>{p.label}</option>
-			{/each}
+			<PeriodOptions />
 		</select>
 	</Field>
 

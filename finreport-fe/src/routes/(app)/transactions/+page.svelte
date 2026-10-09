@@ -7,7 +7,8 @@
 	import TransactionFilters from '$lib/components/TransactionFilters.svelte';
 	import NoMatchingTransactions from '$lib/components/NoMatchingTransactions.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { PERIOD_PRESETS, type PeriodPresetId } from '$lib/period';
+	import type { PeriodSelection } from '$lib/period';
+	import PeriodOptions from '$lib/components/PeriodOptions.svelte';
 	import {
 		clearedFilters,
 		hasActiveFilters,
@@ -39,7 +40,7 @@
 		const params = new URLSearchParams(page.url.searchParams);
 		params.delete('offset');
 		if (preset === 'this-month') params.delete('preset');
-		else params.set('preset', preset as PeriodPresetId);
+		else params.set('preset', preset as PeriodSelection);
 		go(params);
 	}
 
@@ -79,9 +80,7 @@
 					onchange={onPeriodChange}
 					class="focus-visible:outline-brand rounded-md border border-slate-300 px-2 py-1.5 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1"
 				>
-					{#each PERIOD_PRESETS.filter((p) => p.id !== 'custom') as p (p.id)}
-						<option value={p.id}>{p.label}</option>
-					{/each}
+					<PeriodOptions allowCustom={false} />
 				</select>
 			</Field>
 		{/snippet}
