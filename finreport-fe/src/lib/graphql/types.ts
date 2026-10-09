@@ -70,6 +70,14 @@ export interface Account {
 	label: string | null;
 	/** The user's nickname, else label, IBAN, display id, external id. Always set. */
 	displayName: string;
+	/**
+	 * Marked by the user as an account they save into. Per user, like a
+	 * nickname: it is a reporting choice, not a fact the bank tells us.
+	 *
+	 * Optional because no backend serves it yet - the savings preview reads it
+	 * from `graphql/savingsMock`. Make it required with the resolver.
+	 */
+	isSavings?: boolean;
 	currency: string;
 	latestBalance: Balance | null;
 }
@@ -578,4 +586,42 @@ export interface LearningExemption {
 	transactionCount: number;
 	/** RFC 3339 instant. */
 	exemptedAt: string;
+}
+
+/** One savings account's flows over the period. */
+export interface SavingsAccountFlow {
+	account: Account;
+	/** Money that arrived in the account. */
+	paidIn: Decimal;
+	/** Money that left it, as a positive magnitude. */
+	withdrawn: Decimal;
+	/** `paidIn - withdrawn`; negative when the period drew the account down. */
+	net: Decimal;
+}
+
+/**
+ * Net change across the accounts the user marked as savings, over the same
+ * period and filter as the rest of the dashboard.
+ *
+ * "Net balance change" semantics: transfers in, withdrawals out, income paid
+ * straight in, and a payment made directly from a savings account all count.
+ * A movement between two savings accounts counts as neither, since it changes
+ * no total - `internalTransferCount` reports how many were netted away.
+ */
+export interface SavingsSummary {
+	currency: string;
+	/** `paidIn - withdrawn` across every savings account. */
+	netPutAside: Decimal;
+	paidIn: Decimal;
+	withdrawn: Decimal;
+	accounts: SavingsAccountFlow[];
+	/** Savings-to-savings movements excluded as self-cancelling. */
+	internalTransferCount: number;
+	/**
+	 * Of `withdrawn`, the part that went to an outside payee rather than to
+	 * another of the user's accounts - so it is also in the spending card. The
+	 * card states this, because the two figures otherwise look like a
+	 * partition and are not.
+	 */
+	spentDirectly: Decimal;
 }
