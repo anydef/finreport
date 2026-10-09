@@ -27,3 +27,4 @@
 /terraform/terraform.tfstate.backup
 /.idea/dataSources.xml
 /.idea/db-forest-config.xml
+/.claude/worktrees/
