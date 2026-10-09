@@ -99,6 +99,9 @@ services:
         # Display aliases: keyed <user_id>:<kind>:<key>, compacted; a tombstone
         # removes the alias.
         $$RPK topic create finreport.display-alias \
+        # Transaction links: keyed by the link's own UUID, compacted; a tombstone
+        # deletes the link (user-declared reimbursement <-> expense ties).
+        $$RPK topic create finreport.transaction-link \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 

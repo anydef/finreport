@@ -63,6 +63,22 @@ fn category_exact_sql(alias: &str, param: &str) -> String {
     )
 }
 
+/// `reimbursements`' predicate over `alias.id`: is the transaction the
+/// offsetting side of a reimbursement link? `None` for `INCLUDE`/unset.
+/// Parameter-free, so it can be spliced into any of the hand-rolled SQL.
+pub(crate) fn reimbursement_sql(alias: &str, filter: &TransactionFilter) -> Option<String> {
+    use crate::graphql::types::ReimbursementFilter;
+    let exists = format!(
+        "EXISTS (SELECT 1 FROM transaction_link_member rm JOIN transaction_link rl ON rl.id = rm.link_id \
+           WHERE rm.transaction_id = {alias}.id AND rm.role = 'offset' AND rl.kind = 'reimbursement')"
+    );
+    match filter.reimbursements {
+        Some(ReimbursementFilter::Exclude) => Some(format!("NOT {exists}")),
+        Some(ReimbursementFilter::Only) => Some(exists),
+        Some(ReimbursementFilter::Include) | None => None,
+    }
+}
+
 /// Hand-rolled SQL twin of the `transactionIds`/`counterpartyKeys`/`categorySlugsExact`/`amountMin`/`amountMax`
 /// predicates in [`build_condition`], for the aggregation queries in
 /// `cashflow` that do not go through sea-orm. `alias` is the transaction
@@ -91,6 +107,9 @@ pub(crate) fn id_and_amount_sql(
         sql.push_str(&format!(" AND {}", category_exact_sql(alias, &format!("${idx}"))));
         params.push(slugs.into());
         idx += 1;
+    }
+    if let Some(predicate) = reimbursement_sql(alias, filter) {
+        sql.push_str(&format!(" AND {predicate}"));
     }
     let (min, max) = amount_magnitude_bounds(filter);
     if let Some(min) = min {
@@ -122,6 +141,9 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
             category_exact_sql("transaction", "$1"),
             vec![sea_orm::Value::from(slugs)],
         ));
+    }
+    if let Some(predicate) = reimbursement_sql("transaction", filter) {
+        condition = condition.add(sea_orm::sea_query::Expr::cust(predicate));
     }
     let (amount_min, amount_max) = amount_magnitude_bounds(filter);
     if let Some(min) = amount_min {
@@ -665,5 +687,29 @@ mod tests {
         assert_eq!(clamp_limit(200), 200);
         assert_eq!(clamp_limit(201), 200);
         assert_eq!(clamp_limit(10_000), 200);
+    }
+
+    #[test]
+    fn reimbursement_filter_only_acts_on_exclude_and_only() {
+        use crate::graphql::types::ReimbursementFilter as R;
+        let with = |r| TransactionFilter { reimbursements: r, ..Default::default() };
+        assert!(reimbursement_sql("t", &with(None)).is_none());
+        assert!(reimbursement_sql("t", &with(Some(R::Include))).is_none());
+        let exclude = reimbursement_sql("t", &with(Some(R::Exclude))).unwrap();
+        let only = reimbursement_sql("t", &with(Some(R::Only))).unwrap();
+        assert!(exclude.starts_with("NOT EXISTS"));
+        assert!(only.starts_with("EXISTS"));
+        // Only the offsetting side of a reimbursement: never the expense
+        // side, and so never genuine income.
+        assert!(only.contains("rm.role = 'offset'") && only.contains("rl.kind = 'reimbursement'"));
+        assert!(only.contains("rm.transaction_id = t.id"));
+    }
+
+    #[test]
+    fn reimbursement_filter_reaches_the_sql_twins_without_parameters() {
+        use crate::graphql::types::ReimbursementFilter as R;
+        let f = TransactionFilter { reimbursements: Some(R::Exclude), ..Default::default() };
+        let (sql, params) = id_and_amount_sql("transaction", &f, 9);
+        assert!(sql.contains("NOT EXISTS") && params.is_empty());
     }
 }

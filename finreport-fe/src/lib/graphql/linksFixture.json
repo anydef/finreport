@@ -1,0 +1,489 @@
+{
+	"data": {
+		"transactions": {
+			"items": [
+				{
+					"id": "7e1b0000-0000-4000-8000-000000000001",
+					"accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+					"source": "comdirect",
+					"externalId": "LINK-DENTIST",
+					"bookingDate": "2024-02-12",
+					"valutaDate": "2024-02-12",
+					"bookingStatus": "BOOKED",
+					"amount": "-400.00",
+					"currency": "EUR",
+					"counterpartyName": "Zahnarzt Dr. Mueller",
+					"counterpartyIban": null,
+					"description": "Behandlung Januar",
+					"transactionType": "Ueberweisung",
+					"label": null,
+					"splits": [],
+					"tags": [],
+					"note": null,
+					"transfer": null,
+					"recurring": {
+						"isRecurring": false,
+						"source": "AUTO",
+						"seriesId": null,
+						"cadence": null,
+						"medianAmount": null
+					},
+					"link": {
+						"id": "7e1b1111-0000-4000-8000-000000000001",
+						"kind": "REIMBURSEMENT",
+						"note": "Zahnarzt Januar",
+						"status": "FULL",
+						"currency": "EUR",
+						"expenseTotal": "400.00",
+						"offsetTotal": "400.00",
+						"reimbursed": "400.00",
+						"net": "0.00",
+						"surplus": "0.00",
+						"missingMembers": 0,
+						"members": [
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000001",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-12",
+								"amount": "-400.00",
+								"currency": "EUR",
+								"counterpartyName": "Zahnarzt Dr. Mueller",
+								"description": "Behandlung Januar",
+								"allocated": "400.00",
+								"remaining": "0.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000002",
+								"role": "OFFSET",
+								"bookingDate": "2024-03-04",
+								"amount": "400.00",
+								"currency": "EUR",
+								"counterpartyName": "AOK Krankenkasse",
+								"description": "Erstattung Zahnarzt",
+								"allocated": "400.00",
+								"remaining": "0.00"
+							}
+						]
+					}
+				},
+				{
+					"id": "7e1b0000-0000-4000-8000-000000000002",
+					"accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+					"source": "comdirect",
+					"externalId": "LINK-AOK",
+					"bookingDate": "2024-03-04",
+					"valutaDate": "2024-03-04",
+					"bookingStatus": "BOOKED",
+					"amount": "400.00",
+					"currency": "EUR",
+					"counterpartyName": "AOK Krankenkasse",
+					"counterpartyIban": null,
+					"description": "Erstattung Zahnarzt",
+					"transactionType": "Ueberweisung",
+					"label": null,
+					"splits": [],
+					"tags": [],
+					"note": null,
+					"transfer": null,
+					"recurring": {
+						"isRecurring": false,
+						"source": "AUTO",
+						"seriesId": null,
+						"cadence": null,
+						"medianAmount": null
+					},
+					"link": {
+						"id": "7e1b1111-0000-4000-8000-000000000001",
+						"kind": "REIMBURSEMENT",
+						"note": "Zahnarzt Januar",
+						"status": "FULL",
+						"currency": "EUR",
+						"expenseTotal": "400.00",
+						"offsetTotal": "400.00",
+						"reimbursed": "400.00",
+						"net": "0.00",
+						"surplus": "0.00",
+						"missingMembers": 0,
+						"members": [
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000001",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-12",
+								"amount": "-400.00",
+								"currency": "EUR",
+								"counterpartyName": "Zahnarzt Dr. Mueller",
+								"description": "Behandlung Januar",
+								"allocated": "400.00",
+								"remaining": "0.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000002",
+								"role": "OFFSET",
+								"bookingDate": "2024-03-04",
+								"amount": "400.00",
+								"currency": "EUR",
+								"counterpartyName": "AOK Krankenkasse",
+								"description": "Erstattung Zahnarzt",
+								"allocated": "400.00",
+								"remaining": "0.00"
+							}
+						]
+					}
+				},
+				{
+					"id": "7e1b0000-0000-4000-8000-000000000003",
+					"accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+					"source": "comdirect",
+					"externalId": "LINK-PRAXIS",
+					"bookingDate": "2024-02-14",
+					"valutaDate": "2024-02-14",
+					"bookingStatus": "BOOKED",
+					"amount": "-1000.00",
+					"currency": "EUR",
+					"counterpartyName": "Praxis Dr. Meyer",
+					"counterpartyIban": null,
+					"description": "Privatrechnung",
+					"transactionType": "Ueberweisung",
+					"label": null,
+					"splits": [],
+					"tags": [],
+					"note": null,
+					"transfer": null,
+					"recurring": {
+						"isRecurring": false,
+						"source": "AUTO",
+						"seriesId": null,
+						"cadence": null,
+						"medianAmount": null
+					},
+					"link": {
+						"id": "7e1b1111-0000-4000-8000-000000000002",
+						"kind": "REIMBURSEMENT",
+						"note": null,
+						"status": "PARTIAL",
+						"currency": "EUR",
+						"expenseTotal": "1000.00",
+						"offsetTotal": "600.00",
+						"reimbursed": "600.00",
+						"net": "400.00",
+						"surplus": "0.00",
+						"missingMembers": 0,
+						"members": [
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000003",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-14",
+								"amount": "-1000.00",
+								"currency": "EUR",
+								"counterpartyName": "Praxis Dr. Meyer",
+								"description": "Privatrechnung",
+								"allocated": "600.00",
+								"remaining": "400.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000004",
+								"role": "OFFSET",
+								"bookingDate": "2024-03-06",
+								"amount": "600.00",
+								"currency": "EUR",
+								"counterpartyName": "Debeka Erstattung",
+								"description": "Leistungsabrechnung",
+								"allocated": "600.00",
+								"remaining": "0.00"
+							}
+						]
+					}
+				},
+				{
+					"id": "7e1b0000-0000-4000-8000-000000000004",
+					"accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+					"source": "comdirect",
+					"externalId": "LINK-DEBEKA",
+					"bookingDate": "2024-03-06",
+					"valutaDate": "2024-03-06",
+					"bookingStatus": "BOOKED",
+					"amount": "600.00",
+					"currency": "EUR",
+					"counterpartyName": "Debeka Erstattung",
+					"counterpartyIban": null,
+					"description": "Leistungsabrechnung",
+					"transactionType": "Ueberweisung",
+					"label": null,
+					"splits": [],
+					"tags": [],
+					"note": null,
+					"transfer": null,
+					"recurring": {
+						"isRecurring": false,
+						"source": "AUTO",
+						"seriesId": null,
+						"cadence": null,
+						"medianAmount": null
+					},
+					"link": {
+						"id": "7e1b1111-0000-4000-8000-000000000002",
+						"kind": "REIMBURSEMENT",
+						"note": null,
+						"status": "PARTIAL",
+						"currency": "EUR",
+						"expenseTotal": "1000.00",
+						"offsetTotal": "600.00",
+						"reimbursed": "600.00",
+						"net": "400.00",
+						"surplus": "0.00",
+						"missingMembers": 0,
+						"members": [
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000003",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-14",
+								"amount": "-1000.00",
+								"currency": "EUR",
+								"counterpartyName": "Praxis Dr. Meyer",
+								"description": "Privatrechnung",
+								"allocated": "600.00",
+								"remaining": "400.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000004",
+								"role": "OFFSET",
+								"bookingDate": "2024-03-06",
+								"amount": "600.00",
+								"currency": "EUR",
+								"counterpartyName": "Debeka Erstattung",
+								"description": "Leistungsabrechnung",
+								"allocated": "600.00",
+								"remaining": "0.00"
+							}
+						]
+					}
+				},
+				{
+					"id": "7e1b0000-0000-4000-8000-000000000005",
+					"accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+					"source": "comdirect",
+					"externalId": "LINK-HOUSE",
+					"bookingDate": "2024-02-18",
+					"valutaDate": "2024-02-18",
+					"bookingStatus": "BOOKED",
+					"amount": "-300.00",
+					"currency": "EUR",
+					"counterpartyName": "Ferienhaus Booking",
+					"counterpartyIban": null,
+					"description": "Anzahlung Ferienhaus",
+					"transactionType": "Ueberweisung",
+					"label": null,
+					"splits": [],
+					"tags": [],
+					"note": null,
+					"transfer": null,
+					"recurring": {
+						"isRecurring": false,
+						"source": "AUTO",
+						"seriesId": null,
+						"cadence": null,
+						"medianAmount": null
+					},
+					"link": {
+						"id": "7e1b1111-0000-4000-8000-000000000003",
+						"kind": "REIMBURSEMENT",
+						"note": "Urlaub geteilt",
+						"status": "PARTIAL",
+						"currency": "EUR",
+						"expenseTotal": "400.00",
+						"offsetTotal": "200.00",
+						"reimbursed": "200.00",
+						"net": "200.00",
+						"surplus": "0.00",
+						"missingMembers": 0,
+						"members": [
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000005",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-18",
+								"amount": "-300.00",
+								"currency": "EUR",
+								"counterpartyName": "Ferienhaus Booking",
+								"description": "Anzahlung Ferienhaus",
+								"allocated": "150.00",
+								"remaining": "150.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000006",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-19",
+								"amount": "-100.00",
+								"currency": "EUR",
+								"counterpartyName": "Mietwagen Sixt",
+								"description": "Mietwagen Wochenende",
+								"allocated": "50.00",
+								"remaining": "50.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000007",
+								"role": "OFFSET",
+								"bookingDate": "2024-03-01",
+								"amount": "200.00",
+								"currency": "EUR",
+								"counterpartyName": "Anna Schmidt",
+								"description": "Anteil Urlaub",
+								"allocated": "200.00",
+								"remaining": "0.00"
+							}
+						]
+					}
+				},
+				{
+					"id": "7e1b0000-0000-4000-8000-000000000006",
+					"accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+					"source": "comdirect",
+					"externalId": "LINK-CAR",
+					"bookingDate": "2024-02-19",
+					"valutaDate": "2024-02-19",
+					"bookingStatus": "BOOKED",
+					"amount": "-100.00",
+					"currency": "EUR",
+					"counterpartyName": "Mietwagen Sixt",
+					"counterpartyIban": null,
+					"description": "Mietwagen Wochenende",
+					"transactionType": "Ueberweisung",
+					"label": null,
+					"splits": [],
+					"tags": [],
+					"note": null,
+					"transfer": null,
+					"recurring": {
+						"isRecurring": false,
+						"source": "AUTO",
+						"seriesId": null,
+						"cadence": null,
+						"medianAmount": null
+					},
+					"link": {
+						"id": "7e1b1111-0000-4000-8000-000000000003",
+						"kind": "REIMBURSEMENT",
+						"note": "Urlaub geteilt",
+						"status": "PARTIAL",
+						"currency": "EUR",
+						"expenseTotal": "400.00",
+						"offsetTotal": "200.00",
+						"reimbursed": "200.00",
+						"net": "200.00",
+						"surplus": "0.00",
+						"missingMembers": 0,
+						"members": [
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000005",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-18",
+								"amount": "-300.00",
+								"currency": "EUR",
+								"counterpartyName": "Ferienhaus Booking",
+								"description": "Anzahlung Ferienhaus",
+								"allocated": "150.00",
+								"remaining": "150.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000006",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-19",
+								"amount": "-100.00",
+								"currency": "EUR",
+								"counterpartyName": "Mietwagen Sixt",
+								"description": "Mietwagen Wochenende",
+								"allocated": "50.00",
+								"remaining": "50.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000007",
+								"role": "OFFSET",
+								"bookingDate": "2024-03-01",
+								"amount": "200.00",
+								"currency": "EUR",
+								"counterpartyName": "Anna Schmidt",
+								"description": "Anteil Urlaub",
+								"allocated": "200.00",
+								"remaining": "0.00"
+							}
+						]
+					}
+				},
+				{
+					"id": "7e1b0000-0000-4000-8000-000000000007",
+					"accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+					"source": "comdirect",
+					"externalId": "LINK-ANNA",
+					"bookingDate": "2024-03-01",
+					"valutaDate": "2024-03-01",
+					"bookingStatus": "BOOKED",
+					"amount": "200.00",
+					"currency": "EUR",
+					"counterpartyName": "Anna Schmidt",
+					"counterpartyIban": null,
+					"description": "Anteil Urlaub",
+					"transactionType": "Ueberweisung",
+					"label": null,
+					"splits": [],
+					"tags": [],
+					"note": null,
+					"transfer": null,
+					"recurring": {
+						"isRecurring": false,
+						"source": "AUTO",
+						"seriesId": null,
+						"cadence": null,
+						"medianAmount": null
+					},
+					"link": {
+						"id": "7e1b1111-0000-4000-8000-000000000003",
+						"kind": "REIMBURSEMENT",
+						"note": "Urlaub geteilt",
+						"status": "PARTIAL",
+						"currency": "EUR",
+						"expenseTotal": "400.00",
+						"offsetTotal": "200.00",
+						"reimbursed": "200.00",
+						"net": "200.00",
+						"surplus": "0.00",
+						"missingMembers": 0,
+						"members": [
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000005",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-18",
+								"amount": "-300.00",
+								"currency": "EUR",
+								"counterpartyName": "Ferienhaus Booking",
+								"description": "Anzahlung Ferienhaus",
+								"allocated": "150.00",
+								"remaining": "150.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000006",
+								"role": "EXPENSE",
+								"bookingDate": "2024-02-19",
+								"amount": "-100.00",
+								"currency": "EUR",
+								"counterpartyName": "Mietwagen Sixt",
+								"description": "Mietwagen Wochenende",
+								"allocated": "50.00",
+								"remaining": "50.00"
+							},
+							{
+								"transactionId": "7e1b0000-0000-4000-8000-000000000007",
+								"role": "OFFSET",
+								"bookingDate": "2024-03-01",
+								"amount": "200.00",
+								"currency": "EUR",
+								"counterpartyName": "Anna Schmidt",
+								"description": "Anteil Urlaub",
+								"allocated": "200.00",
+								"remaining": "0.00"
+							}
+						]
+					}
+				}
+			]
+		}
+	}
+}

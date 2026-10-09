@@ -17,6 +17,8 @@ pub mod projection_offset;
 pub mod rule;
 pub mod transaction;
 pub mod transaction_insight;
+pub mod transaction_link;
+pub mod transaction_link_member;
 pub mod transaction_label;
 pub mod transaction_split;
 pub mod transaction_tag;

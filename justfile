@@ -291,7 +291,7 @@ dev-migrate:
 dev-reset:
     docker compose -f docker-compose.local.yml exec -T finreport-be-postgres \
         psql -U finreport -d finreport \
-        -c 'TRUNCATE TABLE transaction, account_balance, projection_offset, transaction_label, transaction_user_label, transaction_split, llm_label_cache, rule, category;'
+        -c 'TRUNCATE TABLE transaction, account_balance, projection_offset, transaction_label, transaction_user_label, transaction_split, transaction_link, transaction_link_member, llm_label_cache, rule, category;'
 
 # Run the GraphQL backend locally against the Postgres started by `db-up`.
 # Config comes from `local_env` (top of this file); no .env needed.

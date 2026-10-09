@@ -319,3 +319,70 @@ async fn a_tombstone_deletes_the_projected_row() {
         .unwrap()
         .is_none());
 }
+
+/// A link is the user's declaration on its own topic and tables: a detector
+/// pass, even one that rewrites the insights of the very transactions the
+/// link joins, must leave it exactly as it was.
+#[tokio::test]
+async fn a_detector_run_does_not_disturb_a_transaction_link() {
+    use entity::entities::{transaction_link, transaction_link_member};
+    use sea_orm::{ColumnTrait, QueryFilter};
+    use webapp::kafka::links::{LinkKind, LinkMemberRef, LinkRole, TransactionLinkRecord};
+    use webapp::projection::links::project_transaction_link;
+
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url())
+        .await
+        .expect("connect to test Postgres");
+    let publisher =
+        EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    let user = Uuid::new_v4();
+    seed_user(&db, user).await;
+    let acc_out = seed_account(&db, "LINK-OUT", Some("DE_LINK_OUT"), Some(user)).await;
+    let acc_in = seed_account(&db, "LINK-IN", Some("DE_LINK_IN"), Some(user)).await;
+    // The shape the transfer detector pairs up (IBAN match, equal and
+    // opposite) - and which a user has declared a reimbursement instead.
+    let out = seed_transaction(&db, acc_out, "LINK-D-OUT", months_ago(1), amt("-300.00"), Some("DE_LINK_IN"), None).await;
+    let back = seed_transaction(&db, acc_in, "LINK-D-IN", months_ago(1), amt("300.00"), None, None).await;
+
+    let link_id = Uuid::new_v4();
+    let revision = Utc::now();
+    let record = TransactionLinkRecord {
+        schema_version: 1,
+        id: link_id,
+        kind: LinkKind::Reimbursement,
+        owner_user_id: Some(user),
+        members: vec![
+            LinkMemberRef { source: "comdirect".into(), external_id: "LINK-D-OUT".into(), role: LinkRole::Expense },
+            LinkMemberRef { source: "comdirect".into(), external_id: "LINK-D-IN".into(), role: LinkRole::Offset },
+        ],
+        note: Some("declared by the user".into()),
+        revision,
+    };
+    project_transaction_link(&db, link_id, Some(record)).await.unwrap();
+
+    run_detection_pass(&db, &publisher).await.expect("detection pass");
+    run_detection_pass(&db, &publisher).await.expect("second detection pass");
+
+    let insight = transaction_insight::Entity::find_by_id(out).one(&db).await.unwrap().expect("detector ran");
+    assert!(insight.is_transfer, "the detector still does its own job");
+
+    let link = transaction_link::Entity::find_by_id(link_id).one(&db).await.unwrap().expect("link survives");
+    assert_eq!(link.kind, "reimbursement");
+    assert_eq!(link.note.as_deref(), Some("declared by the user"));
+    assert_eq!(link.revision.timestamp_micros(), revision.timestamp_micros());
+    let mut members: Vec<(Uuid, String)> = transaction_link_member::Entity::find()
+        .filter(transaction_link_member::Column::LinkId.eq(link_id))
+        .all(&db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|m| (m.transaction_id, m.role))
+        .collect();
+    members.sort();
+    let mut expected = vec![(out, "expense".to_string()), (back, "offset".to_string())];
+    expected.sort();
+    assert_eq!(members, expected);
+}

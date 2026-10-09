@@ -16,6 +16,14 @@ import { amountWithinRange } from '$lib/transactionFilters';
 import { compareBySort, DEFAULT_SORT } from '$lib/transactionSort';
 import { mockCategoryComparison } from '$lib/graphql/comparisonMock';
 import type { TransactionSort } from '$lib/graphql/types';
+import {
+	applyReimbursementFilter,
+	linkFixtureItems,
+	mockLinkCandidates,
+	mockReimbursementSummary,
+	mockSaveLink,
+	type LinkableMock
+} from '$lib/graphql/linksMock';
 
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
@@ -153,6 +161,8 @@ interface MockTransaction {
 	tags: string[];
 	transfer: unknown;
 	recurring: { isRecurring: boolean };
+	/** Present on the rows `linksFixture.json` adds. */
+	link?: unknown;
 }
 
 function isSet(v: boolean | null | undefined): v is boolean {
@@ -175,6 +185,11 @@ function applyInsightFilters(
 	filter: Record<string, unknown> | undefined
 ): MockTransaction[] {
 	if (!filter) return items;
+	// `reimbursements`: leave out (or keep only) the offsetting side of links.
+	items = applyReimbursementFilter(
+		items as unknown as LinkableMock[],
+		filter.reimbursements as string | undefined
+	) as unknown as MockTransaction[];
 	const accountIds = filter.accountIds as string[] | undefined;
 	const search = (filter.search as string | undefined)?.toLowerCase();
 	const categorySlugs = filter.categorySlugs as string[] | undefined;
@@ -220,7 +235,10 @@ function applyInsightFilters(
 const MOCK_SPLIT_INDEX = 1;
 
 function mockFixtureItems(): MockTransaction[] {
-	const items = transactionsMock.data.transactions.items as unknown as MockTransaction[];
+	const items = [
+		...(transactionsMock.data.transactions.items as unknown as MockTransaction[]),
+		...(linkFixtureItems() as unknown as MockTransaction[])
+	];
 	return items.map((item, i) =>
 		i === MOCK_SPLIT_INDEX && item.splits.length === 0
 			? {
@@ -913,6 +931,59 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: { data: { archiveGoal: mockArchiveGoal(body.variables) } },
+				setCookies: []
+			};
+		case 'CreateTransactionLink':
+			return {
+				status: 200,
+				body: {
+					data: {
+						createTransactionLink: mockSaveLink(
+							body.variables,
+							mockFixtureItems() as unknown as LinkableMock[]
+						)
+					}
+				},
+				setCookies: []
+			};
+		case 'UpdateTransactionLink':
+			return {
+				status: 200,
+				body: {
+					data: {
+						updateTransactionLink: mockSaveLink(
+							body.variables,
+							mockFixtureItems() as unknown as LinkableMock[],
+							body.variables?.id as string | undefined
+						)
+					}
+				},
+				setCookies: []
+			};
+		case 'RemoveTransactionLink':
+			return { status: 200, body: { data: { removeTransactionLink: true } }, setCookies: [] };
+		case 'LinkCandidates':
+			return {
+				status: 200,
+				body: {
+					data: mockLinkCandidates(
+						body.variables,
+						mockFixtureItems() as unknown as LinkableMock[]
+					)
+				},
+				setCookies: []
+			};
+		case 'ReimbursementSummary':
+			return {
+				status: 200,
+				body: {
+					data: mockReimbursementSummary(
+						applyInsightFilters(
+							mockFixtureItems(),
+							body.variables?.filter as Record<string, unknown> | undefined
+						) as unknown as LinkableMock[]
+					)
+				},
 				setCookies: []
 			};
 		case 'SetTransactionTags':

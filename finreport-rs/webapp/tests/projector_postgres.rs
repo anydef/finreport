@@ -594,3 +594,102 @@ async fn labeler_suffixed_keys_are_scoped_by_group_too() {
     assert_eq!(a.get(&(key.to_string(), 0)), Some(&12));
     assert_eq!(b.get(&(key.to_string(), 0)), Some(&3));
 }
+
+// ---------------------------------------------------------------------------
+// finreport.transaction-link
+// ---------------------------------------------------------------------------
+
+const LINK_TOPIC: &str = "finreport.transaction-link";
+
+fn link_payload(id: Uuid, refs: &[(&str, &str)], note: &str, revision_secs: i64) -> serde_json::Value {
+    json!({
+        "schema_version": 1,
+        "id": id,
+        "kind": "reimbursement",
+        "owner_user_id": null,
+        "members": refs.iter().map(|(ext, role)| json!({"source": "comdirect", "external_id": ext, "role": role})).collect::<Vec<_>>(),
+        "note": note,
+        "revision": Utc.timestamp_opt(1_800_000_000 + revision_secs, 0).unwrap().to_rfc3339(),
+    })
+}
+
+fn link_record(offset: i64, id: Uuid, payload: Option<serde_json::Value>) -> ConsumedRecord {
+    ConsumedRecord {
+        topic: LINK_TOPIC.to_string(),
+        partition: 0,
+        offset,
+        key: Some(id.to_string()),
+        payload: payload.map(|p| serde_json::to_vec(&p).unwrap()).unwrap_or_default(),
+        envelope: envelope(None, "user"),
+    }
+}
+
+async fn link_state(db: &sea_orm::DatabaseConnection, id: Uuid) -> Option<(String, Vec<(String, String)>)> {
+    use entity::entities::{transaction_link, transaction_link_member};
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let link = transaction_link::Entity::find_by_id(id).one(db).await.unwrap()?;
+    let mut members: Vec<(String, String)> = transaction_link_member::Entity::find()
+        .filter(transaction_link_member::Column::LinkId.eq(id))
+        .all(db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|m| (m.transaction_id.to_string(), m.role))
+        .collect();
+    members.sort();
+    Some((link.note.unwrap_or_default(), members))
+}
+
+#[tokio::test]
+async fn a_transaction_link_projects_edits_tombstones_and_replays() {
+    let db = support::TestPostgres::start().await;
+    let registry = MapperRegistry::with_default_mappers();
+    let id = Uuid::new_v4();
+    let tx = |ext: &str| webapp::kafka::envelope::transaction_uuid("comdirect", ext).to_string();
+
+    let v1 = link_record(0, id, Some(link_payload(id, &[("BILL", "expense"), ("BACK-1", "offset")], "first", 1)));
+    // The same link edited: a second reimbursement joins it.
+    let v2 = link_record(1, id, Some(link_payload(id, &[("BILL", "expense"), ("BACK-1", "offset"), ("BACK-2", "offset")], "second", 2)));
+    // An echo of the old revision arriving late must not regress it.
+    let stale = link_record(2, id, Some(link_payload(id, &[("BILL", "expense"), ("BACK-1", "offset")], "first", 1)));
+    let tombstone = link_record(3, id, None);
+
+    process_batch(db.connection(), GROUP, &registry, None, &[v1.clone()]).await.unwrap();
+    let (note, members) = link_state(db.connection(), id).await.expect("link projected");
+    assert_eq!(note, "first");
+    let mut want = vec![(tx("BILL"), "expense".to_string()), (tx("BACK-1"), "offset".to_string())];
+    want.sort();
+    assert_eq!(members, want);
+
+    process_batch(db.connection(), GROUP, &registry, None, &[v2.clone(), stale.clone()]).await.unwrap();
+    let (note, members) = link_state(db.connection(), id).await.unwrap();
+    assert_eq!(note, "second", "a stale revision does not win");
+    assert_eq!(members.len(), 3, "the edit replaced the member list");
+
+    // Replaying the whole log from offset 0 into a fresh database
+    // reproduces the same link.
+    let fresh = support::TestPostgres::start().await;
+    process_batch(fresh.connection(), GROUP, &registry, None, &[v1, v2, stale]).await.unwrap();
+    assert_eq!(link_state(fresh.connection(), id).await, link_state(db.connection(), id).await);
+
+    // A tombstone removes the link and its members; replaying it is a no-op.
+    process_batch(db.connection(), GROUP, &registry, None, &[tombstone.clone()]).await.unwrap();
+    assert_eq!(link_state(db.connection(), id).await, None);
+    process_batch(db.connection(), GROUP, &registry, None, &[tombstone]).await.unwrap();
+    assert_eq!(link_state(db.connection(), id).await, None);
+}
+
+#[tokio::test]
+async fn a_poison_transaction_link_record_is_skipped_without_wedging_the_batch() {
+    let db = support::TestPostgres::start().await;
+    let registry = MapperRegistry::with_default_mappers();
+    let bad = Uuid::new_v4();
+    let good = Uuid::new_v4();
+    let records = [
+        link_record(0, bad, Some(json!({"nonsense": true}))),
+        link_record(1, good, Some(link_payload(good, &[("A", "expense"), ("B", "offset")], "ok", 1))),
+    ];
+    process_batch(db.connection(), GROUP, &registry, None, &records).await.unwrap();
+    assert!(link_state(db.connection(), bad).await.is_none());
+    assert!(link_state(db.connection(), good).await.is_some());
+}

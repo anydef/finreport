@@ -78,6 +78,7 @@ impl QueryRoot {
             let ids: Vec<uuid::Uuid> = page.items.iter().map(|t| t.id.0).collect();
             crate::graphql::labels::prefetch(db, cache, &ids).await?;
         }
+        crate::graphql::links::prefetch_page(ctx, &page.items).await?;
         Ok(page)
     }
 
@@ -212,7 +213,70 @@ impl QueryRoot {
         let page = page.unwrap_or_default();
         let scoped_ids = scoped_account_ids(user, None)?;
         let cache = ctx.data::<LabelSplitCache>()?;
-        review_queue::fetch_review_queue(db, cache, &scoped_ids, page.limit, page.offset).await
+        let queue = review_queue::fetch_review_queue(db, cache, &scoped_ids, page.limit, page.offset).await?;
+        crate::graphql::links::prefetch_page(ctx, &queue.transactions).await?;
+        Ok(queue)
+    }
+
+    /// One link by id; `null` when it does not exist or is not the caller's.
+    async fn transaction_link(
+        &self,
+        ctx: &Context<'_>,
+        id: Uuid,
+    ) -> GqlResult<Option<crate::graphql::links::TransactionLink>> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::links::fetch_transaction_link(db, user, id.0).await
+    }
+
+    /// The caller's links, most recently edited first.
+    async fn transaction_links(
+        &self,
+        ctx: &Context<'_>,
+        #[graphql(default = 50)] limit: i32,
+        #[graphql(default = 0)] offset: i32,
+    ) -> GqlResult<Vec<crate::graphql::links::TransactionLink>> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::links::fetch_transaction_links(db, user, limit, offset).await
+    }
+
+    /// Transactions that could be the other side of a link from
+    /// `transactionId`, best fit first (opposite sign, similar amount,
+    /// nearby date, not already linked). `search` widens it to the whole
+    /// history, matching counterparty and description.
+    async fn link_candidates(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: Uuid,
+        search: Option<String>,
+        #[graphql(default = 20)] limit: i32,
+    ) -> GqlResult<Vec<crate::graphql::links::LinkCandidate>> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let candidates =
+            crate::graphql::links::fetch_link_candidates(db, user, transaction_id.0, search, limit).await?;
+        crate::graphql::links::prefetch_page(ctx, candidates.iter().map(|c| &c.transaction)).await?;
+        Ok(candidates)
+    }
+
+    /// The netted figure for the linked expenses the filter matches, kept
+    /// apart from every period total (which still show what actually left
+    /// the account).
+    async fn reimbursement_summary(
+        &self,
+        ctx: &Context<'_>,
+        filter: Option<TransactionFilter>,
+    ) -> GqlResult<crate::graphql::links::ReimbursementSummary> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let filter = filter.unwrap_or_default();
+        let requested_ids: Option<Vec<uuid::Uuid>> = filter
+            .account_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0).collect());
+        let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
+        crate::graphql::links::fetch_reimbursement_summary(db, &scoped_ids, &filter).await
     }
 
     /// What is waiting for the user: uncategorised and held-for-review
@@ -291,7 +355,9 @@ impl QueryRoot {
     ) -> GqlResult<TransactionPage> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        goals::goal_transactions(db, user, id, start_date, end_date, page, sort).await
+        let page = goals::goal_transactions(db, user, id, start_date, end_date, page, sort).await?;
+        crate::graphql::links::prefetch_page(ctx, &page.items).await?;
+        Ok(page)
     }
 
     /// `recurringSeries` (§4).

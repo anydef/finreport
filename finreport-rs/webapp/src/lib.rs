@@ -8,5 +8,6 @@ pub mod graphql;
 pub mod institute;
 pub mod kafka;
 pub mod labeling;
+pub mod links;
 pub mod projection;
 mod service;

@@ -6,6 +6,7 @@
 	import Card from '$lib/components/Card.svelte';
 	import PeriodSelector from '$lib/components/PeriodSelector.svelte';
 	import TotalsRow from '$lib/components/TotalsRow.svelte';
+	import ReimbursementNote from '$lib/components/ReimbursementNote.svelte';
 	import CashflowBarChart from '$lib/components/CashflowBarChart.svelte';
 	import CashflowSankey from '$lib/components/CashflowSankey.svelte';
 	import CategoryBreakdown from '$lib/components/CategoryBreakdown.svelte';
@@ -260,6 +261,7 @@
 		</p>
 	{:else if data.summary}
 		<TotalsRow totals={data.summary.total} currency={data.summary.currency} />
+		<ReimbursementNote summary={data.reimbursementSummary} currency={data.summary.currency} />
 
 		<Card title="Income vs. spending">
 			{#if browser}

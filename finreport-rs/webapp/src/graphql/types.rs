@@ -158,6 +158,17 @@ impl Transaction {
         crate::graphql::insights::note_for(db.as_ref(), self.id.0).await
     }
 
+    /// The user-declared link this transaction is on (a reimbursement and
+    /// the expense it repays), with the offset figures derived from the
+    /// members' own amounts; `null` when unlinked. Lists prefetch this for a
+    /// whole page.
+    async fn link(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<Option<crate::graphql::links::TransactionLink>> {
+        crate::graphql::links::link_for(ctx, self.id.0).await
+    }
+
     /// `null` = not an internal transfer (§4).
     async fn transfer(
         &self,
@@ -252,6 +263,19 @@ pub struct RecurringOverview {
 pub struct TagCount {
     pub tag: String,
     pub transaction_count: i32,
+}
+
+/// How a transaction list treats the offsetting side of reimbursement links
+/// (the money that came back). Genuine income is never on that side, so
+/// excluding reimbursements cannot hide it.
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum ReimbursementFilter {
+    /// Leave them in. The default, and what omitting the field means.
+    Include,
+    /// Drop transactions that are the offsetting side of a reimbursement link.
+    Exclude,
+    /// Only those.
+    Only,
 }
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
@@ -349,6 +373,10 @@ pub struct TransactionFilter {
     /// Matches variants of one merchant that `counterpartyNames` would miss.
     /// Omitted or empty = unconstrained.
     pub counterparty_keys: Option<Vec<String>>,
+    /// Whether the offsetting side of reimbursement links is included.
+    /// `None` = `INCLUDE`: reimbursements are counted as the money they are
+    /// until the caller asks otherwise, so no existing view changes.
+    pub reimbursements: Option<ReimbursementFilter>,
 }
 
 #[derive(InputObject)]

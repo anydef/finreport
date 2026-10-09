@@ -2,10 +2,17 @@ import { createGraphqlClient } from '$lib/graphqlClient';
 import {
 	ACCOUNTS_QUERY,
 	CATEGORIES_QUERY,
+	REIMBURSEMENT_SUMMARY_QUERY,
 	TAGS_QUERY,
 	TRANSACTIONS_QUERY
 } from '$lib/graphql/queries';
-import type { Account, Category, TagCount, TransactionPage } from '$lib/graphql/types';
+import type {
+	Account,
+	Category,
+	ReimbursementSummary,
+	TagCount,
+	TransactionPage
+} from '$lib/graphql/types';
 import {
 	defaultGranularity,
 	parsePeriodSelection,
@@ -41,13 +48,17 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		...toTransactionFilter(panel, categories)
 	};
 
-	const transactionsResult = await client
-		.query(TRANSACTIONS_QUERY, {
-			filter,
-			page: { limit: PAGE_LIMIT, offset },
-			sort: sortVariable(sort)
-		})
-		.toPromise();
+	const [transactionsResult, reimbursementResult] = await Promise.all([
+		client
+			.query(TRANSACTIONS_QUERY, {
+				filter,
+				page: { limit: PAGE_LIMIT, offset },
+				sort: sortVariable(sort)
+			})
+			.toPromise(),
+		// A separate figure beside the list; its failure never fails the page.
+		client.query(REIMBURSEMENT_SUMMARY_QUERY, { filter }).toPromise()
+	]);
 
 	return {
 		preset,
@@ -64,6 +75,9 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		categories,
 		allTags: (tagsResult.data?.tags ?? []) as TagCount[],
 		transactionFilter: filter,
+		reimbursementSummary: reimbursementResult.data?.reimbursementSummary as
+			| ReimbursementSummary
+			| undefined,
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
 		today: toDateInputValue(today)
 	};

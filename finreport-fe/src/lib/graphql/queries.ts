@@ -50,6 +50,31 @@ query Accounts {
 	}
 }`;
 
+/** What a link carries, wherever it is selected: the figures and every member with its share. */
+const TRANSACTION_LINK_FIELDS = `
+				id
+				kind
+				note
+				status
+				currency
+				expenseTotal
+				offsetTotal
+				reimbursed
+				net
+				surplus
+				missingMembers
+				members {
+					transactionId
+					role
+					bookingDate
+					amount
+					currency
+					counterpartyName
+					description
+					allocated
+					remaining
+				}`;
+
 /** The `Transaction` selection shared by every query that returns a `TransactionPage`. */
 const TRANSACTION_ITEM_FIELDS = `			id
 			accountId
@@ -101,6 +126,8 @@ const TRANSACTION_ITEM_FIELDS = `			id
 				seriesId
 				cadence
 				medianAmount
+			}
+			link {${TRANSACTION_LINK_FIELDS}
 			}`;
 
 // `tags`/`transfer`/`recurring` (iteration 3 §4) were deliberately left off
@@ -640,5 +667,48 @@ query CategoryComparison($filter: TransactionFilter!, $granularity: Granularity!
 				transactionCount
 			}
 		}
+	}
+}`;
+
+export const CREATE_TRANSACTION_LINK_MUTATION = `
+mutation CreateTransactionLink($input: TransactionLinkInput!) {
+	createTransactionLink(input: $input) {${TRANSACTION_LINK_FIELDS}
+	}
+}`;
+
+export const UPDATE_TRANSACTION_LINK_MUTATION = `
+mutation UpdateTransactionLink($id: UUID!, $input: TransactionLinkInput!) {
+	updateTransactionLink(id: $id, input: $input) {${TRANSACTION_LINK_FIELDS}
+	}
+}`;
+
+export const REMOVE_TRANSACTION_LINK_MUTATION = `
+mutation RemoveTransactionLink($id: UUID!) {
+	removeTransactionLink(id: $id)
+}`;
+
+export const LINK_CANDIDATES_QUERY = `
+query LinkCandidates($transactionId: UUID!, $search: String, $limit: Int! = 20) {
+	linkCandidates(transactionId: $transactionId, search: $search, limit: $limit) {
+		score
+		transaction {
+			id
+			bookingDate
+			amount
+			currency
+			counterpartyName
+			description
+		}
+	}
+}`;
+
+export const REIMBURSEMENT_SUMMARY_QUERY = `
+query ReimbursementSummary($filter: TransactionFilter) {
+	reimbursementSummary(filter: $filter) {
+		expenseTotal
+		reimbursed
+		net
+		linkedCount
+		partiallyReimbursedCount
 	}
 }`;

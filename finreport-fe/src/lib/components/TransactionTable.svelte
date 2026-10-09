@@ -11,6 +11,8 @@
 	import TransactionItem from './TransactionItem.svelte';
 	import TransactionEditor from './TransactionEditor.svelte';
 	import BulkEditDialog from './BulkEditDialog.svelte';
+	import LinkDialog from './LinkDialog.svelte';
+	import Badge from './Badge.svelte';
 	import { invalidateAll } from '$app/navigation';
 	import { untrack } from 'svelte';
 	import { pruneExpanded, toggleExpanded } from '$lib/expansion';
@@ -45,11 +47,20 @@
 		applyRecurringResult,
 		applyTagsResult
 	} from '$lib/transactionEdit';
+	import {
+		dialogMemberFromLink,
+		dialogMemberFromTransaction,
+		linkHint,
+		linkabilityOfSelection,
+		statusLabel,
+		type DialogMember
+	} from '$lib/reimbursement';
 	import type {
 		BulkEditResult,
 		Category,
 		Transaction,
 		TransactionFilter,
+		TransactionLink,
 		TransactionSort,
 		TransactionSortField
 	} from '$lib/graphql/types';
@@ -99,6 +110,12 @@
 	const bulkEnabled = $derived(filter !== undefined);
 	let selection = $state<Selection>(EMPTY_SELECTION);
 	let bulkKind = $state<'category' | 'tags' | null>(null);
+	/** The reimbursement-link dialog, when open. */
+	let linkDialog = $state<{
+		anchor: DialogMember;
+		initial: DialogMember[];
+		link: TransactionLink | null;
+	} | null>(null);
 
 	// A selection belongs to the filter and the ordering it was made under.
 	// When either changes, drop it: a stale selection is how a bulk tool edits
@@ -125,6 +142,53 @@
 	const sortTo = $derived(
 		onsort ? (field: TransactionSortField) => onsort(nextSort(sort, field)) : undefined
 	);
+
+	// Linking works on ticked rows (not "all matching", which can span pages).
+	const ticked = $derived(
+		selection.mode === 'ids' ? rows.filter((r) => selection.mode === 'ids' && selection.ids.includes(r.id)) : []
+	);
+	const linkable = $derived(
+		ticked.length >= 2 ? linkabilityOfSelection(ticked) : { ok: true as const, expenses: [], offsets: [] }
+	);
+	const linkBlocked = $derived(
+		selection.mode !== 'ids'
+			? 'Link works on individually ticked rows.'
+			: ticked.length === 1 && ticked[0].link
+				? 'This transaction is already linked. Use Edit link on its row.'
+				: ticked.length >= 2 && !linkable.ok
+					? linkable.reason
+					: null
+	);
+
+	function openLinkFromSelection() {
+		if (linkBlocked || ticked.length === 0) return;
+		const members = ticked.map(dialogMemberFromTransaction);
+		linkDialog = { anchor: members[0], initial: members, link: null };
+	}
+
+	function openLinkEditor(tx: Transaction) {
+		const link = tx.link;
+		if (!link) return;
+		const members = link.members
+			.map(dialogMemberFromLink)
+			.filter((m): m is DialogMember => m !== null);
+		const anchor = members.find((m) => m.id === tx.id) ?? members[0];
+		if (!anchor) return;
+		linkDialog = { anchor, initial: members, link };
+	}
+
+	async function linkDone() {
+		linkDialog = null;
+		selection = EMPTY_SELECTION;
+		await invalidateAll();
+	}
+
+	const statusVariant = {
+		FULL: 'success',
+		PARTIAL: 'warning',
+		OVER: 'info',
+		INCOMPLETE: 'neutral'
+	} as const;
 
 	function openBulk(kind: 'category' | 'tags') {
 		bulkKind = kind;
@@ -272,6 +336,16 @@
 								</button>
 								<button
 									type="button"
+									disabled={ticked.length === 0 || linkBlocked !== null}
+									title={linkBlocked ?? 'Link a reimbursement to the expense it offsets'}
+									onclick={openLinkFromSelection}
+									class="{bulkBtn} bg-brand hover:bg-brand/90 text-white"
+									data-testid="bulk-link"
+								>
+									{ticked.length === 1 ? 'Find reimbursement...' : 'Link as reimbursement'}
+								</button>
+								<button
+									type="button"
 									onclick={() => (selection = EMPTY_SELECTION)}
 									class="{bulkBtn} bg-slate-100 text-slate-700 hover:bg-slate-200"
 								>
@@ -329,6 +403,26 @@
 							/>
 						{/snippet}
 					</TransactionItem>
+					{@const hint = linkHint(tx)}
+					{#if hint && tx.link}
+						<tr class="border-b border-slate-100 bg-slate-50/70" data-testid="link-hint">
+							<td {colspan} class="py-1.5 pr-4 pl-3 text-xs text-slate-600">
+								<span class="flex flex-wrap items-center gap-2">
+									<span aria-hidden="true">↳</span>
+									<Badge text={statusLabel(hint.status)} variant={statusVariant[hint.status]} />
+									<span>{hint.text}</span>
+									{#if tx.link.note}<span class="text-slate-500 italic">"{tx.link.note}"</span>{/if}
+									<button
+										type="button"
+										onclick={() => openLinkEditor(tx)}
+										class="text-brand focus-visible:outline-brand rounded px-1 underline hover:no-underline focus-visible:outline focus-visible:outline-2"
+									>
+										Edit link
+									</button>
+								</span>
+							</td>
+						</tr>
+					{/if}
 				{/each}
 			</tbody>
 		</table>
@@ -345,5 +439,15 @@
 		onApplyTags={applyBulkTags}
 		ondone={bulkDone}
 		onclose={() => (bulkKind = null)}
+	/>
+{/if}
+
+{#if linkDialog}
+	<LinkDialog
+		anchor={linkDialog.anchor}
+		initial={linkDialog.initial}
+		link={linkDialog.link}
+		ondone={linkDone}
+		onclose={() => (linkDialog = null)}
 	/>
 {/if}

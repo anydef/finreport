@@ -10,6 +10,7 @@ pub mod events;
 pub mod goals;
 pub mod insights;
 pub mod labeling;
+pub mod links;
 pub mod producer;
 pub mod repair;
 pub mod scan;

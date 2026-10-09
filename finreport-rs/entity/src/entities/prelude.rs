@@ -15,6 +15,8 @@ pub use super::projection_offset::Entity as ProjectionOffset;
 pub use super::rule::Entity as Rule;
 pub use super::transaction::Entity as Transaction;
 pub use super::transaction_insight::Entity as TransactionInsight;
+pub use super::transaction_link::Entity as TransactionLink;
+pub use super::transaction_link_member::Entity as TransactionLinkMember;
 pub use super::transaction_label::Entity as TransactionLabel;
 pub use super::transaction_split::Entity as TransactionSplit;
 pub use super::transaction_tag::Entity as TransactionTag;

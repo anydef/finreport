@@ -6,6 +6,7 @@ import {
 	CASHFLOW_SUMMARY_QUERY,
 	CATEGORIES_QUERY,
 	CATEGORY_BREAKDOWN_QUERY,
+	REIMBURSEMENT_SUMMARY_QUERY,
 	TAGS_QUERY,
 	TRANSACTIONS_QUERY
 } from '$lib/graphql/queries';
@@ -17,6 +18,7 @@ import type {
 	CashflowSummary,
 	Category,
 	CategoryBreakdown,
+	ReimbursementSummary,
 	TagCount,
 	TransactionFilter,
 	TransactionPage
@@ -118,7 +120,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		endDate: txEnd
 	};
 
-	const [summaryResult, graphResult, transactionsResult, breakdownResult] = await Promise.all([
+	const [summaryResult, graphResult, transactionsResult, breakdownResult, reimbursementResult] =
+		await Promise.all([
 		client.query(CASHFLOW_SUMMARY_QUERY, { filter: periodFilter, granularity }).toPromise(),
 		client
 			.query(CASHFLOW_GRAPH_QUERY, {
@@ -144,7 +147,9 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				// "Categories (iteration 2)").
 				kind: 'EXPENSE'
 			})
-			.toPromise()
+			.toPromise(),
+		// The netted figure beside the totals; its failure never fails the dashboard.
+		client.query(REIMBURSEMENT_SUMMARY_QUERY, { filter: periodFilter }).toPromise()
 	]);
 
 	const error = [accountsResult, summaryResult, graphResult, transactionsResult].some(
@@ -175,6 +180,9 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		transactionFilter,
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
 		breakdown: breakdownResult.data?.categoryBreakdown as CategoryBreakdown | undefined,
+		reimbursementSummary: reimbursementResult.data?.reimbursementSummary as
+			| ReimbursementSummary
+			| undefined,
 		today: toDateInputValue(today)
 	};
 };

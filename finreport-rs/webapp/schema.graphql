@@ -587,6 +587,17 @@ type LearningExemption {
 	exemptedAt: DateTime!
 }
 
+"""
+A transaction that could be linked to another, with how well it fits.
+"""
+type LinkCandidate {
+	transaction: Transaction!
+	"""
+	0..1: closer in amount and nearer in date scores higher.
+	"""
+	score: Float!
+}
+
 input LoginInput {
 	username: String!
 	password: String!
@@ -646,6 +657,21 @@ type Mutation {
 	alias existed.
 	"""
 	removeDisplayAlias(kind: DisplayAliasKind!, key: String!): Boolean!
+	"""
+	Declares that the offsetting transactions repay the expense ones.
+	Every transaction must be the caller's, expenses negative and
+	offsets positive, one currency, and none already on another link.
+	"""
+	createTransactionLink(input: TransactionLinkInput!): TransactionLink!
+	"""
+	Replaces a link's members and note wholesale.
+	"""
+	updateTransactionLink(id: UUID!, input: TransactionLinkInput!): TransactionLink!
+	"""
+	Deletes a link; the linked transactions are untouched. True when a
+	link existed.
+	"""
+	removeTransactionLink(id: UUID!): Boolean!
 	"""
 	`createGoal` (iteration 4 §4).
 	"""
@@ -737,6 +763,27 @@ type Query {
 	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
 	reviewQueue(page: PageInput): ReviewQueue!
 	"""
+	One link by id; `null` when it does not exist or is not the caller's.
+	"""
+	transactionLink(id: UUID!): TransactionLink
+	"""
+	The caller's links, most recently edited first.
+	"""
+	transactionLinks(limit: Int! = 50, offset: Int! = 0): [TransactionLink!]!
+	"""
+	Transactions that could be the other side of a link from
+	`transactionId`, best fit first (opposite sign, similar amount,
+	nearby date, not already linked). `search` widens it to the whole
+	history, matching counterparty and description.
+	"""
+	linkCandidates(transactionId: UUID!, search: String, limit: Int! = 20): [LinkCandidate!]!
+	"""
+	The netted figure for the linked expenses the filter matches, kept
+	apart from every period total (which still show what actually left
+	the account).
+	"""
+	reimbursementSummary(filter: TransactionFilter): ReimbursementSummary!
+	"""
 	What is waiting for the user: uncategorised and held-for-review
 	transactions with their worth. All-time, across the caller's accounts.
 	"""
@@ -821,6 +868,55 @@ type RecurringSeries {
 	`lastDate` older than cadence + grace.
 	"""
 	stale: Boolean!
+}
+
+"""
+How a transaction list treats the offsetting side of reimbursement links
+(the money that came back). Genuine income is never on that side, so
+excluding reimbursements cannot hide it.
+"""
+enum ReimbursementFilter {
+	"""
+	Leave them in. The default, and what omitting the field means.
+	"""
+	INCLUDE
+	"""
+	Drop transactions that are the offsetting side of a reimbursement link.
+	"""
+	EXCLUDE
+	"""
+	Only those.
+	"""
+	ONLY
+}
+
+"""
+The netted figure for the transactions a filter matches, kept apart from
+the period totals on purpose: those keep showing the money that actually
+left the account.
+"""
+type ReimbursementSummary {
+	"""
+	Sum of the magnitudes of the matched expense-side transactions.
+	"""
+	expenseTotal: Decimal!
+	"""
+	How much of that is offset by linked reimbursements, wherever and
+	whenever those landed.
+	"""
+	reimbursed: Decimal!
+	"""
+	`expenseTotal - reimbursed`.
+	"""
+	net: Decimal!
+	"""
+	How many matched transactions are on a link's expense side.
+	"""
+	linkedCount: Int!
+	"""
+	How many of those are only partly offset.
+	"""
+	partiallyReimbursedCount: Int!
 }
 
 type ReviewQueue {
@@ -944,6 +1040,13 @@ type Transaction {
 	"""
 	note: String
 	"""
+	The user-declared link this transaction is on (a reimbursement and
+	the expense it repays), with the offset figures derived from the
+	members' own amounts; `null` when unlinked. Lists prefetch this for a
+	whole page.
+	"""
+	link: TransactionLink
+	"""
 	`null` = not an internal transfer (§4).
 	"""
 	transfer: TransferInfo
@@ -1033,6 +1136,12 @@ input TransactionFilter {
 	Omitted or empty = unconstrained.
 	"""
 	counterpartyKeys: [String!]
+	"""
+	Whether the offsetting side of reimbursement links is included.
+	`None` = `INCLUDE`: reimbursements are counted as the money they are
+	until the caller asks otherwise, so no existing view changes.
+	"""
+	reimbursements: ReimbursementFilter
 }
 
 type TransactionLabel {
@@ -1047,6 +1156,127 @@ type TransactionLabel {
 	reviewReason: ReviewReason
 	proposedCategoryPath: String
 	reasoning: String
+}
+
+"""
+A user-declared link and the figures derived from its members. Nothing
+here is stored: all of it follows the members' current amounts.
+"""
+type TransactionLink {
+	id: UUID!
+	kind: TransactionLinkKind!
+	note: String
+	status: TransactionLinkStatus!
+	currency: String!
+	"""
+	Sum of the expense members' magnitudes.
+	"""
+	expenseTotal: Decimal!
+	"""
+	Sum of the offsetting members' magnitudes.
+	"""
+	offsetTotal: Decimal!
+	"""
+	What actually offsets: the smaller of the two totals.
+	"""
+	reimbursed: Decimal!
+	"""
+	What the expense side still costs after the offset: never negative.
+	"""
+	net: Decimal!
+	"""
+	How much more came back than was paid; zero unless `status` is `OVER`.
+	"""
+	surplus: Decimal!
+	"""
+	Members that could not be found, left out of every figure above.
+	"""
+	missingMembers: Int!
+	members: [TransactionLinkMember!]!
+	updatedAt: DateTime!
+}
+
+input TransactionLinkInput {
+	"""
+	Defaults to `REIMBURSEMENT`.
+	"""
+	kind: TransactionLinkKind
+	"""
+	The side being offset. At least one.
+	"""
+	expenseIds: [UUID!]!
+	"""
+	The side doing the offsetting. At least one.
+	"""
+	offsetIds: [UUID!]!
+	note: String
+}
+
+enum TransactionLinkKind {
+	"""
+	Money paid out, later paid back (wholly or in part) by someone else.
+	"""
+	REIMBURSEMENT
+}
+
+"""
+One transaction in a link, with its share of the offset.
+"""
+type TransactionLinkMember {
+	transactionId: UUID!
+	role: TransactionLinkRole!
+	"""
+	`null` when the transaction no longer exists or is not the caller's.
+	"""
+	bookingDate: Date
+	"""
+	Signed, as on the transaction itself.
+	"""
+	amount: Decimal
+	currency: String
+	counterpartyName: String
+	description: String
+	"""
+	For an expense: how much of it is offset. For an offset: how much of
+	it goes to offsetting. A magnitude, never negative.
+	"""
+	allocated: Decimal!
+	"""
+	For an expense: what it still costs. For an offset: the part that
+	offsets nothing (over-reimbursement). A magnitude.
+	"""
+	remaining: Decimal!
+}
+
+enum TransactionLinkRole {
+	"""
+	The side being offset: the bill that was paid.
+	"""
+	EXPENSE
+	"""
+	The side doing the offsetting: the money that came back.
+	"""
+	OFFSET
+}
+
+enum TransactionLinkStatus {
+	"""
+	The offsetting side exactly covers the expense side.
+	"""
+	FULL
+	"""
+	Something came back, but less than was paid.
+	"""
+	PARTIAL
+	"""
+	More came back than was paid; the excess is `surplus`.
+	"""
+	OVER
+	"""
+	A side has no member left to count (it was removed, or is not
+	visible to the caller): nothing is offset.
+	"""
+	INCOMPLETE
 }
 
 type TransactionPage {

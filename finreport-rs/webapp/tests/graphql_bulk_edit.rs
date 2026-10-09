@@ -24,6 +24,7 @@ use uuid::Uuid;
 use webapp::graphql::current_user::AuthenticatedUser;
 use webapp::graphql::{create_schema, request_with_auth, RawSessionToken};
 use webapp::kafka::labeling::{TOPIC_CATEGORY, TOPIC_LABEL_REQUEST, TOPIC_RULE, TOPIC_USER_LABEL};
+use webapp::kafka::links::TOPIC_TRANSACTION_LINK;
 
 type KafkaContainer = testcontainers::ContainerAsync<testcontainers_modules::kafka::apache::Kafka>;
 
@@ -45,7 +46,7 @@ async fn start_kafka() -> (KafkaContainer, String) {
         .set("bootstrap.servers", &bootstrap)
         .create()
         .expect("admin client");
-    let topics = [TOPIC_USER_LABEL, TOPIC_RULE, TOPIC_CATEGORY, TOPIC_LABEL_REQUEST]
+    let topics = [TOPIC_USER_LABEL, TOPIC_RULE, TOPIC_CATEGORY, TOPIC_LABEL_REQUEST, TOPIC_TRANSACTION_LINK]
         .map(|name| NewTopic::new(name, 1, TopicReplication::Fixed(1)));
     admin
         .create_topics(&topics, &AdminOptions::new().request_timeout(Some(Duration::from_secs(10))))
@@ -1054,4 +1055,342 @@ async fn category_slugs_exact_selects_the_category_itself_and_not_its_children()
     assert_eq!(data["setTransactionsTags"]["matched"], 3);
     assert_eq!(w.tags(own).await, vec!["exact"]);
     assert!(w.tags(in_child).await.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Transaction links (reimbursements)
+// ---------------------------------------------------------------------------
+
+impl World {
+    async fn tx_on(&self, date: &str, amount: &str, name: &str) -> Uuid {
+        common::seed_transaction(&self.db, self.account, date, amount, Some(name)).await
+    }
+
+    async fn link_ok(&self, expense: &[Uuid], offset: &[Uuid]) -> serde_json::Value {
+        let data = self
+            .run_ok(format!(
+                r#"mutation {{ createTransactionLink(input: {{ expenseIds: [{}], offsetIds: [{}], note: "dentist" }}) {{
+                    id status expenseTotal offsetTotal reimbursed net surplus missingMembers
+                    members {{ transactionId role allocated remaining }} }} }}"#,
+                id_list(expense),
+                id_list(offset)
+            ))
+            .await;
+        data["createTransactionLink"].clone()
+    }
+
+    async fn link_of(&self, tx: Uuid) -> serde_json::Value {
+        let data = self
+            .run_ok(format!(
+                r#"{{ transactions(filter: {{ transactionIds: ["{tx}"] }}) {{ items {{ id link {{
+                    id status reimbursed net surplus
+                    members {{ transactionId role allocated remaining counterpartyName }} }} }} }} }}"#
+            ))
+            .await;
+        data["transactions"]["items"][0]["link"].clone()
+    }
+
+    async fn run_err_code(&self, query: String) -> String {
+        let response = self.run(query).await;
+        let error = response.errors.first().expect("expected an error");
+        error
+            .extensions
+            .as_ref()
+            .and_then(|e| e.get("code"))
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| error.message.clone())
+    }
+
+    fn amount(value: &serde_json::Value) -> Decimal {
+        Decimal::from_str(value.as_str().unwrap()).unwrap()
+    }
+}
+
+fn dec(s: &str) -> Decimal {
+    Decimal::from_str(s).unwrap()
+}
+
+#[tokio::test]
+async fn a_partial_reimbursement_is_visible_from_both_sides_and_not_rounded_to_reimbursed() {
+    let w = world().await;
+    let bill = w.tx_on("2024-09-10", "-1000.00", "Praxis Dr. Mueller").await;
+    let back = w.tx_on("2024-10-15", "600.00", "Krankenkasse").await;
+
+    let created = w.link_ok(&[bill], &[back]).await;
+    assert_eq!(created["status"], "PARTIAL");
+    assert_eq!(World::amount(&created["reimbursed"]), dec("600"));
+    assert_eq!(World::amount(&created["net"]), dec("400"));
+
+    // The expense side shows what came back and what it still costs...
+    let on_bill = w.link_of(bill).await;
+    assert_eq!(on_bill["status"], "PARTIAL");
+    let mine = on_bill["members"].as_array().unwrap().iter().find(|m| m["transactionId"] == bill.to_string()).unwrap();
+    assert_eq!((World::amount(&mine["allocated"]), World::amount(&mine["remaining"])), (dec("600"), dec("400")));
+    // ...and the reimbursement side names the expense it offsets.
+    let on_back = w.link_of(back).await;
+    assert_eq!(on_back["id"], on_bill["id"]);
+    let other = on_back["members"].as_array().unwrap().iter().find(|m| m["role"] == "EXPENSE").unwrap();
+    assert_eq!(other["counterpartyName"], "Praxis Dr. Mueller");
+}
+
+#[tokio::test]
+async fn one_reimbursement_spread_over_several_expenses_and_the_reverse() {
+    let w = world().await;
+    // Many expenses, one reimbursement.
+    let (a, b) = (w.tx_on("2024-09-01", "-100.00", "A").await, w.tx_on("2024-09-02", "-300.00", "B").await);
+    let back = w.tx_on("2024-09-20", "200.00", "Friend").await;
+    let created = w.link_ok(&[a, b], &[back]).await;
+    assert_eq!(created["status"], "PARTIAL");
+    let shares: Vec<(String, Decimal)> = created["members"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|m| (m["transactionId"].as_str().unwrap().to_string(), World::amount(&m["allocated"])))
+        .collect();
+    assert!(shares.contains(&(a.to_string(), dec("50"))));
+    assert!(shares.contains(&(b.to_string(), dec("150"))));
+
+    // One expense, several reimbursements.
+    let bill = w.tx_on("2024-09-01", "-900.00", "Hotel").await;
+    let (r1, r2) = (w.tx_on("2024-09-05", "300.00", "P1").await, w.tx_on("2024-09-06", "300.00", "P2").await);
+    let created = w.link_ok(&[bill], &[r1, r2]).await;
+    assert_eq!((World::amount(&created["reimbursed"]), World::amount(&created["net"])), (dec("600"), dec("300")));
+    assert_eq!(w.link_of(r2).await["id"], created["id"]);
+}
+
+#[tokio::test]
+async fn over_reimbursement_caps_the_offset_and_reports_the_surplus() {
+    let w = world().await;
+    let bill = w.tx_on("2024-09-01", "-50.00", "Dinner").await;
+    let back = w.tx_on("2024-09-02", "80.00", "Friends").await;
+    let created = w.link_ok(&[bill], &[back]).await;
+    assert_eq!(created["status"], "OVER");
+    assert_eq!(World::amount(&created["reimbursed"]), dec("50"));
+    assert_eq!(World::amount(&created["net"]), dec("0"));
+    assert_eq!(World::amount(&created["surplus"]), dec("30"));
+}
+
+#[tokio::test]
+async fn linking_never_rewrites_a_period_and_unlinking_restores_the_view_exactly() {
+    let w = world().await;
+    let bill = w.tx_on("2024-09-10", "-1000.00", "Praxis").await;
+    let back = w.tx_on("2024-10-15", "600.00", "Krankenkasse").await;
+
+    let summary = |from: &str, to: &str| {
+        format!(
+            r#"{{ cashflowSummary(filter: {{ startDate: "{from}", endDate: "{to}" }}, granularity: MONTH) {{
+                total {{ income spending net transactionCount }} }} }}"#
+        )
+    };
+    let september_before = w.run_ok(summary("2024-09-01", "2024-09-30")).await;
+    let october_before = w.run_ok(summary("2024-10-01", "2024-10-31")).await;
+    let list_before = w.run_ok(format!(r#"{{ transactions(filter: {{ transactionIds: ["{bill}", "{back}"] }}, sort: {{ field: AMOUNT }}) {{ items {{ id amount link {{ id }} }} }} }}"#)).await;
+
+    let created = w.link_ok(&[bill], &[back]).await;
+    // September still shows the money that left; October the money that came.
+    assert_eq!(w.run_ok(summary("2024-09-01", "2024-09-30")).await, september_before);
+    assert_eq!(w.run_ok(summary("2024-10-01", "2024-10-31")).await, october_before);
+
+    // The netted figure is a separate number, on request.
+    let data = w
+        .run_ok(r#"{ reimbursementSummary(filter: { startDate: "2024-09-01", endDate: "2024-09-30" }) {
+            expenseTotal reimbursed net linkedCount partiallyReimbursedCount } }"#.to_string())
+        .await;
+    let net = &data["reimbursementSummary"];
+    assert_eq!(World::amount(&net["expenseTotal"]), dec("1000"));
+    assert_eq!(World::amount(&net["reimbursed"]), dec("600"));
+    assert_eq!(World::amount(&net["net"]), dec("400"));
+    assert_eq!((net["linkedCount"].as_i64(), net["partiallyReimbursedCount"].as_i64()), (Some(1), Some(1)));
+    // October holds only the reimbursement, which is not an expense there.
+    let october = w
+        .run_ok(r#"{ reimbursementSummary(filter: { startDate: "2024-10-01", endDate: "2024-10-31" }) { linkedCount } }"#.to_string())
+        .await;
+    assert_eq!(october["reimbursementSummary"]["linkedCount"], 0);
+
+    // Removing the link puts everything back, byte for byte.
+    let removed = w
+        .run_ok(format!(r#"mutation {{ removeTransactionLink(id: "{}") }}"#, created["id"].as_str().unwrap()))
+        .await;
+    assert_eq!(removed["removeTransactionLink"], true);
+    assert!(w.link_of(bill).await.is_null() && w.link_of(back).await.is_null());
+    assert_eq!(w.run_ok(summary("2024-09-01", "2024-09-30")).await, september_before);
+    let list_after = w.run_ok(format!(r#"{{ transactions(filter: {{ transactionIds: ["{bill}", "{back}"] }}, sort: {{ field: AMOUNT }}) {{ items {{ id amount link {{ id }} }} }} }}"#)).await;
+    assert_eq!(list_after, list_before);
+    let again = w.run_ok(format!(r#"mutation {{ removeTransactionLink(id: "{}") }}"#, created["id"].as_str().unwrap())).await;
+    assert_eq!(again["removeTransactionLink"], false, "removing twice reports that nothing existed");
+
+    // The tombstone reached the topic and the row is gone.
+    use entity::entities::transaction_link;
+    let id: Uuid = created["id"].as_str().unwrap().parse().unwrap();
+    assert!(transaction_link::Entity::find_by_id(id).one(w.db.as_ref()).await.unwrap().is_none());
+}
+
+#[tokio::test]
+async fn the_reimbursement_filter_leaves_out_reimbursements_but_never_genuine_income() {
+    let w = world().await;
+    let salary = w.tx_on("2024-09-25", "2000.00", "Employer").await;
+    let bill = w.tx_on("2024-09-10", "-1000.00", "Praxis").await;
+    let back = w.tx_on("2024-09-28", "600.00", "Krankenkasse").await;
+    w.link_ok(&[bill], &[back]).await;
+    let (cat, _slug) = common::seed_category(&w.db, "linkinc", "Link income", "income").await;
+    for tx in [salary, back] {
+        common::seed_transaction_label(&w.db, tx, Some(cat), "user", "resolved").await;
+    }
+
+    let range = r#"startDate: "2024-09-01", endDate: "2024-09-30""#;
+    let income = |extra: &str| format!(r#"{{ cashflowSummary(filter: {{ {range}, direction: INCOME {extra} }}, granularity: MONTH) {{ total {{ income transactionCount }} }} }}"#);
+    let total = |v: &serde_json::Value| (World::amount(&v["cashflowSummary"]["total"]["income"]), v["cashflowSummary"]["total"]["transactionCount"].as_i64().unwrap());
+
+    // Default: included. The view a user already reviewed does not change.
+    assert_eq!(total(&w.run_ok(income("")).await), (dec("2600"), 2));
+    assert_eq!(total(&w.run_ok(income(", reimbursements: INCLUDE")).await), (dec("2600"), 2));
+    // Excluded: the salary stays.
+    assert_eq!(total(&w.run_ok(income(", reimbursements: EXCLUDE")).await), (dec("2000"), 1));
+    assert_eq!(total(&w.run_ok(income(", reimbursements: ONLY")).await), (dec("600"), 1));
+
+    // The list.
+    let ids = |v: &serde_json::Value| -> Vec<String> {
+        v["transactions"]["items"].as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect()
+    };
+    let list = |extra: &str| format!(r#"{{ transactions(filter: {{ {range}, direction: INCOME {extra} }}) {{ items {{ id }} totalCount }} }}"#);
+    assert_eq!(ids(&w.run_ok(list(", reimbursements: EXCLUDE")).await), vec![salary.to_string()]);
+    assert_eq!(ids(&w.run_ok(list(", reimbursements: ONLY")).await), vec![back.to_string()]);
+    assert_eq!(w.run_ok(list("")).await["transactions"]["totalCount"], 2);
+
+    // The cashflow graph (a second hand-rolled SQL twin).
+    let graph = |extra: &str| format!(r#"{{ cashflowGraph(filter: {{ {range} {extra} }}) {{ links {{ value }} }} }}"#);
+    let graph_total = |v: &serde_json::Value| -> Decimal {
+        v["cashflowGraph"]["links"].as_array().unwrap().iter().map(|l| World::amount(&l["value"])).sum()
+    };
+    assert!(graph_total(&w.run_ok(graph(", reimbursements: EXCLUDE")).await) < graph_total(&w.run_ok(graph("")).await));
+
+    // The category breakdown.
+    let breakdown = |extra: &str| format!(r#"{{ categoryBreakdown(filter: {{ {range} {extra} }}, kind: INCOME) {{ rows {{ category {{ slug }} amount transactionCount }} }} }}"#);
+    let row = |v: &serde_json::Value| -> (Decimal, i64) {
+        let r = v["categoryBreakdown"]["rows"].as_array().unwrap().iter().map(|r| r.clone()).next().expect("one income row");
+        (World::amount(&r["amount"]), r["transactionCount"].as_i64().unwrap())
+    };
+    assert_eq!(row(&w.run_ok(breakdown("")).await), (dec("2600"), 2));
+    assert_eq!(row(&w.run_ok(breakdown(", reimbursements: EXCLUDE")).await), (dec("2000"), 1));
+
+    // Recurring accepts the filter (a filter that matches nothing yields no series).
+    let recurring = w.run_ok(format!(r#"{{ recurringSeries(filter: {{ {range}, reimbursements: ONLY }}) {{ series {{ id }} }} }}"#)).await;
+    assert!(recurring["recurringSeries"]["series"].as_array().unwrap().is_empty());
+
+    // The bulk mutations honour it too: tagging "only reimbursements" touches just that one.
+    let tagged = w
+        .run_ok(format!(r#"mutation {{ setTransactionsTags(filter: {{ {range}, direction: INCOME, reimbursements: ONLY }}, tags: ["back"]) {{ matched applied failed splitsCleared }} }}"#))
+        .await;
+    assert_eq!(tagged["setTransactionsTags"]["matched"], 1);
+    assert_eq!(w.tags(back).await, vec!["back"]);
+    assert!(w.tags(salary).await.is_empty());
+}
+
+#[tokio::test]
+async fn a_link_cannot_reach_another_users_transactions_nor_be_managed_by_them() {
+    let w = world().await;
+    let mine = w.tx_on("2024-09-10", "-100.00", "Shop").await;
+    let back = w.tx_on("2024-09-20", "100.00", "Friend").await;
+
+    let (other_user, other_name) = common::seed_user(&w.db, "link-other", "pw").await;
+    let other_account = common::seed_account(&w.db, "EUR", "Other").await;
+    common::link(&w.db, other_user, other_account).await;
+    let theirs = common::seed_transaction(&w.db, other_account, "2024-09-20", "100.00", Some("Theirs")).await;
+
+    // A link to a transaction in an account the caller does not own is refused, as if it did not exist.
+    let q = format!(
+        r#"mutation {{ createTransactionLink(input: {{ expenseIds: ["{mine}"], offsetIds: ["{theirs}"] }}) {{ id }} }}"#
+    );
+    let response = w.run(q).await;
+    assert!(!response.errors.is_empty());
+    use entity::entities::transaction_link_member;
+    let leaked = transaction_link_member::Entity::find()
+        .filter(transaction_link_member::Column::TransactionId.eq(theirs))
+        .all(w.db.as_ref())
+        .await
+        .unwrap();
+    assert!(leaked.is_empty());
+
+    // A link of mine is invisible to, and unmanageable by, the other user.
+    let created = w.link_ok(&[mine], &[back]).await;
+    let link_id = created["id"].as_str().unwrap().to_string();
+    let intruder = AuthenticatedUser { user_id: other_user, username: other_name, account_ids: vec![other_account] };
+    let run_as_intruder = |q: String| {
+        let schema = w.schema.clone();
+        let intruder = intruder.clone();
+        async move { schema.execute(authed(Request::new(q), &intruder)).await }
+    };
+    let seen = run_as_intruder(format!(r#"{{ transactionLink(id: "{link_id}") {{ id }} }}"#)).await;
+    assert!(seen.errors.is_empty());
+    assert_eq!(seen.data.into_json().unwrap()["transactionLink"], serde_json::Value::Null);
+    let removed = run_as_intruder(format!(r#"mutation {{ removeTransactionLink(id: "{link_id}") }}"#)).await;
+    assert_eq!(removed.data.into_json().unwrap()["removeTransactionLink"], false);
+    let hijack = run_as_intruder(format!(
+        r#"mutation {{ updateTransactionLink(id: "{link_id}", input: {{ expenseIds: ["{theirs}"], offsetIds: ["{theirs}"] }}) {{ id }} }}"#
+    ))
+    .await;
+    assert!(!hijack.errors.is_empty());
+    let list = run_as_intruder(r#"{ transactionLinks { id } }"#.to_string()).await;
+    assert!(list.data.into_json().unwrap()["transactionLinks"].as_array().unwrap().is_empty());
+    assert!(!w.link_of(mine).await.is_null(), "my link is untouched");
+}
+
+#[tokio::test]
+async fn link_rules_are_enforced_at_write_time() {
+    let w = world().await;
+    let bill = w.tx_on("2024-09-10", "-100.00", "Shop").await;
+    let other_bill = w.tx_on("2024-09-11", "-50.00", "Shop 2").await;
+    let back = w.tx_on("2024-09-20", "100.00", "Friend").await;
+    let back2 = w.tx_on("2024-09-21", "20.00", "Friend 2").await;
+
+    let create = |e: &[Uuid], o: &[Uuid]| {
+        format!(r#"mutation {{ createTransactionLink(input: {{ expenseIds: [{}], offsetIds: [{}] }}) {{ id }} }}"#, id_list(e), id_list(o))
+    };
+    // Wrong sign on a side.
+    assert_eq!(w.run_err_code(create(&[back], &[bill])).await, "\"VALIDATION\"");
+    // Nothing on one side.
+    assert_eq!(w.run_err_code(create(&[bill], &[])).await, "\"VALIDATION\"");
+
+    // One transaction, one link.
+    let created = w.link_ok(&[bill], &[back]).await;
+    assert_eq!(w.run_err_code(create(&[other_bill], &[back])).await, "\"ALREADY_LINKED\"");
+
+    // Updating replaces the members: a second reimbursement joins the same link.
+    let id = created["id"].as_str().unwrap();
+    let updated = w
+        .run_ok(format!(
+            r#"mutation {{ updateTransactionLink(id: "{id}", input: {{ expenseIds: ["{bill}"], offsetIds: ["{back}", "{back2}"] }}) {{ id status offsetTotal }} }}"#
+        ))
+        .await;
+    assert_eq!(updated["updateTransactionLink"]["id"], id);
+    assert_eq!(World::amount(&updated["updateTransactionLink"]["offsetTotal"]), dec("120"));
+    assert_eq!(updated["updateTransactionLink"]["status"], "OVER");
+}
+
+#[tokio::test]
+async fn candidates_rank_the_likely_counterpart_first_and_skip_linked_ones() {
+    let w = world().await;
+    let bill = w.tx_on("2024-09-10", "-1000.00", "Praxis").await;
+    let likely = w.tx_on("2024-09-25", "980.00", "Krankenkasse").await;
+    let unrelated = w.tx_on("2024-09-26", "12.00", "Refund shop").await;
+    let wrong_sign = w.tx_on("2024-09-12", "-1000.00", "Another bill").await;
+    let linked = w.tx_on("2024-09-11", "1000.00", "Already used").await;
+    let linked_bill = w.tx_on("2024-09-01", "-1000.00", "Other bill").await;
+    w.link_ok(&[linked_bill], &[linked]).await;
+
+    let data = w
+        .run_ok(format!(r#"{{ linkCandidates(transactionId: "{bill}") {{ score transaction {{ id }} }} }}"#))
+        .await;
+    let ids: Vec<String> = data["linkCandidates"].as_array().unwrap().iter().map(|c| c["transaction"]["id"].as_str().unwrap().to_string()).collect();
+    assert_eq!(ids.first().map(String::as_str), Some(likely.to_string().as_str()));
+    assert!(ids.contains(&unrelated.to_string()));
+    assert!(!ids.contains(&wrong_sign.to_string()), "same sign cannot offset");
+    assert!(!ids.contains(&linked.to_string()), "already linked");
+    assert!(!ids.contains(&bill.to_string()));
+
+    // Searching widens to the whole history by name.
+    let found = w
+        .run_ok(format!(r#"{{ linkCandidates(transactionId: "{bill}", search: "krankenkasse") {{ transaction {{ id }} }} }}"#))
+        .await;
+    assert_eq!(found["linkCandidates"].as_array().unwrap().len(), 1);
 }

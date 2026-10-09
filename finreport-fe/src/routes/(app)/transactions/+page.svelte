@@ -6,6 +6,7 @@
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import TransactionFilters from '$lib/components/TransactionFilters.svelte';
 	import NoMatchingTransactions from '$lib/components/NoMatchingTransactions.svelte';
+	import ReimbursementNote from '$lib/components/ReimbursementNote.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import type { PeriodSelection } from '$lib/period';
 	import PeriodOptions from '$lib/components/PeriodOptions.svelte';
@@ -91,6 +92,10 @@
 			Failed to load transactions from the GraphQL API.
 		</p>
 	{:else if data.transactions}
+		<ReimbursementNote
+			summary={data.reimbursementSummary}
+			currency={data.accounts[0]?.currency ?? 'EUR'}
+		/>
 		<Card>
 			{#if data.transactions.totalCount === 0}
 				<NoMatchingTransactions {filtered} onclear={() => onFiltersChange(clearedFilters())} />

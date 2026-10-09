@@ -100,7 +100,71 @@ export interface Transaction {
 	transfer: TransferInfo | null;
 	/** Always present; `isRecurring` may be `false` (iteration 3 §4). */
 	recurring: RecurringInfo;
+	/** The user-declared link (reimbursement <-> expense) this transaction is on; `null` when unlinked. */
+	link?: TransactionLink | null;
 }
+
+export type TransactionLinkKind = 'REIMBURSEMENT';
+export type TransactionLinkRole = 'EXPENSE' | 'OFFSET';
+/** FULL: covered exactly. PARTIAL: less came back than was paid. OVER: more came back (see `surplus`). INCOMPLETE: a side has no visible member. */
+export type TransactionLinkStatus = 'FULL' | 'PARTIAL' | 'OVER' | 'INCOMPLETE';
+
+export interface TransactionLinkMember {
+	transactionId: UUID;
+	role: TransactionLinkRole;
+	/** `null` when the transaction no longer exists or is not the caller's. */
+	bookingDate: DateString | null;
+	/** Signed, as on the transaction. */
+	amount: Decimal | null;
+	currency: string | null;
+	counterpartyName: string | null;
+	description: string | null;
+	/** Expense: how much of it is offset. Offset: how much of it goes to offsetting. Magnitude. */
+	allocated: Decimal;
+	/** Expense: what it still costs. Offset: the part that offsets nothing. Magnitude. */
+	remaining: Decimal;
+}
+
+/** Every figure is derived from the members' current amounts; none is stored. */
+export interface TransactionLink {
+	id: UUID;
+	kind: TransactionLinkKind;
+	note: string | null;
+	status: TransactionLinkStatus;
+	currency: string;
+	expenseTotal: Decimal;
+	offsetTotal: Decimal;
+	reimbursed: Decimal;
+	net: Decimal;
+	surplus: Decimal;
+	missingMembers: number;
+	members: TransactionLinkMember[];
+}
+
+export interface TransactionLinkInput {
+	kind?: TransactionLinkKind;
+	expenseIds: UUID[];
+	offsetIds: UUID[];
+	note?: string | null;
+}
+
+export interface LinkCandidate {
+	transaction: Transaction;
+	/** 0..1; closer in amount and nearer in date scores higher. */
+	score: number;
+}
+
+/** The netted figure beside (never instead of) the period totals. */
+export interface ReimbursementSummary {
+	expenseTotal: Decimal;
+	reimbursed: Decimal;
+	net: Decimal;
+	linkedCount: number;
+	partiallyReimbursedCount: number;
+}
+
+/** `INCLUDE` is what omitting the field means. */
+export type ReimbursementFilter = 'INCLUDE' | 'EXCLUDE' | 'ONLY';
 
 export interface TransactionFilter {
 	startDate?: DateString | null;
@@ -132,6 +196,8 @@ export interface TransactionFilter {
 	transactionIds?: UUID[] | null;
 	/** Normalised counterparty keys (`Transaction.counterpartyKey`), OR-ed. */
 	counterpartyKeys?: string[] | null;
+	/** Whether the offsetting side of reimbursement links is counted. Omitted = `INCLUDE`. */
+	reimbursements?: ReimbursementFilter | null;
 }
 
 export interface PageInput {

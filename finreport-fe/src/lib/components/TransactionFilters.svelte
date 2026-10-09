@@ -82,9 +82,15 @@
 		{ key: 'needsReview', label: 'Needs review', yes: 'Needs review', no: 'Reviewed' },
 		{ key: 'uncategorized', label: 'Uncategorized', yes: 'Uncategorized', no: 'Categorized' }
 	];
+	const REIMBURSEMENT_CHOICES: { v: string; text: string }[] = [
+		{ v: 'include', text: 'Included' },
+		{ v: 'exclude', text: 'Left out' },
+		{ v: 'only', text: 'Only these' }
+	];
 	const advancedActive = $derived(
 		value.categorySlugs.length > 0 ||
 			value.tags.length > 0 ||
+			value.reimbursements !== undefined ||
 			FLAG_KEYS.some((k) => value[k] !== undefined)
 	);
 
@@ -245,6 +251,36 @@
 							</div>
 						</fieldset>
 					{/each}
+					<fieldset class="flex items-center gap-3">
+						<legend class="sr-only">Reimbursements</legend>
+						<span class="w-28 text-sm text-slate-700" aria-hidden="true">Reimbursements</span>
+						<div
+							class="inline-flex divide-x divide-slate-300 overflow-hidden rounded-md border border-slate-300"
+						>
+							{#each REIMBURSEMENT_CHOICES as choice (choice.v)}
+								<label class="relative">
+									<input
+										type="radio"
+										class="peer sr-only"
+										name="tf-reimbursements"
+										value={choice.v}
+										checked={(value.reimbursements ?? 'include') === choice.v}
+										onchange={() =>
+											onchange({
+												...value,
+												reimbursements:
+													choice.v === 'include' ? undefined : (choice.v as 'exclude' | 'only')
+											})}
+									/>
+									<span class="{segment} block">{choice.text}</span>
+								</label>
+							{/each}
+						</div>
+					</fieldset>
+					<p class="max-w-xs text-xs text-slate-500">
+						Money paid back for a linked expense is not income. Leave it out to see only genuine
+						income.
+					</p>
 				</div>
 			</div>
 		</details>

@@ -264,6 +264,43 @@ impl MutationRoot {
         crate::graphql::display_aliases::remove(ctx, kind, &key).await
     }
 
+    /// Declares that the offsetting transactions repay the expense ones.
+    /// Every transaction must be the caller's, expenses negative and
+    /// offsets positive, one currency, and none already on another link.
+    async fn create_transaction_link(
+        &self,
+        ctx: &Context<'_>,
+        input: crate::graphql::links::TransactionLinkInput,
+    ) -> GqlResult<crate::graphql::links::TransactionLink> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::links::create_transaction_link(db, publisher(ctx), user, input).await
+    }
+
+    /// Replaces a link's members and note wholesale.
+    async fn update_transaction_link(
+        &self,
+        ctx: &Context<'_>,
+        id: crate::graphql::scalars::Uuid,
+        input: crate::graphql::links::TransactionLinkInput,
+    ) -> GqlResult<crate::graphql::links::TransactionLink> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::links::update_transaction_link(db, publisher(ctx), user, id.0, input).await
+    }
+
+    /// Deletes a link; the linked transactions are untouched. True when a
+    /// link existed.
+    async fn remove_transaction_link(
+        &self,
+        ctx: &Context<'_>,
+        id: crate::graphql::scalars::Uuid,
+    ) -> GqlResult<bool> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::links::remove_transaction_link(db, publisher(ctx), user, id.0).await
+    }
+
     /// `createGoal` (iteration 4 §4).
     async fn create_goal(
         &self,

@@ -15,6 +15,7 @@ pub mod http;
 mod insights;
 mod labels;
 pub mod learning_exemptions;
+pub mod links;
 mod loaders;
 mod mutations;
 mod queries;
@@ -92,4 +93,5 @@ pub fn request_with_auth(
         .data(LabelSplitCache::default())
         .data(rules::RuleReachCache::default())
         .data(display_aliases::AliasCache::default())
+        .data(links::LinkCache::default())
 }

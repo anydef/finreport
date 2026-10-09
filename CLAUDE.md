@@ -237,6 +237,29 @@ the label-resolution and learned-rule-lifecycle diagrams.
   `finreport-be-projector` — same image, same Kafka broker, static LAN IP
   `192.168.100.49`, no new port.
 
+## Transaction links (reimbursements)
+
+A user-declared tie between transactions that offset one another, on its own
+compacted topic `finreport.transaction-link` (keyed by link id, `prevent_destroy`,
+mirrored in `terraform/kafka/main.tf` and `docker-compose.local.yml`), projected
+into `transaction_link` + `transaction_link_member` by `projection::links`. It is
+**not** the detector's `transaction-insight` (so no detector run can overwrite it)
+and not the transfer flag. A link has a `kind` (only `reimbursement` today) and
+members with a role (`expense` / `offset`); a pair is the common case, but one
+expense with several reimbursements and one reimbursement over several expenses
+are each a single link. Amounts are never stored: `links::compute` derives the
+offset from the members' own amounts, `min(offsets, expenses)` shared pro rata,
+the excess of an over-reimbursement reported as `surplus`.
+
+- Linking never rewrites a period. `Transaction.link` annotates every row,
+  `reimbursementSummary(filter)` gives the netted figure separately, and
+  `TransactionFilter.reimbursements` (`INCLUDE` default | `EXCLUDE` | `ONLY`)
+  concerns the offsetting side only. Removing a link is a tombstone and restores
+  the unlinked view exactly.
+- A transaction is on at most one link (enforced at write time, not in the
+  projection, so a replay cannot fail on it).
+- The list resolvers prefetch `Transaction.link` per page (`graphql::links::prefetch_page`).
+
 ## Backend database profiles
 
 The backend can run locally against either Postgres:

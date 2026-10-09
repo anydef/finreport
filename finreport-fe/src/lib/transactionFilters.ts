@@ -7,10 +7,15 @@
  * The panel owns these search params on every page that shows it, so a
  * filtered view is linkable: `accountIds`, `categorySlugs`, `tags`, `search`,
  * `amountMin`, `amountMax`, `recurring`, `transfer`, `needsReview`,
- * `uncategorized`.
+ * `uncategorized`, `reimbursements` (`exclude` | `only`; absent = include).
  */
 import { expandSelectedSlugs } from '$lib/categoryTree';
 import type { Category, Decimal, TransactionFilter } from '$lib/graphql/types';
+import {
+	reimbursementChoiceFromParam,
+	reimbursementFilterValue,
+	type ReimbursementChoice
+} from '$lib/reimbursement';
 
 /** A flag: `true` = only matching, `false` = only non-matching, `undefined` = don't care. */
 export type Tri = boolean | undefined;
@@ -32,6 +37,13 @@ export interface PanelFilters {
 	transfer: Tri;
 	needsReview: Tri;
 	uncategorized: Tri;
+	/**
+	 * Whether the offsetting side of reimbursement links counts. Absent means
+	 * included, so a view nobody changed shows the money that actually moved;
+	 * `exclude` is how an income view leaves reimbursements out (genuine income
+	 * is never on that side), `only` lists just the reimbursements.
+	 */
+	reimbursements: ReimbursementChoice;
 }
 
 /** Every search param the panel owns; everything else passes through untouched. */
@@ -42,6 +54,7 @@ export const PANEL_PARAMS = [
 	'search',
 	'amountMin',
 	'amountMax',
+	'reimbursements',
 	...FLAG_KEYS
 ] as const;
 
@@ -57,7 +70,8 @@ export function clearedFilters(): PanelFilters {
 		recurring: undefined,
 		transfer: undefined,
 		needsReview: undefined,
-		uncategorized: undefined
+		uncategorized: undefined,
+		reimbursements: undefined
 	};
 }
 
@@ -104,7 +118,8 @@ export function parsePanelFilters(params: URLSearchParams): PanelFilters {
 		recurring: triFromParam(params.get('recurring')),
 		transfer: triFromParam(params.get('transfer')),
 		needsReview: triFromParam(params.get('needsReview')),
-		uncategorized: triFromParam(params.get('uncategorized'))
+		uncategorized: triFromParam(params.get('uncategorized')),
+		reimbursements: reimbursementChoiceFromParam(params.get('reimbursements'))
 	};
 }
 
@@ -126,6 +141,7 @@ export function writePanelFilters(
 	if (filters.search.trim()) next.set('search', filters.search.trim());
 	if (filters.amountMin !== undefined) next.set('amountMin', filters.amountMin);
 	if (filters.amountMax !== undefined) next.set('amountMax', filters.amountMax);
+	if (filters.reimbursements) next.set('reimbursements', filters.reimbursements);
 	for (const key of FLAG_KEYS) {
 		const tri = filters[key];
 		if (tri !== undefined) next.set(key, String(tri));
@@ -150,6 +166,8 @@ export function toTransactionFilter(
 	if (filters.search) out.search = filters.search;
 	if (filters.amountMin !== undefined) out.amountMin = filters.amountMin;
 	if (filters.amountMax !== undefined) out.amountMax = filters.amountMax;
+	const reimbursements = reimbursementFilterValue(filters.reimbursements);
+	if (reimbursements) out.reimbursements = reimbursements;
 	for (const key of FLAG_KEYS) {
 		if (filters[key] !== undefined) out[key] = filters[key];
 	}
@@ -218,6 +236,12 @@ export function activeFilters(filters: PanelFilters, labels: Labels): ActiveFilt
 	const range = describeAmountRange(filters);
 	if (range) out.push({ id: 'amount', label: range });
 	if (filters.search) out.push({ id: 'search', label: `Search: "${filters.search}"` });
+	if (filters.reimbursements) {
+		out.push({
+			id: 'reimbursements',
+			label: filters.reimbursements === 'exclude' ? 'Reimbursements left out' : 'Reimbursements only'
+		});
+	}
 	for (const key of FLAG_KEYS) {
 		const tri = filters[key];
 		if (tri !== undefined) out.push({ id: `flag:${key}`, label: FLAG_LABELS[key][tri ? 0 : 1] });
@@ -244,6 +268,8 @@ export function removeFilter(filters: PanelFilters, id: string): PanelFilters {
 			return { ...filters, amountMin: undefined, amountMax: undefined };
 		case 'search':
 			return { ...filters, search: '' };
+		case 'reimbursements':
+			return { ...filters, reimbursements: undefined };
 		case 'flag':
 			return FLAG_KEYS.includes(value as FlagKey) ? { ...filters, [value]: undefined } : filters;
 		default:

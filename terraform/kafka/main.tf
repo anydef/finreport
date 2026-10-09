@@ -266,6 +266,12 @@ resource "kafka_topic" "learning_exemption" {
 # finreport-redpanda-init.
 resource "kafka_topic" "display_alias" {
   name               = "finreport.display-alias"
+# Transaction links: a user-declared tie between transactions that offset one
+# another (a reimbursement and the expense it repays), keyed by the link's own
+# UUID. Compacted; a tombstone deletes the link. Mirrored in
+# docker-compose.local.yml's finreport-redpanda-init.
+resource "kafka_topic" "transaction_link" {
+  name               = "finreport.transaction-link"
   partitions         = 1
   replication_factor = 1
 

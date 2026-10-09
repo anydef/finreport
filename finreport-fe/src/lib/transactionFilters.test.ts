@@ -246,3 +246,40 @@ describe('layerSelection', () => {
 		});
 	});
 });
+
+describe('the reimbursements filter', () => {
+	it('is absent by default, so nothing about an existing view changes', () => {
+		expect(clearedFilters().reimbursements).toBeUndefined();
+		expect(toTransactionFilter(clearedFilters(), [])).not.toHaveProperty('reimbursements');
+		expect(parsePanelFilters(new URLSearchParams()).reimbursements).toBeUndefined();
+		expect(hasActiveFilters(clearedFilters())).toBe(false);
+	});
+
+	it('round-trips exclude and only through the search params and onto the GraphQL enum', () => {
+		for (const [choice, graphql] of [
+			['exclude', 'EXCLUDE'],
+			['only', 'ONLY']
+		] as const) {
+			const panel = { ...clearedFilters(), reimbursements: choice };
+			const params = writePanelFilters(panel);
+			expect(params.get('reimbursements')).toBe(choice);
+			expect(parsePanelFilters(params).reimbursements).toBe(choice);
+			expect(toTransactionFilter(panel, [])).toMatchObject({ reimbursements: graphql });
+		}
+	});
+
+	it('ignores an unknown param value', () => {
+		expect(
+			parsePanelFilters(new URLSearchParams('reimbursements=maybe')).reimbursements
+		).toBeUndefined();
+	});
+
+	it('shows a chip that removes just that filter, and leaves other filters alone', () => {
+		const panel = { ...clearedFilters(), reimbursements: 'exclude' as const, search: 'rent' };
+		const chips = activeFilters(panel, { accounts: [], categories: [] });
+		expect(chips.map((c) => c.label)).toContain('Reimbursements left out');
+		const removed = removeFilter(panel, 'reimbursements');
+		expect(removed.reimbursements).toBeUndefined();
+		expect(removed.search).toBe('rent');
+	});
+});
