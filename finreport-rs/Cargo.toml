@@ -1,3 +1,16 @@
 [workspace]
 resolver = "3"
 members = ["webapp", "comdirect-rs", "utils", "categorizer", "migration", "entity", "amazon-orders"]
+
+# Debug symbols were ~90% of the shared CARGO_TARGET_DIR, which reached 58 GB in
+# a single day of parallel work and filled the disk twice. Panics and test
+# failures here are read through `tracing` output and backtraces, not a step
+# debugger, so the symbols were paying no rent. Set `debug = 1` locally (or
+# export RUSTFLAGS=-Cdebuginfo=1) if you ever do need to attach one.
+[profile.dev]
+debug = 0
+
+# Test and build-script artifacts dominate the directory by count, so they get
+# the same treatment rather than quietly reintroducing the problem.
+[profile.test]
+debug = 0
