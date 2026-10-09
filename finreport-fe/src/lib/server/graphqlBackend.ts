@@ -33,6 +33,10 @@ import transactionsMock from '$lib/graphql/mocks/transactions.json';
 import categoriesMock from '$lib/graphql/mocks/categories.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
 import categoryBreakdownChildrenMock from '$lib/graphql/mocks/category-breakdown-children.json';
+import {
+	savingsBreakdownMock,
+	savingsBreakdownChildrenMock
+} from '$lib/graphql/savingsBreakdownMock';
 import cashflowGraphCategoryMock from '$lib/graphql/mocks/cashflow-graph-category.json';
 import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
@@ -973,10 +977,7 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: {
-					data: mockLinkCandidates(
-						body.variables,
-						mockFixtureItems() as unknown as LinkableMock[]
-					)
+					data: mockLinkCandidates(body.variables, mockFixtureItems() as unknown as LinkableMock[])
 				},
 				setCookies: []
 			};

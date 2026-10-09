@@ -47,6 +47,37 @@ function toBar(row: CategoryBreakdownRow, kind: BreakdownBar['kind']): Breakdown
 }
 
 /**
+ * Combine the expense and saving breakdowns the dashboard fetches for one
+ * period into the single list the category card shows.
+ *
+ * `share` arrives computed **per kind** (§5), so each response's rows already
+ * sum to 1 on their own - concatenating them raw would print percentages
+ * adding up to 200%. Shares are therefore recomputed here over the combined
+ * total, which is also the honest reading once both kinds sit in one list: a
+ * row's percentage is its slice of everything that left the current account,
+ * whether it was spent or set aside.
+ *
+ * `uncategorized` and `needsReview` come from the expense response only. They
+ * carry no kind (the resolver reports them separately for exactly that
+ * reason), so taking them from both sides would double-count them.
+ */
+export function mergeExpenseAndSavingBreakdowns(
+	expense: CategoryBreakdown,
+	saving: CategoryBreakdown | undefined
+): CategoryBreakdown {
+	if (!saving || saving.rows.length === 0) return expense;
+	const rows = [...expense.rows, ...saving.rows];
+	const total = rows.reduce((sum, row) => sum + Math.abs(decimalToNumber(row.amount)), 0);
+	return {
+		...expense,
+		rows: rows.map((row) => ({
+			...row,
+			share: total === 0 ? 0 : Math.abs(decimalToNumber(row.amount)) / total
+		}))
+	};
+}
+
+/**
  * Shape a `CategoryBreakdown` into bars sorted by amount (largest first),
  * with `uncategorized`/`needsReview` appended last when present — they are
  * never part of the ranked "top categories", just always-visible totals

@@ -19,7 +19,8 @@
 		childBreakdownFilter,
 		childLevel,
 		drilldownForBar,
-		type BreakdownBar
+		type BreakdownBar,
+		mergeExpenseAndSavingBreakdowns
 	} from '$lib/breakdownShaping';
 	import { createGraphqlClient } from '$lib/graphqlClient';
 	import { CATEGORY_BREAKDOWN_QUERY } from '$lib/graphql/queries';
@@ -206,17 +207,22 @@
 		return result.data.categoryBreakdown as CategoryBreakdownData;
 	}
 
-	const loadBreakdownChildren = (slug: string) => loadChildrenOfKind(slug, 'EXPENSE');
-	const loadSavingsChildren = (slug: string) => loadChildrenOfKind(slug, 'SAVING');
+	/**
+	 * The card mixes both kinds, so the kind to ask for comes from the expanded
+	 * row's own category. Guessing EXPENSE would make a savings row expand to
+	 * nothing.
+	 */
+	function loadBreakdownChildren(slug: string): Promise<CategoryBreakdownData> {
+		const kind = data.categories.find((c) => c.slug === slug)?.kind;
+		return loadChildrenOfKind(slug, kind === 'SAVING' ? 'SAVING' : 'EXPENSE');
+	}
 
 	function onSankeyDimensionChange(dimension: 'counterparty' | 'category') {
 		navigate({ sankeyDimension: dimension, resetDrilldown: true });
 	}
 
 	const bars = $derived(data.summary ? shapeCashflowBars(data.summary, data.granularity) : []);
-	const graph = $derived(
-		data.graph ? shapeCashflowGraph(data.graph, data.accounts) : undefined
-	);
+	const graph = $derived(data.graph ? shapeCashflowGraph(data.graph, data.accounts) : undefined);
 	const periodLabel = $derived(`${data.start} to ${data.end}`);
 	const filtered = $derived(hasActiveFilters(data.panel));
 	const hasDrilldown = $derived(
@@ -307,28 +313,16 @@
 			</Card>
 		{/if}
 
+		<!-- Savings categories sit in this card rather than beside it: a
+		     `kind: SAVING` row is money that left the current account just as
+		     an expense did. Asking for EXPENSE alone was why savings appeared
+		     nowhere on the dashboard despite being labelled. -->
 		{#if data.breakdown}
-			<Card title="Spending by category">
+			<Card title="Spending and savings by category">
 				<CategoryBreakdown
-					breakdown={data.breakdown}
+					breakdown={mergeExpenseAndSavingBreakdowns(data.breakdown, data.savingsBreakdown)}
 					categories={data.categories}
 					loadChildren={loadBreakdownChildren}
-					scopeKey={JSON.stringify(data.breakdownFilter)}
-					onSelect={onBreakdownSelect}
-				/>
-			</Card>
-		{/if}
-
-		{#if data.savingsBreakdown && data.savingsBreakdown.rows.length > 0}
-			<Card title="Savings by category">
-				<p class="mb-3 text-sm text-slate-500">
-					Money put aside in this period. Kept out of the spending totals above, because it is
-					still yours.
-				</p>
-				<CategoryBreakdown
-					breakdown={data.savingsBreakdown}
-					categories={data.categories}
-					loadChildren={loadSavingsChildren}
 					scopeKey={JSON.stringify(data.breakdownFilter)}
 					onSelect={onBreakdownSelect}
 				/>
