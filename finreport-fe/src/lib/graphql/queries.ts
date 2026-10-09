@@ -89,6 +89,7 @@ const TRANSACTION_ITEM_FIELDS = `			id
 				}
 			}
 			tags
+			note
 			transfer {
 				counterpartTransactionId
 				counterpartAccountId
@@ -457,6 +458,14 @@ mutation SetTransactionTags($transactionId: UUID!, $tags: [String!]!) {
 	setTransactionTags(transactionId: $transactionId, tags: $tags) {
 		id
 		tags
+	}
+}`;
+
+export const SET_TRANSACTION_NOTE_MUTATION = `
+mutation SetTransactionNote($transactionId: UUID!, $note: String) {
+	setTransactionNote(transactionId: $transactionId, note: $note) {
+		id
+		note
 	}
 }`;
 

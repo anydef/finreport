@@ -43,7 +43,27 @@ pub(crate) fn counterparty_key_list(filter: &TransactionFilter) -> Option<Vec<St
     filter.counterparty_keys.clone().filter(|k| !k.is_empty())
 }
 
-/// Hand-rolled SQL twin of the `transactionIds`/`counterpartyKeys`/`amountMin`/`amountMax`
+/// The filter's `categorySlugsExact`, if it names any. Empty is
+/// unconstrained, as `counterpartyKeys`.
+pub(crate) fn category_slug_exact_list(filter: &TransactionFilter) -> Option<Vec<String>> {
+    filter.category_slugs_exact.clone().filter(|s| !s.is_empty())
+}
+
+/// `categorySlugsExact`'s predicate: the transaction's whole label, or a valid
+/// split part, sits in a category whose slug is **exactly** one of `$param`
+/// (a `text[]`) - no descendants, unlike `categorySlugs`. Matches on the slug
+/// itself, so it needs no category lookup and can be used by the hand-rolled
+/// SQL twins too. Same label-or-split semantics as [`category_match_condition`].
+fn category_exact_sql(alias: &str, param: &str) -> String {
+    format!(
+        "(EXISTS (SELECT 1 FROM transaction_label tl JOIN category c ON c.id = tl.category_id \
+           WHERE tl.transaction_id = {alias}.id AND c.slug = ANY({param})) \
+         OR EXISTS (SELECT 1 FROM transaction_split ts JOIN category c ON c.id = ts.category_id \
+           WHERE ts.transaction_id = {alias}.id AND ts.invalid = false AND c.slug = ANY({param})))"
+    )
+}
+
+/// Hand-rolled SQL twin of the `transactionIds`/`counterpartyKeys`/`categorySlugsExact`/`amountMin`/`amountMax`
 /// predicates in [`build_condition`], for the aggregation queries in
 /// `cashflow` that do not go through sea-orm. `alias` is the transaction
 /// table's alias (or name) in that query; `first_param` is the next free
@@ -65,6 +85,11 @@ pub(crate) fn id_and_amount_sql(
     if let Some(keys) = counterparty_key_list(filter) {
         sql.push_str(&format!(" AND {alias}.counterparty_key = ANY(${idx})"));
         params.push(keys.into());
+        idx += 1;
+    }
+    if let Some(slugs) = category_slug_exact_list(filter) {
+        sql.push_str(&format!(" AND {}", category_exact_sql(alias, &format!("${idx}"))));
+        params.push(slugs.into());
         idx += 1;
     }
     let (min, max) = amount_magnitude_bounds(filter);
@@ -91,6 +116,12 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
     }
     if let Some(keys) = counterparty_key_list(filter) {
         condition = condition.add(transaction::Column::CounterpartyKey.is_in(keys));
+    }
+    if let Some(slugs) = category_slug_exact_list(filter) {
+        condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
+            category_exact_sql("transaction", "$1"),
+            vec![sea_orm::Value::from(slugs)],
+        ));
     }
     let (amount_min, amount_max) = amount_magnitude_bounds(filter);
     if let Some(min) = amount_min {
@@ -541,6 +572,51 @@ mod tests {
             ..Default::default()
         });
         assert!(!without.contains(r#""counterparty_key" IN"#), "{without}");
+    }
+
+    #[test]
+    fn category_slugs_exact_sql_matches_the_slug_itself_and_empty_is_unconstrained() {
+        let filter = TransactionFilter {
+            counterparty_keys: Some(vec!["lidl".into()]),
+            category_slugs_exact: Some(vec!["food".into()]),
+            amount_max: Some(dec("20")),
+            ..Default::default()
+        };
+        let (sql, params) = id_and_amount_sql("t", &filter, 1);
+        assert!(sql.starts_with(" AND t.counterparty_key = ANY($1) AND (EXISTS"), "{sql}");
+        assert!(sql.contains("c.slug = ANY($2)"), "{sql}");
+        assert!(sql.contains("ts.invalid = false"), "{sql}");
+        assert!(sql.ends_with(" AND ABS(t.amount) <= $3"), "{sql}");
+        assert_eq!(params.len(), 3);
+
+        let empty = TransactionFilter {
+            category_slugs_exact: Some(vec![]),
+            ..Default::default()
+        };
+        assert_eq!(category_slug_exact_list(&empty), None);
+        assert!(id_and_amount_sql("t", &empty, 1).0.is_empty());
+    }
+
+    #[test]
+    fn category_slugs_exact_condition_never_walks_descendants() {
+        use sea_orm::{DbBackend, QueryTrait};
+        let sql = |filter: &TransactionFilter| {
+            transaction::Entity::find()
+                .filter(build_condition(&[Uuid::nil()], filter))
+                .build(DbBackend::Postgres)
+                .to_string()
+        };
+        let with = sql(&TransactionFilter {
+            category_slugs_exact: Some(vec!["food".into()]),
+            ..Default::default()
+        });
+        assert!(with.contains("c.slug = ANY("), "{with}");
+        assert!(with.contains("food"), "{with}");
+        let without = sql(&TransactionFilter {
+            category_slugs_exact: Some(vec![]),
+            ..Default::default()
+        });
+        assert!(!without.contains("c.slug"), "{without}");
     }
 
     fn order_sql(sort: Option<TransactionSort>) -> String {

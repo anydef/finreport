@@ -345,6 +345,22 @@ impl MutationRoot {
         .await
     }
 
+    /// Sets the free-text note on a transaction; `null` or blank clears it.
+    /// Commentary only: category, tags, splits and recurring are untouched
+    /// and labelling never reads it.
+    async fn set_transaction_note(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+        note: Option<String>,
+    ) -> GqlResult<Transaction> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let publisher = publisher(ctx);
+        let scoped_ids = scoped_account_ids(user, None)?;
+        crate::graphql::insights::set_transaction_note(db, publisher, &scoped_ids, transaction_id.0, note).await
+    }
+
     /// `null` clears the override and lets auto-detection decide again
     /// (§4).
     async fn set_transaction_recurring(

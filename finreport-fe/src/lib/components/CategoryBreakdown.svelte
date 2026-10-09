@@ -8,7 +8,9 @@
 	 *   them under the parent; a level-2 row with children expands the same way;
 	 * - the bar itself drills down: the owning page narrows the transaction
 	 *   list (`onSelect`), for categories and for the synthetic Uncategorized /
-	 *   Needs review rows alike.
+	 *   Needs review rows alike. A child level's "(no subcategory)" row drills
+	 *   into the parent's *own* transactions (`categorySlugsExact`), not its
+	 *   children's.
 	 *
 	 * Plain Tailwind div bars rather than a LayerChart chart — this is a ranked
 	 * list with a width-encoded magnitude, not an axis-based chart, and it needs
@@ -155,20 +157,14 @@
 					{:else}
 						<span class="h-7 w-7 shrink-0" aria-hidden="true"></span>
 					{/if}
-					{#if bar.own}
-						<div class="flex w-full min-w-0 flex-col gap-1 px-1 py-1 text-slate-500">
-							{@render rowBody(bar, maxAmount)}
-						</div>
-					{:else}
-						<button
-							type="button"
-							class="flex w-full min-w-0 flex-col gap-1 rounded px-1 py-1 text-left hover:bg-slate-50 {focusRing}"
-							title="Show transactions: {bar.label}"
-							onclick={() => onSelect?.(bar)}
-						>
-							{@render rowBody(bar, maxAmount)}
-						</button>
-					{/if}
+					<button
+						type="button"
+						class="flex w-full min-w-0 flex-col gap-1 rounded px-1 py-1 text-left hover:bg-slate-50 {focusRing}"
+						title="Show transactions: {bar.label}"
+						onclick={() => onSelect?.(bar)}
+					>
+						{@render rowBody(bar, maxAmount)}
+					</button>
 				</div>
 				{#if open && bar.slug !== null}
 					{@const state = children[bar.slug]}

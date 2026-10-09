@@ -40,6 +40,32 @@ export function applyTagsResult(tx: Transaction, result: { tags: string[] }): Tr
 	return { ...tx, tags: result.tags };
 }
 
+export function applyNoteResult(tx: Transaction, result: { note: string | null }): Transaction {
+	return { ...tx, note: result.note };
+}
+
+/** Longest note the backend accepts, in characters (`MAX_NOTE_CHARS`). */
+export const MAX_NOTE_LENGTH = 2000;
+
+/** What a draft would be saved as: trimmed, and `null` when blank (which clears the note). */
+export function noteToSave(draft: string): string | null {
+	const trimmed = draft.trim();
+	return trimmed === '' ? null : trimmed;
+}
+
+/** Whether saving `draft` would change the stored note. */
+export function isNoteDirty(saved: string | null | undefined, draft: string): boolean {
+	return noteToSave(draft) !== (saved?.trim() ? saved.trim() : null);
+}
+
+/** A message when `draft` cannot be saved, else `null`. */
+export function noteProblem(draft: string): string | null {
+	const length = [...draft.trim()].length;
+	return length > MAX_NOTE_LENGTH
+		? `A note can be at most ${MAX_NOTE_LENGTH} characters (this one is ${length}).`
+		: null;
+}
+
 export function applyRecurringResult(
 	tx: Transaction,
 	result: { recurring: RecurringInfo }

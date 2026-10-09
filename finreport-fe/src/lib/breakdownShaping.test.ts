@@ -82,6 +82,14 @@ describe('drilldownForBar', () => {
 		});
 	});
 
+	it('drills the "(no subcategory)" row into the exact category, not its descendants', () => {
+		const children = loadChildren().food;
+		const own = shapeChildBreakdown(children, 'food').find((b) => b.own)!;
+		expect(drilldownForBar(own)).toEqual({ categorySlugsExact: ['food'] });
+		const sibling = shapeChildBreakdown(children, 'food').find((b) => b.slug === 'food.groceries')!;
+		expect(drilldownForBar(sibling)).toEqual({ categorySlugs: ['food.groceries'] });
+	});
+
 	it('narrows the needs-review bar to held labels', () => {
 		expect(drilldownForBar(bars.find((b) => b.kind === 'needs-review')!)).toEqual({
 			needsReview: true

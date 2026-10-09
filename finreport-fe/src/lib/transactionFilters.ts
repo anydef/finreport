@@ -267,6 +267,8 @@ export function layerSelection(
 	}
 	// A selected "Uncategorized" node contradicts category slugs from the panel, and vice versa.
 	if (selection.uncategorized) delete out.categorySlugs;
-	if (selection.categorySlugs?.length) delete out.uncategorized;
+	if (selection.categorySlugs?.length || selection.categorySlugsExact?.length) {
+		delete out.uncategorized;
+	}
 	return out as Partial<TransactionFilter>;
 }

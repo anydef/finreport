@@ -1,7 +1,7 @@
 <script lang="ts">
 	/**
 	 * Transaction list. Rows are `TransactionItem`s; clicking one opens the
-	 * detail modal where category, tags and the recurring flag are edited.
+	 * detail modal where category, tags, the recurring flag and the note are edited.
 	 * The table owns the mutations: each response is folded into a local
 	 * override of that row (see `transactionEdit.ts`), so the list shows the
 	 * change at once without a refetch. Overrides are dropped whenever the
@@ -30,12 +30,18 @@
 	import {
 		CATEGORIES_QUERY,
 		SET_TRANSACTION_CATEGORY_MUTATION,
+		SET_TRANSACTION_NOTE_MUTATION,
 		SET_TRANSACTION_RECURRING_MUTATION,
 		SET_TRANSACTION_TAGS_MUTATION,
 		SET_TRANSACTIONS_CATEGORY_MUTATION,
 		SET_TRANSACTIONS_TAGS_MUTATION
 	} from '$lib/graphql/queries';
-	import { applyCategoryResult, applyRecurringResult, applyTagsResult } from '$lib/transactionEdit';
+	import {
+		applyCategoryResult,
+		applyNoteResult,
+		applyRecurringResult,
+		applyTagsResult
+	} from '$lib/transactionEdit';
 	import type {
 		BulkEditResult,
 		Category,
@@ -196,6 +202,17 @@
 		edited[base.id] = applyTagsResult(edited[base.id] ?? base, res);
 	}
 
+	async function setNote(note: string | null) {
+		if (!selected) return;
+		const base = selected;
+		const res = await mutate<{ note: string | null }>(
+			SET_TRANSACTION_NOTE_MUTATION,
+			{ transactionId: base.id, note },
+			'setTransactionNote'
+		);
+		edited[base.id] = applyNoteResult(edited[base.id] ?? base, res);
+	}
+
 	async function setRecurring(recurring: boolean | null) {
 		if (!selected) return;
 		const base = selected;
@@ -309,6 +326,7 @@
 		onSetCategory={setCategory}
 		onSetTags={setTags}
 		onSetRecurring={setRecurring}
+		onSetNote={setNote}
 		onclose={() => (selectedId = null)}
 	/>
 {/if}

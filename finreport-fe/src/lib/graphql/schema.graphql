@@ -616,6 +616,12 @@ type Mutation {
 	"""
 	setTransactionsTags(filter: TransactionFilter!, tags: [String!]!): BulkEditResult!
 	"""
+	Sets the free-text note on a transaction; `null` or blank clears it.
+	Commentary only: category, tags, splits and recurring are untouched
+	and labelling never reads it.
+	"""
+	setTransactionNote(transactionId: UUID!, note: String): Transaction!
+	"""
 	`null` clears the override and lets auto-detection decide again
 	(§4).
 	"""
@@ -867,6 +873,11 @@ type Transaction {
 	"""
 	tags: [String!]!
 	"""
+	Free-text commentary the user left on the transaction; `null` when
+	none. Never consulted by labelling.
+	"""
+	note: String
+	"""
 	`null` = not an internal transfer (§4).
 	"""
 	transfer: TransferInfo
@@ -909,6 +920,14 @@ input TransactionFilter {
 	Iteration 2 (§5): OR-ed; includes descendants of each slug.
 	"""
 	categorySlugs: [String!]
+	"""
+	Like `categorySlugs` but **exact**: only transactions labelled with
+	one of these categories themselves (a split counts via its parts),
+	never their descendants. OR-ed among themselves, AND-ed with every
+	other condition. Omitted or empty = unconstrained. Used to drill into a
+	parent's own "(no subcategory)" transactions.
+	"""
+	categorySlugsExact: [String!]
 	"""
 	`true` ⇒ no label at all (distinct from `needsReview`).
 	"""

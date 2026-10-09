@@ -746,3 +746,311 @@ async fn child_category_slug_must_be_parent_slug_plus_one_segment() {
     let ensured = w.run(ensure_category("gym2", "EXPENSE", Some(&parent))).await;
     assert_eq!(error_code(&ensured).as_deref(), Some("VALIDATION"), "{:?}", ensured.errors);
 }
+
+// ---------------------------------------------------------------------------
+// setTransactionNote: free-text commentary riding in the whole-state record
+// ---------------------------------------------------------------------------
+
+impl World {
+    async fn note(&self, tx: Uuid) -> Option<String> {
+        self.user_label(tx).await.and_then(|l| l.note)
+    }
+
+    async fn set_note(&self, tx: Uuid, note: &str) -> async_graphql::Response {
+        let arg = if note == "null" { "null".to_string() } else { format!("{note:?}") };
+        self.run(format!(
+            r#"mutation {{ setTransactionNote(transactionId: "{tx}", note: {arg}) {{ id note }} }}"#
+        ))
+        .await
+    }
+
+    /// The last published whole-state record for `tx`.
+    fn last_record(&self, tx: Uuid) -> serde_json::Value {
+        let external = tx.to_string();
+        read_user_labels(&self.bootstrap)
+            .into_iter()
+            .rev()
+            .find(|r| r["external_id"] == external.as_str())
+            .expect("a published user-label record")
+    }
+}
+
+#[tokio::test]
+async fn setting_a_note_round_trips_and_preserves_category_tags_recurring_and_splits() {
+    let w = world().await;
+    let (cat_id, slug) = common::seed_category(&w.db, "expense.note-cat", "Note", "EXPENSE").await;
+    let (_, slug_b) = common::seed_category(&w.db, "expense.note-b", "NoteB", "EXPENSE").await;
+    let plain = w.tx("-20.00").await;
+    let split = w.tx("-30.00").await;
+
+    w.run_ok(format!(r#"mutation {{ setTransactionCategory(transactionId: "{plain}", categorySlug: "{slug}") {{ id }} }}"#)).await;
+    w.run_ok(format!(r#"mutation {{ setTransactionTags(transactionId: "{plain}", tags: ["trip"]) {{ id }} }}"#)).await;
+    w.run_ok(format!(r#"mutation {{ setTransactionRecurring(transactionId: "{plain}", recurring: true) {{ id }} }}"#)).await;
+    w.run_ok(format!(
+        r#"mutation {{ splitTransaction(transactionId: "{split}", parts: [{{amount: "-10.00", categorySlug: "{slug}"}}, {{amount: "-20.00", categorySlug: "{slug_b}"}}]) {{ id }} }}"#
+    ))
+    .await;
+
+    let data = w.set_note(plain, "  Paid cash, ask Anna for half \n").await;
+    assert!(data.errors.is_empty(), "{:?}", data.errors);
+    assert_eq!(
+        data.data.into_json().unwrap()["setTransactionNote"]["note"],
+        "Paid cash, ask Anna for half",
+        "trimmed, and returned by the mutation"
+    );
+    w.run_ok(format!(r#"mutation {{ setTransactionNote(transactionId: "{split}", note: "shared") {{ id }} }}"#)).await;
+
+    // The projection row: note set, everything else untouched.
+    let label = w.user_label(plain).await.unwrap();
+    assert_eq!(label.note.as_deref(), Some("Paid cash, ask Anna for half"));
+    assert_eq!(label.category_id, Some(cat_id));
+    assert_eq!(label.recurring, Some(true));
+    assert_eq!(w.tags(plain).await, vec!["trip"]);
+    assert_eq!(w.split_count(split).await, 2);
+
+    // The published whole-state record must carry all of it, or a replay of
+    // the log would erase them.
+    let record = w.last_record(plain);
+    assert_eq!(record["note"], "Paid cash, ask Anna for half");
+    assert_eq!(record["category_slug"], slug.as_str());
+    assert_eq!(record["tags"], serde_json::json!(["trip"]));
+    assert_eq!(record["recurring"], true);
+    let record = w.last_record(split);
+    assert_eq!(record["note"], "shared");
+    assert_eq!(record["parts"].as_array().unwrap().len(), 2, "{record}");
+
+    // Readable on the list query.
+    let data = w
+        .run_ok(format!(r#"{{ transactions(filter: {{ transactionIds: ["{plain}"] }}) {{ items {{ note }} }} }}"#))
+        .await;
+    assert_eq!(data["transactions"]["items"][0]["note"], "Paid cash, ask Anna for half");
+    let untouched = w.tx("-1.00").await;
+    let data = w
+        .run_ok(format!(r#"{{ transactions(filter: {{ transactionIds: ["{untouched}"] }}) {{ items {{ note }} }} }}"#))
+        .await;
+    assert!(data["transactions"]["items"][0]["note"].is_null());
+}
+
+#[tokio::test]
+async fn clearing_a_note_keeps_the_rest_and_bad_notes_are_rejected() {
+    let w = world().await;
+    let (cat_id, slug) = common::seed_category(&w.db, "expense.note-clear", "Clear", "EXPENSE").await;
+    let tx = w.tx("-20.00").await;
+    w.run_ok(format!(r#"mutation {{ setTransactionCategory(transactionId: "{tx}", categorySlug: "{slug}") {{ id }} }}"#)).await;
+
+    assert!(w.set_note(tx, "remember").await.errors.is_empty());
+    assert_eq!(w.note(tx).await.as_deref(), Some("remember"));
+
+    // `null` clears.
+    assert!(w.set_note(tx, "null").await.errors.is_empty());
+    assert_eq!(w.note(tx).await, None);
+    assert_eq!(w.user_label(tx).await.unwrap().category_id, Some(cat_id));
+    let record = w.last_record(tx);
+    assert!(record["note"].is_null(), "{record}");
+    assert_eq!(record["category_slug"], slug.as_str());
+
+    // Blank is "no note" too, not an empty string.
+    assert!(w.set_note(tx, "x").await.errors.is_empty());
+    assert!(w.set_note(tx, "   ").await.errors.is_empty());
+    assert_eq!(w.note(tx).await, None);
+
+    // Over-long is refused outright and changes nothing.
+    assert!(w.set_note(tx, "keep").await.errors.is_empty());
+    let too_long = w.set_note(tx, &"x".repeat(2001)).await;
+    assert_eq!(error_code(&too_long).as_deref(), Some("VALIDATION"), "{:?}", too_long.errors);
+    assert_eq!(w.note(tx).await.as_deref(), Some("keep"));
+}
+
+#[tokio::test]
+async fn a_note_on_a_transaction_without_a_label_row_creates_a_commentary_only_override() {
+    let w = world().await;
+    let tx = w.tx("-5.00").await;
+    assert!(w.user_label(tx).await.is_none());
+    assert!(w.set_note(tx, "just a thought").await.errors.is_empty());
+    let label = w.user_label(tx).await.unwrap();
+    assert_eq!(label.note.as_deref(), Some("just a thought"));
+    assert_eq!(label.category_id, None, "a note must never pin a category");
+    assert_eq!(label.recurring, None);
+}
+
+#[tokio::test]
+async fn every_other_user_label_mutation_carries_the_note_through() {
+    let w = world().await;
+    let (_, slug) = common::seed_category(&w.db, "expense.note-keep", "Keep", "EXPENSE").await;
+    let (_, slug_b) = common::seed_category(&w.db, "expense.note-keep-b", "KeepB", "EXPENSE").await;
+    let tx = w.tx("-30.00").await;
+    assert!(w.set_note(tx, "do not lose me").await.errors.is_empty());
+
+    let mutations = [
+        ("setTransactionCategory", format!(r#"setTransactionCategory(transactionId: "{tx}", categorySlug: "{slug}") {{ id }}"#)),
+        ("setTransactionTags", format!(r#"setTransactionTags(transactionId: "{tx}", tags: ["a"]) {{ id }}"#)),
+        ("setTransactionRecurring", format!(r#"setTransactionRecurring(transactionId: "{tx}", recurring: false) {{ id }}"#)),
+        (
+            "splitTransaction",
+            format!(
+                r#"splitTransaction(transactionId: "{tx}", parts: [{{amount: "-10.00", categorySlug: "{slug}"}}, {{amount: "-20.00", categorySlug: "{slug_b}"}}]) {{ id }}"#
+            ),
+        ),
+        ("unsplitTransaction", format!(r#"unsplitTransaction(transactionId: "{tx}") {{ id }}"#)),
+        ("setTransactionCategory again", format!(r#"setTransactionCategory(transactionId: "{tx}", categorySlug: "{slug_b}") {{ id }}"#)),
+        ("clearTransactionCategory", format!(r#"clearTransactionCategory(transactionId: "{tx}") {{ id }}"#)),
+    ];
+    for (name, body) in mutations {
+        w.run_ok(format!("mutation {{ {body} }}")).await;
+        assert_eq!(w.note(tx).await.as_deref(), Some("do not lose me"), "{name} dropped the note");
+    }
+
+    // The bulk paths share the cores, but prove it end to end.
+    w.run_ok(bulk_category(&[tx], &slug)).await;
+    assert_eq!(w.note(tx).await.as_deref(), Some("do not lose me"), "bulk category dropped the note");
+    w.run_ok(bulk_tags(&[tx], r#""b""#)).await;
+    assert_eq!(w.note(tx).await.as_deref(), Some("do not lose me"), "bulk tags dropped the note");
+
+    // And on the log, not just the projection: every record after the note
+    // was first written still carries it.
+    let external = tx.to_string();
+    let records: Vec<_> = read_user_labels(&w.bootstrap)
+        .into_iter()
+        .filter(|r| r["external_id"] == external.as_str())
+        .collect();
+    assert!(records.len() >= 10, "{} records", records.len());
+    for record in &records {
+        assert_eq!(record["note"], "do not lose me", "{record}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// categorySlugsExact
+// ---------------------------------------------------------------------------
+
+impl World {
+    async fn seed_child_category(&self, parent: Uuid, parent_slug: &str, leaf: &str) -> (Uuid, String) {
+        let id = Uuid::new_v4();
+        let slug = format!("{parent_slug}.{leaf}");
+        entity::entities::category::ActiveModel {
+            id: Set(id),
+            slug: Set(slug.clone()),
+            parent_id: Set(Some(parent)),
+            name: Set(leaf.to_string()),
+            kind: Set("EXPENSE".to_string()),
+            depth: Set(2),
+            sort_order: Set(0),
+            archived: Set(false),
+            origin: Set("seed".to_string()),
+            owner_user_id: Set(None),
+            revision: Set(Utc::now().into()),
+        }
+        .insert(self.db.as_ref())
+        .await
+        .unwrap();
+        (id, slug)
+    }
+}
+
+#[tokio::test]
+async fn category_slugs_exact_selects_the_category_itself_and_not_its_children() {
+    let w = world().await;
+    let (parent, parent_slug) = common::seed_category(&w.db, "expense.exact", "Parent", "EXPENSE").await;
+    let (child, child_slug) = w.seed_child_category(parent, &parent_slug, "kid").await;
+    let (_, other_slug) = common::seed_category(&w.db, "expense.exact-other", "Other", "EXPENSE").await;
+
+    let own = w.tx("-10.00").await;
+    let own_big = w.tx("-300.00").await;
+    let in_child = w.tx("-11.00").await;
+    let split_into_parent = w.tx("-40.00").await;
+    let split_only_child = w.tx("-50.00").await;
+    let unlabelled = w.tx("-12.00").await;
+    common::seed_transaction_label(&w.db, own, Some(parent), "user", "resolved").await;
+    common::seed_transaction_label(&w.db, own_big, Some(parent), "llm", "resolved").await;
+    common::seed_transaction_label(&w.db, in_child, Some(child), "user", "resolved").await;
+    w.seed_split(split_into_parent, 0, "-15.00", parent).await;
+    w.seed_split(split_into_parent, 1, "-25.00", child).await;
+    w.seed_split(split_only_child, 0, "-50.00", child).await;
+    let _ = unlabelled;
+
+    // Descendant-expanding filter, for contrast: everything under the parent.
+    assert_eq!(
+        w.filtered_ids(&format!(r#"categorySlugs: ["{parent_slug}"]"#)).await,
+        sorted_ids(&[own, own_big, in_child, split_into_parent, split_only_child])
+    );
+    // Exact: the parent's own transactions (a split counts through its parts).
+    assert_eq!(
+        w.filtered_ids(&format!(r#"categorySlugsExact: ["{parent_slug}"]"#)).await,
+        sorted_ids(&[own, own_big, split_into_parent]),
+        "no child-only transactions"
+    );
+    assert_eq!(
+        w.filtered_ids(&format!(r#"categorySlugsExact: ["{child_slug}"]"#)).await,
+        sorted_ids(&[in_child, split_into_parent, split_only_child])
+    );
+    // OR-ed among themselves.
+    assert_eq!(
+        w.filtered_ids(&format!(r#"categorySlugsExact: ["{parent_slug}", "{child_slug}"]"#)).await,
+        sorted_ids(&[own, own_big, in_child, split_into_parent, split_only_child])
+    );
+    // AND-ed with the rest.
+    assert_eq!(
+        w.filtered_ids(&format!(r#"categorySlugsExact: ["{parent_slug}"] amountMin: "100""#)).await,
+        sorted_ids(&[own_big])
+    );
+    assert_eq!(
+        w.filtered_ids(&format!(r#"categorySlugsExact: ["{parent_slug}"] labelSources: [USER]"#)).await,
+        sorted_ids(&[own])
+    );
+    assert_eq!(
+        w.filtered_ids(&format!(r#"categorySlugsExact: ["{parent_slug}"] categorySlugs: ["{child_slug}"]"#)).await,
+        sorted_ids(&[split_into_parent]),
+        "both category filters must hold"
+    );
+    // Unknown slug matches nothing; empty list is unconstrained.
+    assert!(w.filtered_ids(r#"categorySlugsExact: ["no.such.slug"]"#).await.is_empty());
+    assert!(w.filtered_ids(&format!(r#"categorySlugsExact: ["{other_slug}"]"#)).await.is_empty());
+    let all = w.filtered_ids("").await;
+    assert_eq!(w.filtered_ids("categorySlugsExact: []").await, all);
+
+    // The aggregations honour it too (hand-rolled SQL twins).
+    let summary = w
+        .run_ok(format!(
+            r#"{{ cashflowSummary(filter: {{ categorySlugsExact: ["{parent_slug}"] startDate: "2024-07-01" endDate: "2024-07-31" }}, granularity: MONTH) {{
+                buckets {{ spending transactionCount }} }} }}"#
+        ))
+        .await;
+    let bucket = &summary["cashflowSummary"]["buckets"][0];
+    assert_eq!(bucket["transactionCount"], 3);
+    assert_eq!(Decimal::from_str(bucket["spending"].as_str().unwrap()).unwrap(), Decimal::from(350));
+    let graph = w
+        .run_ok(format!(
+            r#"{{ cashflowGraph(filter: {{ categorySlugsExact: ["{parent_slug}"] startDate: "2024-07-01" endDate: "2024-07-31" }}) {{ links {{ value }} }} }}"#
+        ))
+        .await;
+    let total: Decimal = graph["cashflowGraph"]["links"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| Decimal::from_str(l["value"].as_str().unwrap()).unwrap())
+        .sum();
+    assert!(total > Decimal::ZERO);
+
+    // Recurring overview and the breakdown take the filter without error.
+    w.run_ok(format!(
+        r#"{{ recurringSeries(filter: {{ categorySlugsExact: ["{parent_slug}"] }}) {{ series {{ id }} }} }}"#
+    ))
+    .await;
+    let breakdown = w
+        .run_ok(format!(
+            r#"{{ categoryBreakdown(filter: {{ categorySlugsExact: ["{parent_slug}"] }}, level: 2) {{ rows {{ category {{ slug }} amount }} }} }}"#
+        ))
+        .await;
+    let rows = breakdown["categoryBreakdown"]["rows"].as_array().unwrap();
+    assert!(!rows.is_empty(), "{breakdown}");
+
+    // A bulk edit driven by the exact filter touches only the parent's own.
+    let data = w
+        .run_ok(format!(
+            r#"mutation {{ setTransactionsTags(filter: {{ categorySlugsExact: ["{parent_slug}"] }}, tags: ["exact"]) {{ matched applied }} }}"#
+        ))
+        .await;
+    assert_eq!(data["setTransactionsTags"]["matched"], 3);
+    assert_eq!(w.tags(own).await, vec!["exact"]);
+    assert!(w.tags(in_child).await.is_empty());
+}

@@ -94,6 +94,8 @@ export interface Transaction {
 	splits: TransactionSplit[];
 	/** Sorted; `[]` when untagged (iteration 3 §4). */
 	tags: string[];
+	/** Free-text commentary; `null` when none. Never affects labelling. */
+	note?: string | null;
 	/** `null` = not an internal transfer (iteration 3 §4). */
 	transfer: TransferInfo | null;
 	/** Always present; `isRecurring` may be `false` (iteration 3 §4). */
@@ -110,6 +112,8 @@ export interface TransactionFilter {
 	hasCounterparty?: boolean | null;
 	/** OR-ed; includes descendants. */
 	categorySlugs?: string[] | null;
+	/** Like `categorySlugs` but exact: the categories themselves, no descendants. */
+	categorySlugsExact?: string[] | null;
 	/** `true` = no label at all. */
 	uncategorized?: boolean | null;
 	needsReview?: boolean | null;

@@ -2,8 +2,10 @@
 	/**
 	 * Detail view of one transaction with its classification editable in place:
 	 * category (`setTransactionCategory`), tags (`setTransactionTags`, whole-set
-	 * replace) and the recurring flag (`setTransactionRecurring`). Each edit is
-	 * saved as it is made; the parent owns the mutations and hands back the
+	 * replace), the recurring flag (`setTransactionRecurring`) and a free-text
+	 * note (`setTransactionNote`; commentary only, labelling never reads it).
+	 * Category, tags and the flag are saved as they are made, the note on its
+	 * Save button; the parent owns the mutations and hands back the
 	 * updated transaction through the `transaction` prop. A rejected callback
 	 * shows an error here and leaves the dialog open. Splits are shown, not
 	 * edited (SplitEditor is its own dialog).
@@ -16,7 +18,14 @@
 	import { categoryOptionGroups } from '$lib/categoryTree';
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 	import { labelSourceBadge, needsReviewBadge } from '$lib/labelBadge';
-	import { categoryChangeWarning } from '$lib/transactionEdit';
+	import { untrack } from 'svelte';
+	import {
+		categoryChangeWarning,
+		isNoteDirty,
+		MAX_NOTE_LENGTH,
+		noteProblem,
+		noteToSave
+	} from '$lib/transactionEdit';
 	import type { Category, Transaction } from '$lib/graphql/types';
 
 	interface Props {
@@ -27,6 +36,7 @@
 		onSetCategory: (slug: string) => Promise<void>;
 		onSetTags: (tags: string[]) => Promise<void>;
 		onSetRecurring: (recurring: boolean | null) => Promise<void>;
+		onSetNote: (note: string | null) => Promise<void>;
 		onclose: () => void;
 	}
 
@@ -37,6 +47,7 @@
 		onSetCategory,
 		onSetTags,
 		onSetRecurring,
+		onSetNote,
 		onclose
 	}: Props = $props();
 
@@ -44,6 +55,11 @@
 	let errorMessage = $state('');
 	/** A category picked while splits exist, waiting for the user to confirm. */
 	let pendingSlug = $state<string | null>(null);
+
+	/** The textarea's content; seeded once, then owned by the user until saved. */
+	let noteDraft = $state(untrack(() => tx.note ?? ''));
+	const noteDirty = $derived(isNoteDirty(tx.note, noteDraft));
+	const noteIssue = $derived(noteProblem(noteDraft));
 
 	const groups = $derived(categoryOptionGroups(categories ?? []));
 	const pendingLabel = $derived(
@@ -82,6 +98,12 @@
 	}
 
 	const saveTags = (tags: string[]) => run(() => onSetTags(tags), 'Failed to save tags');
+	const saveNote = () =>
+		run(async () => {
+			await onSetNote(noteToSave(noteDraft));
+			// Show what was stored (trimmed), so the button settles to "saved".
+			noteDraft = noteToSave(noteDraft) ?? '';
+		}, 'Failed to save the note');
 	const saveRecurring = (next: boolean | null) =>
 		run(() => onSetRecurring(next), 'Failed to update recurring flag');
 
@@ -209,6 +231,35 @@
 			Recurring (click to cycle auto / yes / no)
 		</h3>
 		<div><RecurringBadge recurring={tx.recurring} onToggle={saveRecurring} /></div>
+	</section>
+
+	<section class="flex flex-col gap-2" aria-labelledby="tx-note-heading">
+		<h3 id="tx-note-heading" class="text-xs font-medium text-slate-500">Note</h3>
+		<textarea
+			bind:value={noteDraft}
+			rows="3"
+			aria-labelledby="tx-note-heading"
+			aria-invalid={noteIssue !== null}
+			placeholder="Anything worth remembering about this transaction. Does not affect its category."
+			class="focus-visible:outline-brand w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+		></textarea>
+		<div class="flex items-center gap-2">
+			<button
+				type="button"
+				disabled={busy || !noteDirty || noteIssue !== null}
+				onclick={saveNote}
+				class="{btn} bg-brand hover:bg-brand/90 text-white"
+			>
+				{noteToSave(noteDraft) === null && tx.note ? 'Clear note' : 'Save note'}
+			</button>
+			{#if noteIssue}
+				<p role="alert" class="text-xs text-[var(--color-spending)]">{noteIssue}</p>
+			{:else if !noteDirty && tx.note}
+				<p class="text-xs text-slate-400">Saved</p>
+			{:else}
+				<p class="text-xs text-slate-400">{noteDraft.length}/{MAX_NOTE_LENGTH}</p>
+			{/if}
+		</div>
 	</section>
 
 	{#if errorMessage}

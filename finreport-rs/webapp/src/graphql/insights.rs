@@ -740,21 +740,115 @@ pub async fn set_transaction_recurring(
     Ok(to_graphql_transaction(&txn))
 }
 
-/// Shared by `labels.rs`'s iteration-2 mutations to preserve `tags`/
-/// `recurring` across a category/split change (§2.1 read-modify-write;
-/// WP0 addendum §9.7 flagged the previous `Vec::new()`/`None` as a bug for
-/// WP-B to fix).
-pub(crate) async fn preserved_tags_and_recurring(
+/// Shared by `labels.rs`'s iteration-2 mutations to preserve `tags`,
+/// `recurring` and `note` across a category/split change (§2.1
+/// read-modify-write). The note was previously dropped to `None` by all
+/// three of them, silently erasing it on every category change.
+pub(crate) async fn preserved_tags_recurring_note(
     db: &DatabaseConnection,
     transaction_id: Uuid,
-) -> async_graphql::Result<(Vec<String>, Option<bool>)> {
+) -> async_graphql::Result<(Vec<String>, Option<bool>, Option<String>)> {
     let state = load_current_state(db, transaction_id).await?;
-    Ok((state.tags, state.recurring))
+    Ok((state.tags, state.recurring, state.note))
+}
+
+/// Longest note accepted, in characters.
+pub const MAX_NOTE_CHARS: usize = 2000;
+
+/// Trims a raw note; blank means "no note". Rejects over-long text rather
+/// than truncating the user's words.
+pub fn normalize_note(raw: Option<&str>) -> async_graphql::Result<Option<String>> {
+    let Some(trimmed) = raw.map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    if trimmed.chars().count() > MAX_NOTE_CHARS {
+        return Err(async_graphql::Error::new(format!(
+            "a note is at most {MAX_NOTE_CHARS} characters"
+        ))
+        .extend_with(|_, e| e.set("code", "VALIDATION")));
+    }
+    Ok(Some(trimmed.to_string()))
+}
+
+/// `Transaction.note`: the free-text commentary, `null` when none. Lives on
+/// `transaction_user_label`, so it is a resolver rather than a column — which
+/// is also why every `to_graphql_transaction` copy serves it without edits.
+pub async fn note_for(
+    db: &DatabaseConnection,
+    transaction_id: Uuid,
+) -> async_graphql::Result<Option<String>> {
+    Ok(transaction_user_label::Entity::find_by_id(transaction_id)
+        .one(db)
+        .await?
+        .and_then(|r| r.note))
+}
+
+/// `setTransactionNote`: sets or (blank / `null`) clears the note. A note is
+/// pure commentary: it rides in the whole-state record but never feeds the
+/// label resolution chain. Everything else is republished unchanged (§2.1).
+pub async fn set_transaction_note(
+    db: &DatabaseConnection,
+    publisher: Option<&Arc<EventPublisher>>,
+    scoped_ids: &[Uuid],
+    transaction_id: Uuid,
+    note: Option<String>,
+) -> async_graphql::Result<Transaction> {
+    let txn = load_scoped_transaction(db, scoped_ids, transaction_id).await?;
+    let note = normalize_note(note.as_deref())?;
+    let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
+
+    let current = load_current_state(db, transaction_id).await?;
+    let revision = Utc::now();
+    let record = UserLabelRecord {
+        schema_version: USER_LABEL_SCHEMA_VERSION_V2,
+        source: txn.source.clone(),
+        external_id: txn.external_id.clone(),
+        category_slug: current.category_slug.clone(),
+        parts: current.parts.clone(),
+        tags: current.tags.clone(),
+        recurring: current.recurring,
+        revision,
+        note: note.clone(),
+    };
+    publish_user_label(publisher, &record).await?;
+
+    let category_id = match &current.category_slug {
+        Some(slug) => crate::graphql::categories::find_by_slug(db, slug).await?.map(|c| c.id),
+        None => None,
+    };
+    upsert_user_label_row(
+        db,
+        transaction_id,
+        category_id,
+        note.as_deref(),
+        current.recurring,
+        revision,
+    )
+    .await?;
+    Ok(to_graphql_transaction(&txn))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_note_trims_and_treats_blank_as_none() {
+        assert_eq!(normalize_note(None).unwrap(), None);
+        assert_eq!(normalize_note(Some("  \n ")).unwrap(), None);
+        assert_eq!(normalize_note(Some("  paid cash \n")).unwrap(), Some("paid cash".into()));
+    }
+
+    #[test]
+    fn normalize_note_rejects_over_long_text_by_characters() {
+        let ok = "ä".repeat(MAX_NOTE_CHARS);
+        assert_eq!(normalize_note(Some(&ok)).unwrap(), Some(ok.clone()));
+        let err = normalize_note(Some(&"ä".repeat(MAX_NOTE_CHARS + 1))).unwrap_err();
+        assert_eq!(
+            err.extensions.unwrap().get("code"),
+            Some(&async_graphql::Value::String("VALIDATION".to_string()))
+        );
+    }
 
     #[test]
     fn normalize_tag_lowercases_trims_and_collapses_separators() {

@@ -161,7 +161,8 @@ function isSet(v: boolean | null | undefined): v is boolean {
  * Applies the `TransactionFilter` fields the filter panel sends over the
  * static fixture in mock mode, so every control is visibly functional
  * without a real backend: `accountIds`, `search` (case-insensitive substring
- * over counterparty + description), `categorySlugs` (OR-ed), `tags` (AND-ed),
+ * over counterparty + description), `categorySlugs` (OR-ed) and
+ * `categorySlugsExact` (the labelled category itself, no descendants), `tags` (AND-ed),
  * `amountMin`/`amountMax` (inclusive bounds on the absolute amount) and the
  * flags `recurring` (the *effective* flag), `transfer`, `needsReview` and
  * `uncategorized` (`true` = no label at all). Dates are not applied: the
@@ -183,7 +184,14 @@ function applyInsightFilters(
 	const needsReview = filter.needsReview as boolean | undefined;
 	const uncategorized = filter.uncategorized as boolean | undefined;
 	const counterpartyKeys = filter.counterpartyKeys as string[] | undefined;
+	const categorySlugsExact = filter.categorySlugsExact as string[] | undefined;
 	return items.filter((item) => {
+		if (
+			categorySlugsExact?.length &&
+			!categorySlugsExact.includes(item.label?.category?.slug ?? '')
+		) {
+			return false;
+		}
 		if (counterpartyKeys?.length && !counterpartyKeys.includes(item.counterpartyKey ?? '')) {
 			return false;
 		}
@@ -447,6 +455,13 @@ function mockSetTransactionTags(variables: Record<string, unknown> | undefined):
 	const transactionId = (variables?.transactionId as string) ?? '';
 	const tags = (variables?.tags as string[] | undefined) ?? [];
 	return { setTransactionTags: { id: transactionId, tags: [...tags].sort() } };
+}
+
+/** `setTransactionNote`: echo the trimmed note, blank/null clearing it, as the backend does. */
+function mockSetTransactionNote(variables: Record<string, unknown> | undefined): unknown {
+	const transactionId = (variables?.transactionId as string) ?? '';
+	const raw = (variables?.note as string | null | undefined) ?? '';
+	return { setTransactionNote: { id: transactionId, note: raw.trim() === '' ? null : raw.trim() } };
 }
 
 function mockSetTransactionRecurring(variables: Record<string, unknown> | undefined): unknown {
@@ -844,6 +859,12 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: { data: mockBulkEdit(body.variables, 'setTransactionsTags') },
+				setCookies: []
+			};
+		case 'SetTransactionNote':
+			return {
+				status: 200,
+				body: { data: mockSetTransactionNote(body.variables) },
 				setCookies: []
 			};
 		case 'SetTransactionRecurring':

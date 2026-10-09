@@ -81,6 +81,15 @@
 		>
 			{tx.counterpartyName ?? 'Unknown'}
 		</button>
+		{#if tx.note}
+			<!-- A glyph, not a pill: the row already carries label-source and split pills. -->
+			<span
+				role="img"
+				aria-label="Has a note: {tx.note}"
+				title={tx.note}
+				class="ml-1 cursor-help text-slate-400">✎</span
+			>
+		{/if}
 	</td>
 	<td class="py-2 pr-4 text-slate-600">{tx.description ?? ''}</td>
 	<td class="py-2 pr-4">

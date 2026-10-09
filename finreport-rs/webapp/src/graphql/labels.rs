@@ -527,8 +527,8 @@ pub(crate) async fn apply_category(
     // record, so the current tags/recurring override must ride along
     // unchanged (WP0 addendum §9.7 flagged the previous `Vec::new()`/`None`
     // as a bug WP-B owned fixing).
-    let (tags, recurring) =
-        crate::graphql::insights::preserved_tags_and_recurring(db, txn.id).await?;
+    let (tags, recurring, note) =
+        crate::graphql::insights::preserved_tags_recurring_note(db, txn.id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -539,10 +539,10 @@ pub(crate) async fn apply_category(
         tags,
         recurring,
         revision,
-        note: None,
+        note: note.clone(),
     };
     publish_user_label(publisher, &record).await?;
-    if upsert_user_label(db, txn.id, Some(category.id), None, revision).await? {
+    if upsert_user_label(db, txn.id, Some(category.id), note.as_deref(), revision).await? {
         Ok(Some(clear_splits(db, txn.id).await?))
     } else {
         Ok(None)
@@ -560,8 +560,8 @@ pub async fn clear_transaction_category(
     let txn = load_scoped_transaction(db, scoped_ids, transaction_id).await?;
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
 
-    let (tags, recurring) =
-        crate::graphql::insights::preserved_tags_and_recurring(db, transaction_id).await?;
+    let (tags, recurring, note) =
+        crate::graphql::insights::preserved_tags_recurring_note(db, transaction_id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -572,10 +572,10 @@ pub async fn clear_transaction_category(
         tags,
         recurring,
         revision,
-        note: None,
+        note: note.clone(),
     };
     publish_user_label(publisher, &record).await?;
-    if upsert_user_label(db, transaction_id, None, None, revision).await? {
+    if upsert_user_label(db, transaction_id, None, note.as_deref(), revision).await? {
         clear_splits(db, transaction_id).await?;
     }
     Ok(to_graphql_transaction(&txn))
@@ -651,8 +651,8 @@ pub async fn split_transaction(
     }
 
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
-    let (tags, recurring) =
-        crate::graphql::insights::preserved_tags_and_recurring(db, transaction_id).await?;
+    let (tags, recurring, note) =
+        crate::graphql::insights::preserved_tags_recurring_note(db, transaction_id).await?;
     let revision = Utc::now();
     let record = UserLabelRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -670,10 +670,10 @@ pub async fn split_transaction(
         tags,
         recurring,
         revision,
-        note: None,
+        note: note.clone(),
     };
     publish_user_label(publisher, &record).await?;
-    if upsert_user_label(db, transaction_id, None, None, revision).await? {
+    if upsert_user_label(db, transaction_id, None, note.as_deref(), revision).await? {
         let insertable: Vec<(i32, RustDecimal, Uuid)> = resolved_parts
             .into_iter()
             .map(|(index, amount, category_id, _)| (index, amount, category_id))

@@ -139,6 +139,13 @@ impl Transaction {
         crate::graphql::insights::tags_for(db.as_ref(), self.id.0).await
     }
 
+    /// Free-text commentary the user left on the transaction; `null` when
+    /// none. Never consulted by labelling.
+    async fn note(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<Option<String>> {
+        let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
+        crate::graphql::insights::note_for(db.as_ref(), self.id.0).await
+    }
+
     /// `null` = not an internal transfer (§4).
     async fn transfer(
         &self,
@@ -301,6 +308,12 @@ pub struct TransactionFilter {
     pub has_counterparty: Option<bool>,
     /// Iteration 2 (§5): OR-ed; includes descendants of each slug.
     pub category_slugs: Option<Vec<String>>,
+    /// Like `categorySlugs` but **exact**: only transactions labelled with
+    /// one of these categories themselves (a split counts via its parts),
+    /// never their descendants. OR-ed among themselves, AND-ed with every
+    /// other condition. Omitted or empty = unconstrained. Used to drill into a
+    /// parent's own "(no subcategory)" transactions.
+    pub category_slugs_exact: Option<Vec<String>>,
     /// `true` ⇒ no label at all (distinct from `needsReview`).
     pub uncategorized: Option<bool>,
     pub needs_review: Option<bool>,

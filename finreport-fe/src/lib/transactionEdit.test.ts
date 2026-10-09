@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
 	applyCategoryResult,
+	applyNoteResult,
+	isNoteDirty,
+	MAX_NOTE_LENGTH,
+	noteProblem,
+	noteToSave,
 	applyRecurringResult,
 	applyTagsResult,
 	categoryChangeWarning
@@ -93,5 +98,34 @@ describe('categoryOptionGroups', () => {
 		]);
 		expect(groups.map((g) => g.groupLabel)).toEqual(['Food', 'Travel']);
 		expect(groups[0].options.map((o) => o.label)).toEqual(['Food', 'Food / Groceries']);
+	});
+});
+
+describe('notes', () => {
+	it('folds the saved note back into the row, null clearing it', () => {
+		const tx = { id: 't', note: 'old' } as Transaction;
+		expect(applyNoteResult(tx, { note: 'new' }).note).toBe('new');
+		expect(applyNoteResult(tx, { note: null }).note).toBeNull();
+	});
+
+	it('saves a trimmed note and treats blank as clearing it', () => {
+		expect(noteToSave('  paid cash \n')).toBe('paid cash');
+		expect(noteToSave('   ')).toBeNull();
+		expect(noteToSave('')).toBeNull();
+	});
+
+	it('is dirty only when saving would change what is stored', () => {
+		expect(isNoteDirty(null, '')).toBe(false);
+		expect(isNoteDirty(undefined, '  ')).toBe(false);
+		expect(isNoteDirty('paid cash', ' paid cash ')).toBe(false);
+		expect(isNoteDirty('paid cash', 'paid card')).toBe(true);
+		expect(isNoteDirty('paid cash', '')).toBe(true);
+		expect(isNoteDirty(null, 'x')).toBe(true);
+	});
+
+	it('flags an over-long note by characters, not bytes', () => {
+		expect(noteProblem('ä'.repeat(MAX_NOTE_LENGTH))).toBeNull();
+		expect(noteProblem('ä'.repeat(MAX_NOTE_LENGTH + 1))).toMatch(/at most 2000/);
+		expect(noteProblem(' '.repeat(MAX_NOTE_LENGTH + 5))).toBeNull();
 	});
 });

@@ -1159,4 +1159,58 @@ async fn an_exempt_paypal_learns_no_narrow_rule_either() {
 
     decide_paypal_by_hand(&db, &publisher, &ops, &catalog).await;
     assert!(rule_rows(&db).await.is_empty(), "exempt merchant: no rule of any kind");
+
+/// A note is commentary, not an input to labelling: a note-only user-label
+/// record re-runs the chain, but the resolution is identical, so compare-before-
+/// publish suppresses it - no provider call, no republished label, the cache
+/// entry survives and no rule appears or disappears.
+#[tokio::test]
+async fn a_note_only_user_label_changes_nothing_about_the_label() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    // Eager learner, so a note that wrongly counted as a decision would show.
+    let ops = LabelingOps::real(1, 1, 0.9);
+    let cost_guard = CostGuard::new(10);
+    let counting = CountingProvider(std::sync::atomic::AtomicU32::new(0));
+
+    let txn = seed_fitness_first(&db, "NOTE-A").await;
+    label_one_transaction(&db, &publisher, &ops, &counting, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+        .await
+        .expect("llm label");
+    assert_eq!(counting.0.load(std::sync::atomic::Ordering::SeqCst), 1);
+    let first = proj::find_transaction_label(&db, txn.id).await.unwrap().expect("labelled");
+    let fp = first.fingerprint.clone().expect("llm labels carry a fingerprint");
+    assert!(proj::find_cache(&db, &fp).await.unwrap().is_some());
+    // The eager learner turns that agreement into a rule; settle on it so the
+    // comparison below starts from the steady state.
+    label_one_transaction(&db, &publisher, &ops, &counting, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+        .await
+        .expect("settle on the learned rule");
+    let before = proj::find_transaction_label(&db, txn.id).await.unwrap().expect("labelled");
+    let key = webapp::labeling::normalize::normalize(Some("Fitness First"), None);
+    let rule_id = webapp::kafka::labeling::learned_rule_uuid(&key, "personal.gym");
+    let rule_before = proj::find_rule(&db, rule_id).await.unwrap().map(|r| (r.state, r.revision));
+    assert!(rule_before.is_some(), "the eager learner produced a rule to watch");
+
+    let mut note_only = user_override(&txn, "personal.gym");
+    note_only.category_slug = None;
+    note_only.note = Some("paid in cash".to_string());
+    proj::project_user_label(&db, txn.id, Some(note_only)).await.unwrap();
+    label_one_transaction(&db, &publisher, &ops, &counting, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+        .await
+        .expect("re-resolve after the note");
+
+    assert_eq!(counting.0.load(std::sync::atomic::Ordering::SeqCst), 1, "no new provider call");
+    let after = proj::find_transaction_label(&db, txn.id).await.unwrap().expect("still labelled");
+    assert_eq!(after.labeled_at, before.labeled_at, "label not republished: {before:?} vs {after:?}");
+    assert_eq!(after.label_source, before.label_source);
+    assert_eq!(after.category_id, before.category_id);
+    assert!(proj::find_cache(&db, &fp).await.unwrap().is_some(), "cache entry survives");
+    let rule_after = proj::find_rule(&db, rule_id).await.unwrap().map(|r| (r.state, r.revision));
+    assert_eq!(rule_after, rule_before, "no rule learned, changed or revoked by a note");
 }

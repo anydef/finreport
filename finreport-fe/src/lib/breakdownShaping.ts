@@ -28,7 +28,8 @@ export interface BreakdownBar {
 	/**
 	 * Set on the row a child level carries for the parent's own transactions
 	 * (labelled with the parent itself, not a subcategory). It repeats the
-	 * parent's slug, so it is shown but is not drillable or expandable.
+	 * parent's slug, so it is not expandable; it drills down on the exact
+	 * category (`categorySlugsExact`) so the list holds only its own rows.
 	 */
 	own?: true;
 }
@@ -68,6 +69,8 @@ export function maxBarAmount(bars: BreakdownBar[]): number {
 /** What a bar click narrows the transaction list by: the `sel*` drill-down fields. */
 export interface BarDrilldown {
 	categorySlugs?: string[];
+	/** The category itself, not its descendants: the "(no subcategory)" row. */
+	categorySlugsExact?: string[];
 	uncategorized?: boolean;
 	needsReview?: boolean;
 }
@@ -86,7 +89,10 @@ export function drilldownForBar(bar: BreakdownBar): BarDrilldown {
 		case 'needs-review':
 			return { needsReview: true };
 		default:
-			return bar.slug ? { categorySlugs: [bar.slug] } : {};
+			if (!bar.slug) return {};
+			// A child level's `own` row repeats the parent's slug and stands for the
+			// parent's own transactions; `categorySlugs` would drag the children in.
+			return bar.own ? { categorySlugsExact: [bar.slug] } : { categorySlugs: [bar.slug] };
 	}
 }
 
