@@ -821,8 +821,13 @@ function mockArchiveGoal(variables: Record<string, unknown> | undefined): unknow
 function mockCategoryBreakdown(variables: Record<string, unknown> | undefined): unknown {
 	const filter = variables?.filter as { categorySlugs?: string[] } | undefined;
 	const level = Number(variables?.level ?? 1);
+	// The dashboard asks this same operation twice per load, once per card, so
+	// the kind - not the operation name - is what tells the two apart here.
+	const saving = variables?.kind === 'SAVING';
 	if (level > 1 && filter?.categorySlugs?.length) {
-		const children = categoryBreakdownChildrenMock.data as Record<string, unknown>;
+		const children = (
+			saving ? savingsBreakdownChildrenMock : categoryBreakdownChildrenMock.data
+		) as Record<string, unknown>;
 		const parent = [...filter.categorySlugs]
 			.sort((a, b) => a.length - b.length)
 			.find((slug) => slug in children);
@@ -831,7 +836,7 @@ function mockCategoryBreakdown(variables: Record<string, unknown> | undefined): 
 			categoryBreakdown: { rows: [], uncategorized: null, needsReview: null, currency: 'EUR' }
 		};
 	}
-	return categoryBreakdownMock.data;
+	return saving ? savingsBreakdownMock : categoryBreakdownMock.data;
 }
 
 function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBackendResult | null {

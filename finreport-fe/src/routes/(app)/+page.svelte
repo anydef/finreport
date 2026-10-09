@@ -186,18 +186,28 @@
 		navigate({ ...drilldownForBar(bar), offset: 0, resetDrilldown: true });
 	}
 
-	/** Fetch the children of an expanded breakdown row (scoped to it, one level deeper). */
-	async function loadBreakdownChildren(slug: string): Promise<CategoryBreakdownData> {
+	/**
+	 * Fetch the children of an expanded breakdown row (scoped to it, one level
+	 * deeper). The kind has to match the card the row came from, or expanding a
+	 * savings row would ask for its expense children and find none.
+	 */
+	async function loadChildrenOfKind(
+		slug: string,
+		kind: 'EXPENSE' | 'SAVING'
+	): Promise<CategoryBreakdownData> {
 		const result = await createGraphqlClient(fetch)
 			.query(CATEGORY_BREAKDOWN_QUERY, {
 				filter: childBreakdownFilter(data.breakdownFilter, slug, data.categories),
 				level: childLevel(slug, data.categories),
-				kind: 'EXPENSE'
+				kind
 			})
 			.toPromise();
 		if (result.error || !result.data) throw result.error ?? new Error('No data');
 		return result.data.categoryBreakdown as CategoryBreakdownData;
 	}
+
+	const loadBreakdownChildren = (slug: string) => loadChildrenOfKind(slug, 'EXPENSE');
+	const loadSavingsChildren = (slug: string) => loadChildrenOfKind(slug, 'SAVING');
 
 	function onSankeyDimensionChange(dimension: 'counterparty' | 'category') {
 		navigate({ sankeyDimension: dimension, resetDrilldown: true });
@@ -303,6 +313,22 @@
 					breakdown={data.breakdown}
 					categories={data.categories}
 					loadChildren={loadBreakdownChildren}
+					scopeKey={JSON.stringify(data.breakdownFilter)}
+					onSelect={onBreakdownSelect}
+				/>
+			</Card>
+		{/if}
+
+		{#if data.savingsBreakdown && data.savingsBreakdown.rows.length > 0}
+			<Card title="Savings by category">
+				<p class="mb-3 text-sm text-slate-500">
+					Money put aside in this period. Kept out of the spending totals above, because it is
+					still yours.
+				</p>
+				<CategoryBreakdown
+					breakdown={data.savingsBreakdown}
+					categories={data.categories}
+					loadChildren={loadSavingsChildren}
 					scopeKey={JSON.stringify(data.breakdownFilter)}
 					onSelect={onBreakdownSelect}
 				/>
