@@ -496,11 +496,18 @@ type HeldMerchantGroup {
 	"""
 	counterpartyKey: String
 	"""
-	The most common `counterpartyName` among the group's held
-	transactions (ties broken alphabetically, so it is stable). Falls back
-	to the key; the ungrouped bucket is named "No merchant key".
+	What the caller sees for the merchant: their alias for
+	`counterpartyKey` when they set one, else `rawName`. The ungrouped
+	bucket is named "No merchant key" and is never aliased.
 	"""
 	displayName: String!
+	"""
+	The bank's own name: the most common `counterpartyName` among the
+	group's held transactions (ties broken alphabetically, so it is
+	stable), falling back to the key. Shown as secondary detail next to an
+	alias, as on a transaction row.
+	"""
+	rawName: String!
 	"""
 	How many held transactions the group has.
 	"""
@@ -1070,7 +1077,9 @@ input TransactionFilter {
 	"""
 	accountIds: [UUID!]
 	"""
-	Case-insensitive substring over `counterpartyName` + `description`.
+	Case-insensitive substring over `counterpartyName` + `description`,
+	and over the caller's own nickname for the counterparty
+	(`counterpartyDisplayName`), so what the list shows is findable.
 	"""
 	search: String
 	"""

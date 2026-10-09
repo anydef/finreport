@@ -763,13 +763,14 @@ mod display_aliases {
         Tenant { user: AuthenticatedUser { user_id, username, account_ids: vec![account] }, account }
     }
 
-    async fn tx(db: &DatabaseConnection, account: Uuid, name: &str) {
+    async fn tx(db: &DatabaseConnection, account: Uuid, name: &str) -> Uuid {
         let id = common::seed_transaction(db, account, "2024-07-01", "-5", Some(name)).await;
         let key = webapp::labeling::normalize::normalize(Some(name), None);
         let mut model: transaction::ActiveModel =
             transaction::Entity::find_by_id(id).one(db).await.unwrap().unwrap().into();
         model.counterparty_key = Set(Some(key));
         model.update(db).await.unwrap();
+        id
     }
 
     async fn alias(db: &DatabaseConnection, user: Uuid, kind: AliasKind, key: &str, alias: &str) {
@@ -881,6 +882,134 @@ mod display_aliases {
         );
         let response = schema.execute(authed(Request::new(mutation), Some(bob.user.clone()))).await;
         assert!(response.errors[0].message.contains("not accessible"), "{:?}", response.errors);
+    }
+
+    /// Ids the list returns for `search`, plus what `cashflowSummary` and
+    /// `cashflowGraph` count for the same term - the three must agree.
+    async fn search_everywhere(
+        schema: &webapp::graphql::AppSchema,
+        user: &AuthenticatedUser,
+        search: &str,
+    ) -> (Vec<String>, i64, bool) {
+        let filter = format!(r#"{{ startDate: "2024-07-01", endDate: "2024-07-31", search: "{search}" }}"#);
+        let list = run(
+            schema,
+            user,
+            &format!("{{ transactions(filter: {filter}) {{ items {{ id }} }} }}"),
+        )
+        .await;
+        let mut ids: Vec<String> = list["transactions"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["id"].as_str().unwrap().to_string())
+            .collect();
+        ids.sort();
+        let summary = run(
+            schema,
+            user,
+            &format!(
+                "{{ cashflowSummary(filter: {filter}, granularity: MONTH) {{ total {{ transactionCount }} }} }}"
+            ),
+        )
+        .await;
+        let graph = run(
+            schema,
+            user,
+            &format!("{{ cashflowGraph(filter: {filter}) {{ links {{ value }} }} }}"),
+        )
+        .await;
+        (
+            ids,
+            summary["cashflowSummary"]["total"]["transactionCount"].as_i64().unwrap(),
+            !graph["cashflowGraph"]["links"].as_array().unwrap().is_empty(),
+        )
+    }
+
+    #[tokio::test]
+    async fn search_finds_the_nickname_and_the_bank_name_and_only_the_callers_nickname() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let alice = tenant(&db, &format!("alias-s-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("alias-s-b-{}", Uuid::new_v4().simple())).await;
+        let u = Uuid::new_v4().simple().to_string();
+        let bank = format!("Backwerk Filiale {u}");
+        let mine = tx(&db, alice.account, &bank).await;
+        let bobs = tx(&db, bob.account, &bank).await;
+        tx(&db, alice.account, &format!("Unrelated {u}")).await;
+        let key = webapp::labeling::normalize::normalize(Some(&bank), None);
+        let nickname = format!("Bakery{u}");
+        alias(&db, alice.user.user_id, AliasKind::Counterparty, &key, &nickname).await;
+
+        // The nickname finds the row - case-insensitively, as a substring -
+        // in the list, the summary and the graph alike.
+        for term in [nickname.clone(), nickname.to_lowercase(), format!("akery{u}")] {
+            let (ids, summary, graph) = search_everywhere(&schema, &alice.user, &term).await;
+            assert_eq!(ids, vec![mine.to_string()], "searching the nickname {term:?}");
+            assert_eq!(summary, 1, "cashflowSummary must agree with the list for {term:?}");
+            assert!(graph, "cashflowGraph must see the match the list sees for {term:?}");
+        }
+        // The bank's wording still finds it.
+        let (ids, summary, graph) = search_everywhere(&schema, &alice.user, &format!("Backwerk Filiale {u}")).await;
+        assert_eq!(ids, vec![mine.to_string()]);
+        assert_eq!((summary, graph), (1, true));
+
+        // Bob shares the merchant key but not Alice's alias: it matches
+        // nothing for him anywhere, and his own row is still found by name.
+        let (ids, summary, graph) = search_everywhere(&schema, &bob.user, &nickname).await;
+        assert!(ids.is_empty(), "another user's alias must not match: {ids:?}");
+        assert_eq!((summary, graph), (0, false));
+        let (ids, summary, _) = search_everywhere(&schema, &bob.user, &format!("Backwerk Filiale {u}")).await;
+        assert_eq!(ids, vec![bobs.to_string()]);
+        assert_eq!(summary, 1);
+
+        // Removing the alias takes the nickname out of search again.
+        project_display_alias(db.as_ref(), alice.user.user_id, AliasKind::Counterparty, &key, None)
+            .await
+            .unwrap();
+        let (ids, summary, _) = search_everywhere(&schema, &alice.user, &nickname).await;
+        assert!(ids.is_empty());
+        assert_eq!(summary, 0);
+    }
+
+    #[tokio::test]
+    async fn counterparty_sort_follows_the_displayed_name_with_aliased_and_plain_rows_interleaved() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let alice = tenant(&db, &format!("alias-o-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("alias-o-b-{}", Uuid::new_v4().simple())).await;
+        // Raw order: Aldi < Edeka < Penny < Zalando. Alice's displayed order:
+        // Aldi, Bakery (Zalando), Edeka, mum (Penny) - the lower-case "mum"
+        // sorts after "Edeka" because the sort is case-insensitive.
+        let aldi = tx(&db, alice.account, "Aldi").await;
+        let edeka = tx(&db, alice.account, "Edeka").await;
+        let penny = tx(&db, alice.account, "Penny").await;
+        let zalando = tx(&db, alice.account, "Zalando").await;
+        let b_zalando = tx(&db, bob.account, "Zalando").await;
+        let b_aldi = tx(&db, bob.account, "Aldi").await;
+        alias(&db, alice.user.user_id, AliasKind::Counterparty, "zalando", "Bakery").await;
+        alias(&db, alice.user.user_id, AliasKind::Counterparty, "penny", "mum").await;
+
+        let order = |user: AuthenticatedUser, dir: &'static str| {
+            let schema = schema.clone();
+            async move {
+                let q = format!(
+                    r#"{{ transactions(filter: {{ startDate: "2024-07-01", endDate: "2024-07-31" }},
+                         sort: {{ field: COUNTERPARTY_NAME, direction: {dir} }}) {{ items {{ id }} }} }}"#
+                );
+                run(&schema, &user, &q).await["transactions"]["items"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|i| i["id"].as_str().unwrap().to_string())
+                    .collect::<Vec<_>>()
+            }
+        };
+        let s = |ids: &[Uuid]| ids.iter().map(Uuid::to_string).collect::<Vec<_>>();
+        assert_eq!(order(alice.user.clone(), "ASC").await, s(&[aldi, zalando, edeka, penny]));
+        assert_eq!(order(alice.user.clone(), "DESC").await, s(&[penny, edeka, zalando, aldi]));
+        // Alice's nicknames do not reorder Bob's rows.
+        assert_eq!(order(bob.user.clone(), "ASC").await, s(&[b_aldi, b_zalando]));
     }
 
     #[tokio::test]

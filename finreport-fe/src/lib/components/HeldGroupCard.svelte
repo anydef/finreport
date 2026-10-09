@@ -49,6 +49,9 @@
 	<div class="flex flex-wrap items-center justify-between gap-3 p-3">
 		<div class="min-w-0">
 			<p class="truncate text-sm font-medium text-slate-900">{group.displayName}</p>
+			{#if group.rawName !== group.displayName}
+				<p class="truncate text-xs text-slate-400" data-testid="group-raw-name">{group.rawName}</p>
+			{/if}
 			<p class="text-xs text-slate-500">
 				<span data-testid="group-count">{group.heldCount} held</span>
 				·

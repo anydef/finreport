@@ -528,6 +528,8 @@ export interface HeldMerchantGroup {
 	/** `null` for the single bucket of held transactions that have no merchant key. */
 	counterpartyKey: string | null;
 	displayName: string;
+	/** The bank's own name; differs from `displayName` when the user nicknamed the merchant. */
+	rawName: string;
 	heldCount: number;
 	/** Signed net sum (negative = net spending): a refund cancels the charge it reverses. */
 	totalAmount: string;

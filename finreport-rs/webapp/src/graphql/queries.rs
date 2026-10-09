@@ -62,8 +62,9 @@ impl QueryRoot {
     ) -> GqlResult<TransactionPage> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        let filter = filter.unwrap_or_default();
+        let mut filter = filter.unwrap_or_default();
         let page = page.unwrap_or_default();
+        filter.viewer = Some(user.user_id);
         let requested_ids: Option<Vec<uuid::Uuid>> = filter
             .account_ids
             .as_ref()
@@ -85,11 +86,12 @@ impl QueryRoot {
     async fn cashflow_summary(
         &self,
         ctx: &Context<'_>,
-        filter: TransactionFilter,
+        mut filter: TransactionFilter,
         granularity: Granularity,
     ) -> GqlResult<CashflowSummary> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        filter.viewer = Some(user.user_id);
         let requested_ids: Option<Vec<uuid::Uuid>> = filter
             .account_ids
             .as_ref()
@@ -101,11 +103,12 @@ impl QueryRoot {
     async fn cashflow_graph(
         &self,
         ctx: &Context<'_>,
-        filter: TransactionFilter,
+        mut filter: TransactionFilter,
         grouping: Option<CashflowGraphInput>,
     ) -> GqlResult<CashflowGraph> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        filter.viewer = Some(user.user_id);
         let requested_ids: Option<Vec<uuid::Uuid>> = filter
             .account_ids
             .as_ref()
@@ -130,12 +133,13 @@ impl QueryRoot {
     async fn category_breakdown(
         &self,
         ctx: &Context<'_>,
-        filter: TransactionFilter,
+        mut filter: TransactionFilter,
         #[graphql(default = 1)] level: i32,
         kind: Option<CategoryKind>,
     ) -> GqlResult<CategoryBreakdown> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        filter.viewer = Some(user.user_id);
         let requested_ids: Option<Vec<uuid::Uuid>> = filter
             .account_ids
             .as_ref()
@@ -152,13 +156,14 @@ impl QueryRoot {
     async fn category_comparison(
         &self,
         ctx: &Context<'_>,
-        filter: TransactionFilter,
+        mut filter: TransactionFilter,
         #[graphql(default_with = "Granularity::Month")] granularity: Granularity,
         #[graphql(default = 1)] level: i32,
         #[graphql(default_with = "CategoryKind::Expense")] kind: CategoryKind,
     ) -> GqlResult<CategoryComparison> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        filter.viewer = Some(user.user_id);
         let requested_ids: Option<Vec<uuid::Uuid>> = filter
             .account_ids
             .as_ref()
@@ -270,7 +275,8 @@ impl QueryRoot {
     ) -> GqlResult<crate::graphql::links::ReimbursementSummary> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        let filter = filter.unwrap_or_default();
+        let mut filter = filter.unwrap_or_default();
+        filter.viewer = Some(user.user_id);
         let requested_ids: Option<Vec<uuid::Uuid>> = filter
             .account_ids
             .as_ref()
@@ -302,7 +308,8 @@ impl QueryRoot {
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let page = page.unwrap_or_default();
         let scoped_ids = scoped_account_ids(user, None)?;
-        held_groups::fetch_held_merchant_groups(db, &scoped_ids, page.limit, page.offset).await
+        let aliases = crate::graphql::display_aliases::book_for(ctx).await?;
+        held_groups::fetch_held_merchant_groups(db, &scoped_ids, &aliases, page.limit, page.offset).await
     }
 
     /// `tags` (§4): all tags, descending count.
@@ -368,7 +375,8 @@ impl QueryRoot {
     ) -> GqlResult<RecurringOverview> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        let filter = filter.unwrap_or_default();
+        let mut filter = filter.unwrap_or_default();
+        filter.viewer = Some(user.user_id);
         let requested_ids: Option<Vec<uuid::Uuid>> = filter
             .account_ids
             .as_ref()

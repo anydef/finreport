@@ -805,6 +805,7 @@ pub async fn fetch_link_candidates(
     let search = search.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     let filter = TransactionFilter {
         search: search.clone(),
+        viewer: Some(user.user_id),
         direction: Some(if base.amount < Decimal::ZERO { Direction::Income } else { Direction::Spending }),
         ..Default::default()
     };

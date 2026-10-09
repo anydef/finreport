@@ -366,10 +366,11 @@ impl MutationRoot {
     async fn set_transactions_category(
         &self,
         ctx: &Context<'_>,
-        filter: TransactionFilter,
+        mut filter: TransactionFilter,
         category_slug: String,
     ) -> GqlResult<BulkEditResult> {
         let user = current_user(ctx)?;
+        filter.viewer = Some(user.user_id);
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let settings = ctx.data::<Arc<Settings>>()?;
         bulk::set_transactions_category(
@@ -388,10 +389,11 @@ impl MutationRoot {
     async fn set_transactions_tags(
         &self,
         ctx: &Context<'_>,
-        filter: TransactionFilter,
+        mut filter: TransactionFilter,
         tags: Vec<String>,
     ) -> GqlResult<BulkEditResult> {
         let user = current_user(ctx)?;
+        filter.viewer = Some(user.user_id);
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let settings = ctx.data::<Arc<Settings>>()?;
         bulk::set_transactions_tags(

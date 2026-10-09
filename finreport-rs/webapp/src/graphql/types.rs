@@ -328,13 +328,21 @@ pub enum Granularity {
 
 #[derive(InputObject, Default)]
 pub struct TransactionFilter {
+    /// The caller, set server-side by each resolver (never part of the SDL).
+    /// Makes `search` match this user's display aliases; `None` (internal
+    /// callers) matches the bank's own strings only. An alias is per user, so
+    /// this is never taken from the request.
+    #[graphql(skip)]
+    pub viewer: Option<uuid::Uuid>,
     /// Inclusive; `None` = unbounded.
     pub start_date: Option<Date>,
     /// Inclusive; `None` = unbounded.
     pub end_date: Option<Date>,
     /// `None`/empty = all of the caller's accounts.
     pub account_ids: Option<Vec<Uuid>>,
-    /// Case-insensitive substring over `counterpartyName` + `description`.
+    /// Case-insensitive substring over `counterpartyName` + `description`,
+    /// and over the caller's own nickname for the counterparty
+    /// (`counterpartyDisplayName`), so what the list shows is findable.
     pub search: Option<String>,
     /// `None` = both.
     pub direction: Option<Direction>,

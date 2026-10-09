@@ -239,7 +239,7 @@ async fn load_book(db: &DatabaseConnection, user_id: Uuid) -> async_graphql::Res
     ))
 }
 
-async fn book_for(ctx: &Context<'_>) -> async_graphql::Result<Arc<AliasBook>> {
+pub(crate) async fn book_for(ctx: &Context<'_>) -> async_graphql::Result<Arc<AliasBook>> {
     let user = current_user(ctx)?;
     let db: &Arc<DatabaseConnection> = ctx.data()?;
     match ctx.data::<AliasCache>() {
