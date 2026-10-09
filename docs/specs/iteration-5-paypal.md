@@ -148,10 +148,20 @@ the key next to the ciphertext.
 
 #### 2.5.3 Shape
 
-A generic credential store, not a PayPal-specific one: the same mechanism must
-serve the bank connections that `docs/requirements.md` still lists as blocked,
-and a second implementation of credential encryption is how one of them ends up
-weaker than the other.
+A generic credential store, not a PayPal-specific one. The user confirmed the
+intent, 2026-10-09: *"in the next iterations the bank connectors will be
+configured like that as well."* So PayPal is the **first** consumer of this
+store, not its owner, and the bank connections `docs/requirements.md` lists as
+blocked are the next. A second implementation of credential encryption is how
+one of them ends up weaker than the other; design the store against both from
+the start, even though only PayPal uses it this iteration.
+
+Concretely, that means the credential row is keyed by *provider plus account*,
+not by "paypal account", and that nothing provider-specific leaks into the
+encryption, rotation or admin surface. A Comdirect login needs a different set
+of fields than a PayPal app (zugangsnummer and PIN against client id and
+secret), so the stored payload is a provider-tagged structure rather than two
+fixed columns.
 
 Each PayPal account row carries its own client id, secret, environment
 (live or sandbox) and display name, and its own watermark key, so accounts
