@@ -91,19 +91,76 @@ second source risks the working one for the benefit of symmetry. The trait's
 shape is proven against PayPal first; Comdirect moves behind it as follow-up,
 when the trait has a real second implementation to answer to.
 
-### 2.5 Credentials
+### 2.5 Credentials: multiple accounts, configured in the admin UI
 
-Client id and secret, via the established pattern: one `op://` reference each in
-`.env.tpl`, flattened by terraform into `APP_paypal_client_id` /
-`APP_paypal_client_secret`, reaching the container through
-`module "portainer_stack"`'s `extra_env` — the same mechanism as
-`POSTGRES_PASSWORD` and `APP_anthropic_api_key`. Secrets are `SecretString`.
+The user's decision, 2026-10-09: *"I'd like the support for multiple paypal
+accounts. Also I want you to stop using 1password as the medium, instead, these
+accounts have to be configurable via the admin UI."* This supersedes the
+env-var approach and settles the credential-storage question that
+`docs/requirements.md` ("Bank connections via UI") had left open.
 
-**Not blocked on the credential-storage decision.** That open question concerns
-*user-entered bank passwords* in a UI (requirements, "Bank connections via UI").
-A PayPal app credential is an operator secret of the same kind the stack already
-holds, so it follows the existing route. When the UI flow lands, PayPal moves
-with the rest.
+So: PayPal accounts are **rows, not environment variables**, created and edited
+by an admin in the UI, with any number of them.
+
+#### 2.5.1 One secret still has to live outside the database
+
+Credentials stored in Postgres must be encrypted at rest - a database dump,
+a backup, a replica or a `SELECT` by anyone with read access must not yield
+usable PayPal credentials. Encryption needs a key, and **that key cannot live
+in the database it protects**, or it is not encryption, only obfuscation.
+
+The honest consequence: this does not remove the external secret, it reduces
+it from N per-account secrets to **one master key**, delivered the way the
+stack already delivers `POSTGRES_PASSWORD` and the admin password - generated
+by Terraform, stored in 1Password, injected as `APP_credential_key` through
+`module "portainer_stack"`'s `extra_env`. Everything the user adds afterwards
+goes through the UI and never touches 1Password or a deploy.
+
+This is a real improvement - adding a PayPal account stops being a deploy - but
+it is not "no 1Password at all", and pretending otherwise would mean storing
+the key next to the ciphertext.
+
+#### 2.5.2 Rules the implementation must hold
+
+- **Encrypt with an AEAD** (XChaCha20-Poly1305 or AES-256-GCM) from a vetted
+  crate. Fresh random nonce per write. Bind the account id as associated data,
+  so a ciphertext cannot be moved between rows.
+- **Secrets are write-only across the API.** No query, type or error returns a
+  client secret, ever. The UI shows "configured" or "not configured", when it
+  was last changed, and at most a non-reversible hint - never the value, not
+  even to an admin. There is no legitimate read path: the importer decrypts
+  server-side and uses it directly.
+- **Never logged.** `SecretString` with `ExposeSecret` at the single point of
+  use, per the repo convention. No `Debug` derive that could print it; assert
+  this in a test.
+- **Admin-only mutations**, enforced server-side on every one - the existing
+  role check, not a hidden menu.
+- **Key rotation must be possible** without re-entering every credential:
+  decrypt with the old key, re-encrypt with the new. Record which key version
+  encrypted each row so a rotation is resumable and auditable.
+- **Audit the fact, never the value.** A credential being created, changed or
+  deleted is worth a log line naming the account and the actor; its contents
+  are not.
+- **Validate before saving.** A credential that does not authenticate is worse
+  than none, because it fails later and silently. Exchange it for a token once,
+  report the result, and surface `REQUIRED_SCOPE_MISSING` as "the app is
+  missing the Transaction Search permission" rather than a raw 401.
+
+#### 2.5.3 Shape
+
+A generic credential store, not a PayPal-specific one: the same mechanism must
+serve the bank connections that `docs/requirements.md` still lists as blocked,
+and a second implementation of credential encryption is how one of them ends up
+weaker than the other.
+
+Each PayPal account row carries its own client id, secret, environment
+(live or sandbox) and display name, and its own watermark key, so accounts
+resume independently - mirroring how Comdirect logins already each keep their
+own session file and watermark. One failing account must not stall the others.
+
+**Comdirect stays on env vars for now.** Migrating it is a follow-up, not part
+of this iteration: it is deployed and working, and moving its credentials while
+also adding a new source risks the one that currently feeds all the data.
 
 ### 2.6 Linking the two sides
 
@@ -128,7 +185,7 @@ hides real spending, which is worse than two visible rows.
 **In scope.** The OAuth client-credentials flow; the windowed, paginated
 Transaction Search fetch; a `paypal` mapper in the projector; the watermark with
 its settle margin; a `paypal-import` binary and its deployed service;
-credentials wiring; the `Source` trait.
+the credential store and its admin UI; the `Source` trait.
 
 **Non-goals.** Linking PayPal to bank lines (§2.6). Refactoring Comdirect behind
 the trait (§2.4). Multi-currency conversion — record the currency the provider
