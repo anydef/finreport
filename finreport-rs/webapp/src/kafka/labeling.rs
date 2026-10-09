@@ -65,6 +65,16 @@ pub fn learned_rule_uuid(counterparty_key: &str, category_slug: &str) -> Uuid {
     Uuid::new_v5(&FINREPORT_NS, name.as_bytes())
 }
 
+/// Deterministic id for a description-qualified learned rule: like
+/// [`learned_rule_uuid`] but also varying with the `description_contains`
+/// condition, so two narrow rules for one merchant and category (different
+/// subscriptions both filed under it) never collide, and neither collides
+/// with the merchant-wide rule.
+pub fn learned_narrow_rule_uuid(counterparty_key: &str, category_slug: &str, description_contains: &str) -> Uuid {
+    let name = format!("rule\0{counterparty_key}\0{category_slug}\0contains\0{description_contains}");
+    Uuid::new_v5(&FINREPORT_NS, name.as_bytes())
+}
+
 /// Deterministic id for a category node (§3):
 /// `UUIDv5(FINREPORT_NS, "category\0"+slug)` — so `category-seed` is
 /// idempotent (same slugs ⇒ same ids).
@@ -372,6 +382,10 @@ mod tests {
         let other_category = learned_rule_uuid("lidl", "food.restaurants");
         assert_ne!(a, other_category);
 
+        let narrow = learned_narrow_rule_uuid("lidl", "food.groceries", "netflix");
+        assert_eq!(narrow, learned_narrow_rule_uuid("lidl", "food.groceries", "netflix"));
+        assert_ne!(narrow, a, "narrow differs from the merchant-wide id");
+        assert_ne!(narrow, learned_narrow_rule_uuid("lidl", "food.groceries", "spotify"));
         let other_key = learned_rule_uuid("rewe", "food.groceries");
         assert_ne!(a, other_key);
     }

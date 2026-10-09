@@ -827,6 +827,9 @@ pub struct CounterpartyObservation {
     pub confidence: f32,
     /// `true` for a `label_source = 'user'` label (a human decision).
     pub user_confirmed: bool,
+    /// The labelled transaction's raw description, for description-qualified
+    /// rule learning.
+    pub description: Option<String>,
 }
 
 /// Every observation (category slug, confidence, whether human) labelled `user`/`llm`/`llm-cache`
@@ -838,13 +841,13 @@ pub async fn observations_for_counterparty_key(
     db: &impl ConnectionTrait,
     counterparty_key: &str,
 ) -> Result<Vec<CounterpartyObservation>, DbErr> {
-    let transaction_ids: Vec<Uuid> = transaction::Entity::find()
+    let transactions = transaction::Entity::find()
         .filter(transaction::Column::CounterpartyKey.eq(counterparty_key))
         .all(db)
-        .await?
-        .into_iter()
-        .map(|t| t.id)
-        .collect();
+        .await?;
+    let description_by_txn: std::collections::HashMap<Uuid, Option<String>> =
+        transactions.iter().map(|t| (t.id, t.description.clone())).collect();
+    let transaction_ids: Vec<Uuid> = transactions.into_iter().map(|t| t.id).collect();
     if transaction_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -875,7 +878,8 @@ pub async fn observations_for_counterparty_key(
             } else {
                 l.confidence.and_then(|d| d.to_string().parse().ok()).unwrap_or(0.0)
             };
-            Some(CounterpartyObservation { category_slug: slug, confidence, user_confirmed })
+            let description = description_by_txn.get(&l.transaction_id).cloned().flatten();
+            Some(CounterpartyObservation { category_slug: slug, confidence, user_confirmed, description })
         })
         .collect())
 }

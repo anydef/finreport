@@ -1033,3 +1033,130 @@ async fn learning_exemption_projects_tombstones_and_replays() {
     entity::entities::learning_exemption::Entity::delete_many().exec(&db).await.unwrap();
     assert_eq!(apply_exemption_log(&db, &log).await, first, "replay from offset 0 reproduces the table");
 }
+
+// ---------------------------------------------------------------------------
+// Description-qualified learning: ambiguous merchants (PayPal) learn narrowly
+// ---------------------------------------------------------------------------
+
+/// A PayPal transaction whose raw description is `description`, key already set.
+async fn seed_paypal(db: &sea_orm::DatabaseConnection, external_id: &str, description: &str) -> TransactionForLabeling {
+    use sea_orm::IntoActiveModel;
+    let mut txn = seed_transaction(db, external_id, "PayPal").await;
+    let key = webapp::labeling::normalize::normalize(txn.counterparty_name.as_deref(), None);
+    proj::set_counterparty_key(db, txn.id, &key).await.expect("set counterparty key");
+    let row = transaction::Entity::find_by_id(txn.id).one(db).await.unwrap().expect("seeded row");
+    let mut active = row.into_active_model();
+    active.description = Set(Some(description.to_string()));
+    active.update(db).await.expect("set description");
+    txn.counterparty_key = Some(key);
+    txn.description = Some(description.to_string());
+    txn
+}
+
+const PAYPAL_NETFLIX: &str = "PayPal . NETFLIX INTERNATIONAL B.V. 1234567890 PP.1234.PP . , Ihr Einkauf bei NETFLIX";
+const PAYPAL_ETSY: &str = "PayPal . ETSY IRELAND UC 5550001112 PP.5550.PP . , Ihr Einkauf bei ETSY";
+
+/// Interleaved so no category has enough evidence (2 user decisions) before
+/// the merchant is already known to be ambiguous - no broad rule sneaks in.
+async fn decide_paypal_by_hand(
+    db: &sea_orm::DatabaseConnection,
+    publisher: &EventPublisher,
+    ops: &LabelingOps,
+    catalog: &categorizer::provider::CategoryCatalog,
+) {
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let cost_guard = CostGuard::new(10);
+    for (id, description, slug) in [
+        ("PP-N1", PAYPAL_NETFLIX, "personal.gym"),
+        ("PP-E1", PAYPAL_ETSY, "food.restaurants"),
+        ("PP-N2", "PayPal . NETFLIX INTERNATIONAL B.V. 7770001 PP.7770.PP . , Ihr Einkauf bei NETFLIX", "personal.gym"),
+        ("PP-E2", "PayPal . ETSY IRELAND UC 8880002 PP.8880.PP . , Ihr Einkauf bei ETSY", "food.restaurants"),
+    ] {
+        let txn = seed_paypal(db, id, description).await;
+        proj::project_user_label(db, txn.id, Some(user_override(&txn, slug))).await.unwrap();
+        label_one_transaction(db, publisher, ops, &provider, catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+            .await
+            .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn paypal_decisions_learn_narrow_rules_that_resolve_a_new_transaction_without_the_llm() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let ops = LabelingOps::real(3, 2, 0.9);
+
+    decide_paypal_by_hand(&db, &publisher, &ops, &catalog).await;
+
+    let rules = rule_rows(&db).await;
+    assert_eq!(rules.len(), 2, "one narrow rule per category, no merchant-wide one: {rules:?}");
+    let mut contains: Vec<(String, Uuid)> = rules
+        .iter()
+        .map(|r| {
+            let conditions: webapp::kafka::labeling::RuleConditions =
+                serde_json::from_value(r.conditions.clone()).expect("conditions json");
+            assert_eq!(conditions.counterparty_key.as_deref(), Some("paypal"));
+            (conditions.description_contains.expect("narrow"), r.category_id)
+        })
+        .collect();
+    contains.sort();
+    assert_eq!(
+        contains,
+        vec![
+            ("etsy".to_string(), category_uuid("food.restaurants")),
+            ("netflix".to_string(), category_uuid("personal.gym"))
+        ]
+    );
+    let netflix_rule_id = webapp::kafka::labeling::learned_narrow_rule_uuid("paypal", "personal.gym", "netflix");
+
+    struct PanicProvider;
+    #[async_trait::async_trait]
+    impl categorizer::provider::LabelProvider for PanicProvider {
+        fn id(&self) -> &'static str {
+            "panic"
+        }
+        fn model(&self) -> &str {
+            "panic"
+        }
+        async fn suggest(
+            &self,
+            _req: &categorizer::provider::LabelRequest<'_>,
+        ) -> Result<categorizer::provider::LabelSuggestion, categorizer::provider::ProviderError> {
+            panic!("a narrow rule must short-circuit before ever calling the provider");
+        }
+    }
+
+    let third = seed_paypal(
+        &db,
+        "PP-N3",
+        "PayPal . NETFLIX INTERNATIONAL B.V. 4242424242 PP.4242.PP . , Ihr Einkauf bei NETFLIX",
+    )
+    .await;
+    label_one_transaction(&db, &publisher, &ops, &PanicProvider, &catalog, "test-prompt-v1", 0.0, &CostGuard::new(10), &third)
+        .await
+        .expect("resolves from the narrow rule");
+    let label = transaction_label::Entity::find_by_id(third.id).one(&db).await.unwrap().expect("label");
+    assert_eq!(label.label_source, "rule");
+    assert_eq!(label.rule_id, Some(netflix_rule_id));
+}
+
+#[tokio::test]
+async fn an_exempt_paypal_learns_no_narrow_rule_either() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let ops = LabelingOps::real(3, 2, 0.9);
+    proj::project_learning_exemption(&db, "paypal", Some(exemption_record("paypal"))).await.expect("exempt");
+
+    decide_paypal_by_hand(&db, &publisher, &ops, &catalog).await;
+    assert!(rule_rows(&db).await.is_empty(), "exempt merchant: no rule of any kind");
+}

@@ -28,7 +28,7 @@ use categorizer::provider::{CategoryCatalog, LabelProvider, LabelRequest};
 
 use crate::kafka::envelope::{Envelope, TOPIC_TRANSACTION};
 use crate::kafka::labeling::{
-    learned_rule_uuid, CacheRecord, LabelRecord, LabelSource, LabelStatus, LabelRequestRecord,
+    learned_narrow_rule_uuid, learned_rule_uuid, CacheRecord, LabelRecord, LabelSource, LabelStatus, LabelRequestRecord,
     LabelRequestTarget, ReviewReason, RuleOrigin, RuleRecord, RuleState, UserLabelRecord,
     CURRENT_SCHEMA_VERSION, TOPIC_LABEL_REQUEST, TOPIC_LLM_CACHE, TOPIC_RULE,
     TOPIC_TRANSACTION_LABEL, TOPIC_USER_LABEL,
@@ -71,7 +71,7 @@ type NormalizeFn = Box<dyn Fn(Option<&str>, Option<&str>) -> String + Send + Syn
 type FingerprintFn = Box<dyn Fn(&str, &str, &str, &str, &str, Direction) -> String + Send + Sync>;
 type MostSpecificMatchFn =
     Box<dyn Fn(&[RuleRecord], &RuleMatchInput<'_>) -> Option<RuleRecord> + Send + Sync>;
-type ConsiderFn = Box<dyn for<'a> Fn(&[Observation<'a>]) -> Option<LearnedRule> + Send + Sync>;
+type ConsiderFn = Box<dyn for<'a> Fn(&[Observation<'a>]) -> Vec<LearnedRule> + Send + Sync>;
 
 pub struct LabelingOps {
     normalize: NormalizeFn,
@@ -105,7 +105,7 @@ impl LabelingOps {
                 rules::most_specific_match(rules_slice, input).cloned()
             }),
             consider: Box::new(move |observations| {
-                learn::consider(observations, min_observations, min_user_observations, auto_approve_threshold)
+                learn::candidates(observations, min_observations, min_user_observations, auto_approve_threshold)
             }),
         }
     }
@@ -133,7 +133,7 @@ impl LabelingOps {
             normalize: Box::new(normalize),
             fingerprint: Box::new(fingerprint),
             most_specific_match: Box::new(most_specific_match),
-            consider: Box::new(consider),
+            consider: Box::new(move |observations| consider(observations).into_iter().collect()),
         }
     }
 }
@@ -789,12 +789,12 @@ pub async fn maybe_learn_rule(
     publisher: &EventPublisher,
     ops: &LabelingOps,
     counterparty_key: &str,
-) -> Result<Option<RuleRecord>, DbErr> {
+) -> Result<Vec<RuleRecord>, DbErr> {
     // A merchant the user has exempted never gets a candidate at all - not
     // even an `in_review` one, since the point is never to be asked. Checked
     // before anything is considered, so nothing can reach `publish_rule`.
     if proj::is_learning_exempt(db, counterparty_key).await? {
-        return Ok(None);
+        return Ok(Vec::new());
     }
     let observations = proj::observations_for_counterparty_key(db, counterparty_key).await?;
     let observations: Vec<Observation<'_>> = observations
@@ -804,44 +804,58 @@ pub async fn maybe_learn_rule(
             category_slug: o.category_slug.as_str(),
             confidence: o.confidence,
             user_confirmed: o.user_confirmed,
+            description: o.description.as_deref(),
         })
         .collect();
 
-    let Some(candidate) = (ops.consider)(&observations) else {
-        return Ok(None);
-    };
+    // One merchant-wide rule when the merchant is unambiguous, otherwise the
+    // description-qualified rules `learn::consider_narrow` could verify.
+    let mut published = Vec::new();
+    for candidate in (ops.consider)(&observations) {
+        let rule_id = match candidate.description_contains.as_deref() {
+            Some(needle) => learned_narrow_rule_uuid(&candidate.counterparty_key, &candidate.category_slug, needle),
+            None => learned_rule_uuid(&candidate.counterparty_key, &candidate.category_slug),
+        };
+        if let Some(existing) = proj::find_rule(db, rule_id).await?
+            && (existing.user_touched || existing.state != RuleState::InReview || existing.origin != RuleOrigin::Learned)
+        {
+            continue;
+        }
 
-    let rule_id = learned_rule_uuid(&candidate.counterparty_key, &candidate.category_slug);
-    if let Some(existing) = proj::find_rule(db, rule_id).await?
-        && (existing.user_touched || existing.state != RuleState::InReview || existing.origin != RuleOrigin::Learned)
-    {
-        return Ok(None);
+        let now = Utc::now();
+        let name = match candidate.description_contains.as_deref() {
+            Some(needle) => format!(
+                "Learned: {} containing \"{}\" -> {}",
+                candidate.counterparty_key, needle, candidate.category_slug
+            ),
+            None => format!("Learned: {} -> {}", candidate.counterparty_key, candidate.category_slug),
+        };
+        let record = RuleRecord {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            id: rule_id,
+            name,
+            category_slug: candidate.category_slug.clone(),
+            conditions: crate::kafka::labeling::RuleConditions {
+                counterparty_key: Some(candidate.counterparty_key.clone()),
+                description_contains: candidate.description_contains.clone(),
+                ..Default::default()
+            },
+            priority: 0,
+            state: if candidate.auto_approved { RuleState::Active } else { RuleState::InReview },
+            origin: RuleOrigin::Learned,
+            auto_approved: candidate.auto_approved,
+            user_touched: false,
+            confidence: Some(candidate.confidence),
+            evidence: None,
+            created_at: now,
+            revision: now,
+        };
+
+        publish_rule(publisher, &record).await;
+        proj::project_rule(db, rule_id, Some(record.clone())).await?;
+        published.push(record);
     }
-
-    let now = Utc::now();
-    let record = RuleRecord {
-        schema_version: CURRENT_SCHEMA_VERSION,
-        id: rule_id,
-        name: format!("Learned: {} -> {}", candidate.counterparty_key, candidate.category_slug),
-        category_slug: candidate.category_slug.clone(),
-        conditions: crate::kafka::labeling::RuleConditions {
-            counterparty_key: Some(candidate.counterparty_key.clone()),
-            ..Default::default()
-        },
-        priority: 0,
-        state: if candidate.auto_approved { RuleState::Active } else { RuleState::InReview },
-        origin: RuleOrigin::Learned,
-        auto_approved: candidate.auto_approved,
-        user_touched: false,
-        confidence: Some(candidate.confidence),
-        evidence: None,
-        created_at: now,
-        revision: now,
-    };
-
-    publish_rule(publisher, &record).await;
-    proj::project_rule(db, rule_id, Some(record.clone())).await?;
-    Ok(Some(record))
+    Ok(published)
 }
 
 async fn publish_rule(publisher: &EventPublisher, record: &RuleRecord) {
