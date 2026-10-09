@@ -120,6 +120,30 @@ This is a real improvement - adding a PayPal account stops being a deploy - but
 it is not "no 1Password at all", and pretending otherwise would mean storing
 the key next to the ciphertext.
 
+#### 2.5.1b Envelope encryption: a per-user key, wrapped by the master key
+
+The user's refinement, 2026-10-09: *"but server can create a master key per
+user, no? user doesn't even have to see it."* Yes - and it is the better
+design. The server generates a **per-user data key**, stores it encrypted under
+the master key from 2.5.1, and the user never sees or handles it.
+
+What this buys, stated honestly:
+
+- **Crypto-shredding.** Deleting a user destroys their data key, which makes
+  their stored credentials unrecoverable immediately - including in backups
+  and replicas already taken. Without it, "delete the user" means rewriting
+  rows and hoping no copy survives.
+- **Blast radius.** One leaked data key exposes one user, not the estate.
+- **Independent rotation** per user, without touching anyone else's rows.
+
+What it does **not** buy: protection from an attacker holding both the database
+and the master key, since the master unwraps every data key. No scheme can,
+while an unattended importer still has to decrypt at 3am with nobody logged in.
+Do not let the extra layer suggest otherwise.
+
+Cost is small - one wrapped key per user plus unwrap-on-use - so the extra
+indirection is worth it for the shredding property alone.
+
 #### 2.5.2 Rules the implementation must hold
 
 - **Encrypt with an AEAD** (XChaCha20-Poly1305 or AES-256-GCM) from a vetted
@@ -135,9 +159,13 @@ the key next to the ciphertext.
   this in a test.
 - **Admin-only mutations**, enforced server-side on every one - the existing
   role check, not a hidden menu.
-- **Key rotation must be possible** without re-entering every credential:
-  decrypt with the old key, re-encrypt with the new. Record which key version
-  encrypted each row so a rotation is resumable and auditable.
+- **Key rotation must be possible** without re-entering every credential.
+  Rotating the master re-wraps the per-user data keys only, not every
+  credential row - the cheap rotation being the point of the envelope. Record
+  which key version wrapped each data key so a rotation is resumable and
+  auditable.
+- **Deleting a user destroys their data key**, and that destruction is the
+  deletion; do not rely on row deletion alone.
 - **Audit the fact, never the value.** A credential being created, changed or
   deleted is worth a log line naming the account and the actor; its contents
   are not.
