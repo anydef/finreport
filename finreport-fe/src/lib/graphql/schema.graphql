@@ -231,6 +231,15 @@ type CategoryBreakdownRow {
 	share: Float!
 }
 
+type CategoryComparison {
+	periods: [ComparisonPeriod!]!
+	"""
+	Every category that appears in at least one period, heaviest first.
+	"""
+	categories: [ComparisonCategory!]!
+	currency: String!
+}
+
 input CategoryInput {
 	slug: String!
 	name: String!
@@ -243,6 +252,57 @@ enum CategoryKind {
 	EXPENSE
 	TRANSFER
 	SAVING
+}
+
+type ComparisonCategory {
+	category: Category!
+	"""
+	Sum of `cells`, so the list can be ordered by overall weight.
+	"""
+	total: Decimal!
+	"""
+	One per entry of `periods`, in the same order.
+	"""
+	cells: [ComparisonCell!]!
+}
+
+type ComparisonCell {
+	"""
+	Magnitude of the category's signed net in the period; `0` when the
+	category had no transactions (or a refund cancelled them).
+	"""
+	amount: Decimal!
+	"""
+	`0` means the category was absent from the period altogether, as opposed
+	to present and netting to zero.
+	"""
+	transactionCount: Int!
+}
+
+type ComparisonPeriod {
+	"""
+	Inclusive. The first and last periods are clipped to the requested range.
+	"""
+	start: Date!
+	"""
+	Inclusive.
+	"""
+	end: Date!
+	"""
+	Everything spent in the period that is not held for review: the
+	categories' amounts plus `uncategorized`. This is the headline figure.
+	"""
+	total: Decimal!
+	"""
+	Unlabelled spending, as the breakdown's `uncategorized` row (magnitude of
+	the signed net). Included in `total`.
+	"""
+	uncategorized: Decimal!
+	"""
+	Held for review, as the breakdown's `needsReview` row. Deliberately NOT
+	in `total` and in no category: the label is not trusted yet.
+	"""
+	needsReview: Decimal!
 }
 
 scalar Date
@@ -589,6 +649,14 @@ type Query {
 	"""
 	categories(includeArchived: Boolean! = false): [Category!]!
 	categoryBreakdown(filter: TransactionFilter!, level: Int! = 1, kind: CategoryKind): CategoryBreakdown!
+	"""
+	Spending per category across consecutive calendar periods of
+	`filter`'s `startDate`..`endDate`, plus each period's total — one
+	query for a headline trend and for "which categories drove it".
+	`kind` defaults to `EXPENSE`. Same scoping and rules as
+	`categoryBreakdown`, which it is built on.
+	"""
+	categoryComparison(filter: TransactionFilter!, granularity: Granularity! = MONTH, level: Int! = 1, kind: CategoryKind! = EXPENSE): CategoryComparison!
 	"""
 	`rules` (§5): like `categories`, not tenant-scoped — rules apply to
 	every account the labeler sees.

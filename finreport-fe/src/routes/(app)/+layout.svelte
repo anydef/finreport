@@ -10,6 +10,7 @@
 	const tabs = [
 		{ label: 'Dashboard', href: '/' },
 		{ label: 'Transactions', href: '/transactions' },
+		{ label: 'Compare', href: '/compare' },
 		// Iteration 3 §6 WP0: added once here so WP-C's Recurring page and the
 		// existing tabs never both edit this layout.
 		{ label: 'Recurring', href: '/recurring' },

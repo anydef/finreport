@@ -51,15 +51,15 @@ pub(crate) fn transfer_filter_sql(id_expr: &str, filter: &TransactionFilter) -> 
     }
 }
 
-fn bounded_range(filter: &TransactionFilter) -> GqlResult<(NaiveDate, NaiveDate)> {
+pub(crate) fn bounded_range(filter: &TransactionFilter) -> GqlResult<(NaiveDate, NaiveDate)> {
     match (filter.start_date, filter.end_date) {
         (Some(start), Some(end)) if start.0 <= end.0 => Ok((start.0, end.0)),
         (Some(start), Some(end)) => Err(async_graphql::Error::new(format!(
-            "cashflowSummary: startDate {start:?} must not be after endDate {end:?}"
+            "startDate {start:?} must not be after endDate {end:?}"
         ))
         .extend_with(|_, e| e.set("code", "VALIDATION"))),
         _ => Err(
-            async_graphql::Error::new("cashflowSummary requires both startDate and endDate")
+            async_graphql::Error::new("a date range needs both startDate and endDate")
                 .extend_with(|_, e| e.set("code", "VALIDATION")),
         ),
     }
@@ -137,7 +137,7 @@ fn to_graphql_summary(dense: Vec<summary::DenseBucket>, currency: String) -> Cas
 }
 
 /// Iteration 1 assumes one currency per account set; the first seen (§5).
-async fn first_currency(db: &DatabaseConnection, scoped_ids: &[Uuid]) -> GqlResult<String> {
+pub(crate) async fn first_currency(db: &DatabaseConnection, scoped_ids: &[Uuid]) -> GqlResult<String> {
     if scoped_ids.is_empty() {
         return Ok("EUR".to_string());
     }

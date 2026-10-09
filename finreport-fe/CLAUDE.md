@@ -40,6 +40,7 @@ npm run storybook          # component dev server
 - `(app)` route group — auth-guarded, shares a nav layout (Dashboard / Transactions tabs + logout).
   - `/` — the dashboard: period selector (month/week/custom + granularity), totals, a `CashflowBarChart` (income/spending bars) and a `CashflowSankey` (income → account → spending, with `Other`/`NET`/`DEFICIT` nodes), and a paged transaction list. Clicking a bar narrows the list to that bucket's date range (`txStart`/`txEnd` search params); clicking a Sankey node/link narrows it by the `sel*` params (`selAccountIds`/`selCounterparties`/`selHasCounterparty`/`selCategorySlugs`/`selUncategorized`/`selNeedsReview`, via `chartShaping.ts`'s `drilldownFilterForNode`/`drilldownFilterForLink`) — a chart click narrows only the list. The "Spending by category" card expands a row to its subcategories (child `categoryBreakdown` fetched on open, scoped to the category at `level: depth + 1`) and drills down on the row itself, including the Uncategorized and Needs review rows (`breakdownShaping.ts`'s `drilldownForBar`). The shared `TransactionFilters` panel (search params `accountIds`, `categorySlugs`, `tags`, `search`, `amountMin`/`amountMax`, tri-state `recurring`/`transfer`/`needsReview`/`uncategorized`) is separate and narrows the totals, charts, breakdown *and* list; a panel edit resets the chart selection.
   - `/transactions` — a paged transaction list with the same `TransactionFilters` panel (plus a period select), no charts.
+  - `/compare` — month-over-month comparison: `categoryComparison` for the last 3/6/12 months (ending this month or a past one; `months`/`end` params), a total-per-month bar chart, and a category table (per-month amounts, change and %, `new`/`gone` instead of a percentage) between two chosen months (`base`/`to` params, defaulting to the last two complete months). Cells link to `/transactions` for that month and category. Shaping lives in `comparisonView.ts`; the mock is `graphql/comparisonMock.ts` (honours the requested range).
 - `/login` — public.
 - `/api/graphql` — the proxy (see above).
 
@@ -50,7 +51,8 @@ LayerChart's `Chart` component has a server-rendering bug on this Svelte/Node co
 - Run `npm run check` and `npm run lint` before considering frontend work done.
 - Vitest (`npm run test:unit`) covers pure, non-Svelte logic extracted into `src/lib/*.ts`:
 
-  - `src/lib/period.ts` — date range presets, default granularity, bucket labeling.
+  - `src/lib/period.ts` — date range presets, calendar months/years (the `preset` param also carries `month:YYYY-MM` and `year:YYYY`; `PeriodOptions.svelte` lists them), default granularity, bucket labeling.
+  - `src/lib/comparisonView.ts` — the `/compare` window, deltas (new/gone/zero-base), table and chart shaping, drill-down links.
   - `src/lib/chartShaping.ts` — shaping `CashflowSummary`/`CashflowGraph` GraphQL responses into chart-ready datasets, plus the drilldown-filter builders (covers the `DEFICIT`/`NET`/`Other`/unknown-`kind` edge cases using the actual WP0 mock fixtures).
   - `src/lib/format.ts` — amount/date display formatting.
   - `src/lib/transactionFilters.ts` — the filter panel's logic: search params <-> filter, active-filter chips, tri-state flags, amount bounds, layering a chart selection over the panel.

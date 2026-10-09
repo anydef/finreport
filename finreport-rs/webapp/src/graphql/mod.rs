@@ -1,6 +1,7 @@
 mod attention;
 mod accounts;
 mod breakdown;
+mod comparison;
 mod bulk;
 pub(crate) mod cashflow;
 pub mod categories;

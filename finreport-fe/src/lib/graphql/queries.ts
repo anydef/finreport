@@ -606,3 +606,30 @@ query AttentionSummary {
 		}
 	}
 }`;
+
+export const CATEGORY_COMPARISON_QUERY = `
+query CategoryComparison($filter: TransactionFilter!, $granularity: Granularity! = MONTH, $level: Int! = 1, $kind: CategoryKind! = EXPENSE) {
+	categoryComparison(filter: $filter, granularity: $granularity, level: $level, kind: $kind) {
+		currency
+		periods {
+			start
+			end
+			total
+			uncategorized
+			needsReview
+		}
+		categories {
+			category {
+				id
+				slug
+				name
+				kind
+			}
+			total
+			cells {
+				amount
+				transactionCount
+			}
+		}
+	}
+}`;

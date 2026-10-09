@@ -14,6 +14,7 @@ import { env as publicEnv } from '$env/dynamic/public';
 import type { RequestEvent } from '@sveltejs/kit';
 import { amountWithinRange } from '$lib/transactionFilters';
 import { compareBySort, DEFAULT_SORT } from '$lib/transactionSort';
+import { mockCategoryComparison } from '$lib/graphql/comparisonMock';
 import type { TransactionSort } from '$lib/graphql/types';
 
 import accountsMock from '$lib/graphql/mocks/accounts.json';
@@ -747,6 +748,12 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		// return NOT_IMPLEMENTED until their owning WP lands.
 		case 'CategoryBreakdown':
 			return { status: 200, body: { data: mockCategoryBreakdown(body.variables) }, setCookies: [] };
+		case 'CategoryComparison':
+			return {
+				status: 200,
+				body: { data: mockCategoryComparison(body.variables) },
+				setCookies: []
+			};
 		case 'Categories':
 			return { status: 200, body: { data: categoriesMock.data }, setCookies: [] };
 		case 'ReviewQueue':

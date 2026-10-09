@@ -15,9 +15,10 @@ use crate::graphql::types::{
     CategoryBreakdown, CategoryKind, Granularity, Me, PageInput, RecurringOverview, ReviewQueue,
     Rule, RuleState, TagCount, TransactionFilter, TransactionPage, TransactionSort,
 };
+use crate::graphql::comparison::CategoryComparison;
 use crate::graphql::scalars::{Date, Uuid};
 use crate::graphql::{
-    accounts, attention, breakdown, categories, goals, held_groups, review_queue, rules, transactions,
+    accounts, attention, breakdown, categories, comparison, goals, held_groups, review_queue, rules, transactions,
 };
 
 pub struct QueryRoot;
@@ -140,6 +141,29 @@ impl QueryRoot {
             .map(|ids| ids.iter().map(|id| id.0).collect());
         let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
         breakdown::fetch_breakdown(db, &scoped_ids, &filter, level, kind).await
+    }
+
+    /// Spending per category across consecutive calendar periods of
+    /// `filter`'s `startDate`..`endDate`, plus each period's total — one
+    /// query for a headline trend and for "which categories drove it".
+    /// `kind` defaults to `EXPENSE`. Same scoping and rules as
+    /// `categoryBreakdown`, which it is built on.
+    async fn category_comparison(
+        &self,
+        ctx: &Context<'_>,
+        filter: TransactionFilter,
+        #[graphql(default_with = "Granularity::Month")] granularity: Granularity,
+        #[graphql(default = 1)] level: i32,
+        #[graphql(default_with = "CategoryKind::Expense")] kind: CategoryKind,
+    ) -> GqlResult<CategoryComparison> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let requested_ids: Option<Vec<uuid::Uuid>> = filter
+            .account_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0).collect());
+        let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
+        comparison::fetch_comparison(db, &scoped_ids, filter, granularity, level, kind).await
     }
 
     /// `rules` (§5): like `categories`, not tenant-scoped — rules apply to
