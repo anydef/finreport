@@ -1,0 +1,23 @@
+{
+  "query": "query DisplayAliases {\n  displayAliases {\n    kind\n    key\n    alias\n    rawName\n    transactionCount\n    updatedAt\n  }\n}",
+  "data": {
+    "displayAliases": [
+      {
+        "kind": "COUNTERPARTY",
+        "key": "pavlo fedyna",
+        "alias": "Pavlo (savings, other bank)",
+        "rawName": "Pavlo Fedyna",
+        "transactionCount": 6,
+        "updatedAt": "2024-06-20T10:00:00Z"
+      },
+      {
+        "kind": "ACCOUNT",
+        "key": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+        "alias": "Pavlo - everyday",
+        "rawName": "Main",
+        "transactionCount": null,
+        "updatedAt": "2024-06-19T08:15:00Z"
+      }
+    ]
+  }
+}

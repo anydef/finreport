@@ -96,6 +96,10 @@ services:
         # lifts the exemption.
         $$RPK topic create finreport.learning-exemption \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        # Display aliases: keyed <user_id>:<kind>:<key>, compacted; a tombstone
+        # removes the alias.
+        $$RPK topic create finreport.display-alias \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 
   finreport-be:

@@ -735,3 +735,181 @@ async fn the_search_filter_is_case_insensitive() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Display aliases
+// ---------------------------------------------------------------------------
+
+mod display_aliases {
+    use super::*;
+    use chrono::Utc;
+    use entity::entities::transaction;
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+    use secrecy::ExposeSecret;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use uuid::Uuid;
+    use webapp::kafka::labeling::{AliasKind, DisplayAliasRecord, CURRENT_SCHEMA_VERSION};
+    use webapp::projection::display_alias::project_display_alias;
+
+    struct Tenant {
+        user: AuthenticatedUser,
+        account: Uuid,
+    }
+
+    async fn tenant(db: &DatabaseConnection, name: &str) -> Tenant {
+        let (user_id, username) = common::seed_user(db, name, "pw").await;
+        let account = common::seed_account(db, "EUR", "Pavlo").await;
+        common::link(db, user_id, account).await;
+        Tenant { user: AuthenticatedUser { user_id, username, account_ids: vec![account] }, account }
+    }
+
+    async fn tx(db: &DatabaseConnection, account: Uuid, name: &str) {
+        let id = common::seed_transaction(db, account, "2024-07-01", "-5", Some(name)).await;
+        let key = webapp::labeling::normalize::normalize(Some(name), None);
+        let mut model: transaction::ActiveModel =
+            transaction::Entity::find_by_id(id).one(db).await.unwrap().unwrap().into();
+        model.counterparty_key = Set(Some(key));
+        model.update(db).await.unwrap();
+    }
+
+    async fn alias(db: &DatabaseConnection, user: Uuid, kind: AliasKind, key: &str, alias: &str) {
+        let record = DisplayAliasRecord {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            user_id: user,
+            kind,
+            key: key.to_string(),
+            alias: alias.to_string(),
+            revision: Utc::now(),
+        };
+        project_display_alias(db, user, kind, key, Some(record)).await.unwrap();
+    }
+
+    async fn run(
+        schema: &webapp::graphql::AppSchema,
+        user: &AuthenticatedUser,
+        query: &str,
+    ) -> serde_json::Value {
+        let response = schema.execute(authed(Request::new(query), Some(user.clone()))).await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        response.data.into_json().unwrap()
+    }
+
+    const ITEMS: &str = r#"{ transactions(filter: { startDate: "2024-07-01", endDate: "2024-07-31" })
+        { items { counterpartyName counterpartyDisplayName } } }"#;
+
+    #[tokio::test]
+    async fn the_alias_covers_every_spelling_and_leaves_the_raw_name_alone() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let t = tenant(&db, &format!("alias-{}", Uuid::new_v4().simple())).await;
+        let unique = Uuid::new_v4().simple().to_string();
+        let spellings = [
+            format!("Mum {unique} GmbH"),
+            format!("MUM {unique}"),
+            format!("mum {unique} 12.03"),
+        ];
+        for s in &spellings {
+            tx(&db, t.account, s).await;
+        }
+        tx(&db, t.account, "Unrelated Shop").await;
+        let key = webapp::labeling::normalize::normalize(Some(&spellings[0]), None);
+        alias(&db, t.user.user_id, AliasKind::Counterparty, &key, "Mum").await;
+
+        let data = run(&schema, &t.user, ITEMS).await;
+        for item in data["transactions"]["items"].as_array().unwrap() {
+            let raw = item["counterpartyName"].as_str().unwrap();
+            let shown = item["counterpartyDisplayName"].as_str().unwrap();
+            if raw == "Unrelated Shop" {
+                assert_eq!(shown, raw, "an unaliased merchant shows the bank name");
+            } else {
+                assert_eq!(shown, "Mum", "{raw:?} must show the alias");
+            }
+        }
+
+        // A tombstone brings the bank name back, unchanged.
+        project_display_alias(db.as_ref(), t.user.user_id, AliasKind::Counterparty, &key, None)
+            .await
+            .unwrap();
+        let data = run(&schema, &t.user, ITEMS).await;
+        for item in data["transactions"]["items"].as_array().unwrap() {
+            assert_eq!(item["counterpartyName"], item["counterpartyDisplayName"]);
+        }
+    }
+
+    #[tokio::test]
+    async fn aliases_are_per_user_and_account_aliases_need_an_accessible_account() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let alice = tenant(&db, &format!("alias-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("alias-b-{}", Uuid::new_v4().simple())).await;
+        let name = format!("Shared Shop {}", Uuid::new_v4().simple());
+        tx(&db, alice.account, &name).await;
+        tx(&db, bob.account, &name).await;
+        let key = webapp::labeling::normalize::normalize(Some(&name), None);
+        alias(&db, alice.user.user_id, AliasKind::Counterparty, &key, "Alice's shop").await;
+        alias(&db, alice.user.user_id, AliasKind::Account, &alice.account.to_string(), "Alice main").await;
+
+        let bobs = run(&schema, &bob.user, ITEMS).await;
+        assert_eq!(bobs["transactions"]["items"][0]["counterpartyDisplayName"], name);
+        let list = run(&schema, &bob.user, "{ displayAliases { key } }").await;
+        assert_eq!(list["displayAliases"].as_array().unwrap().len(), 0);
+
+        let alices = run(
+            &schema,
+            &alice.user,
+            "{ displayAliases { kind key alias rawName transactionCount } accounts { displayName label } }",
+        )
+        .await;
+        assert_eq!(alices["displayAliases"].as_array().unwrap().len(), 2);
+        let merchant = alices["displayAliases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["kind"] == "COUNTERPARTY")
+            .unwrap();
+        assert_eq!(merchant["rawName"], name);
+        assert_eq!(merchant["transactionCount"], 1);
+        assert_eq!(alices["accounts"][0]["displayName"], "Alice main");
+        assert_eq!(alices["accounts"][0]["label"], "Pavlo", "label stays the login label");
+        let bob_accounts = run(&schema, &bob.user, "{ accounts { displayName } }").await;
+        assert_eq!(bob_accounts["accounts"][0]["displayName"], "Pavlo");
+
+        // Bob cannot alias Alice's account.
+        let mutation = format!(
+            r#"mutation {{ setDisplayAlias(kind: ACCOUNT, key: "{}", alias: "mine") {{ key }} }}"#,
+            alice.account
+        );
+        let response = schema.execute(authed(Request::new(mutation), Some(bob.user.clone()))).await;
+        assert!(response.errors[0].message.contains("not accessible"), "{:?}", response.errors);
+    }
+
+    #[tokio::test]
+    async fn a_page_of_rows_issues_one_alias_query() {
+        let db = common::db().await;
+        let t = tenant(&db, &format!("alias-q-{}", Uuid::new_v4().simple())).await;
+        for i in 0..25 {
+            tx(&db, t.account, &format!("Row Shop {i} {}", Uuid::new_v4().simple())).await;
+        }
+        alias(&db, t.user.user_id, AliasKind::Counterparty, "row shop", "Rows").await;
+
+        // A private connection with a statement counter in front of the schema.
+        let url = common::dummy_settings().database_url.as_ref().unwrap().expose_secret().to_string();
+        let mut counted = sea_orm::Database::connect(url).await.unwrap();
+        let alias_queries = Arc::new(AtomicUsize::new(0));
+        let seen = alias_queries.clone();
+        counted.set_metric_callback(move |info| {
+            if info.statement.sql.contains("\"display_alias\"") {
+                seen.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let schema = create_schema(Arc::new(counted), common::dummy_settings());
+
+        let data = run(&schema, &t.user, ITEMS).await;
+        assert!(data["transactions"]["items"].as_array().unwrap().len() >= 25);
+        assert_eq!(
+            alias_queries.load(Ordering::SeqCst),
+            1,
+            "one alias query for the whole page, not one per row"
+        );
+    }
+}

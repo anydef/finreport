@@ -187,6 +187,15 @@ impl QueryRoot {
         crate::graphql::learning_exemptions::fetch_learning_exemptions(db, &scoped_ids).await
     }
 
+    /// `displayAliases`: the caller's own nicknames for merchants and
+    /// accounts, each with the original name alongside.
+    async fn display_aliases(
+        &self,
+        ctx: &Context<'_>,
+    ) -> GqlResult<Vec<crate::graphql::display_aliases::DisplayAlias>> {
+        crate::graphql::display_aliases::list(ctx).await
+    }
+
     async fn recently_auto_approved_rules(
         &self,
         ctx: &Context<'_>,

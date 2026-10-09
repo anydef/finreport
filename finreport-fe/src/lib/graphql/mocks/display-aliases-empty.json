@@ -1,0 +1,6 @@
+{
+  "query": "query DisplayAliases {\n  displayAliases {\n    kind\n    key\n    alias\n    rawName\n    transactionCount\n    updatedAt\n  }\n}",
+  "data": {
+    "displayAliases": []
+  }
+}

@@ -40,6 +40,8 @@ import goalProgressFixedMock from '$lib/graphql/mocks/goal-progress-fixed.json';
 import goalTransactionsMock from '$lib/graphql/mocks/goal-transactions.json';
 import learningExemptionsMock from '$lib/graphql/mocks/learning-exemptions.json';
 import learningExemptionsEmptyMock from '$lib/graphql/mocks/learning-exemptions-empty.json';
+import displayAliasesMock from '$lib/graphql/mocks/display-aliases.json';
+import displayAliasesEmptyMock from '$lib/graphql/mocks/display-aliases-empty.json';
 
 /** Name of the mock-mode session cookie, mirroring the real `fr_session` cookie's role. */
 const MOCK_SESSION_COOKIE = 'fr_session';
@@ -601,6 +603,62 @@ function mockRemoveLearningExemption(variables: Record<string, unknown> | undefi
 	return index >= 0;
 }
 
+interface MockDisplayAlias {
+	kind: string;
+	key: string;
+	alias: string;
+	rawName: string;
+	transactionCount: number | null;
+	updatedAt: string;
+}
+
+/**
+ * Display aliases are in-memory mock state, like the exemptions: setting,
+ * editing and removing must visibly work end to end, including the empty
+ * state. Seeded from the fixture; a restart resets it.
+ */
+const mockAliases: MockDisplayAlias[] = [
+	...(displayAliasesMock.data.displayAliases as MockDisplayAlias[])
+];
+
+function mockDisplayAliases(): unknown {
+	return mockAliases.length === 0
+		? displayAliasesEmptyMock.data
+		: { displayAliases: [...mockAliases] };
+}
+
+function mockSetDisplayAlias(variables: Record<string, unknown> | undefined): MockDisplayAlias {
+	const kind = String(variables?.kind ?? 'COUNTERPARTY');
+	const rawKey = String(variables?.key ?? '').trim();
+	const key = kind === 'ACCOUNT' ? rawKey : rawKey.toLowerCase();
+	const account = accountsMock.data.accounts.find((a) => a.id === key);
+	const entry: MockDisplayAlias = {
+		kind,
+		key,
+		alias: String(variables?.alias ?? '').trim(),
+		rawName: kind === 'ACCOUNT' ? (account?.label ?? key) : rawKey,
+		transactionCount: kind === 'ACCOUNT' ? null : 0,
+		updatedAt: new Date().toISOString()
+	};
+	const index = mockAliases.findIndex((a) => a.kind === kind && a.key === key);
+	if (index >= 0) {
+		entry.rawName = mockAliases[index].rawName;
+		entry.transactionCount = mockAliases[index].transactionCount;
+		mockAliases.splice(index, 1);
+	}
+	mockAliases.unshift(entry);
+	return entry;
+}
+
+function mockRemoveDisplayAlias(variables: Record<string, unknown> | undefined): boolean {
+	const kind = String(variables?.kind ?? '');
+	const rawKey = String(variables?.key ?? '').trim();
+	const key = kind === 'ACCOUNT' ? rawKey : rawKey.toLowerCase();
+	const index = mockAliases.findIndex((a) => a.kind === kind && a.key === key);
+	if (index >= 0) mockAliases.splice(index, 1);
+	return index >= 0;
+}
+
 /** `reapplyRule` returns how many transactions it will re-queue (§5); a fixed, plausible count in mock mode. */
 function mockReapplyRule(): unknown {
 	return 7;
@@ -935,6 +993,20 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: { data: { removeLearningExemption: mockRemoveLearningExemption(body.variables) } },
+				setCookies: []
+			};
+		case 'DisplayAliases':
+			return { status: 200, body: { data: mockDisplayAliases() }, setCookies: [] };
+		case 'SetDisplayAlias':
+			return {
+				status: 200,
+				body: { data: { setDisplayAlias: mockSetDisplayAlias(body.variables) } },
+				setCookies: []
+			};
+		case 'RemoveDisplayAlias':
+			return {
+				status: 200,
+				body: { data: { removeDisplayAlias: mockRemoveDisplayAlias(body.variables) } },
 				setCookies: []
 			};
 		case 'ReapplyRule':

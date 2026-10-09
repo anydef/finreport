@@ -1,0 +1,6 @@
+{
+  "query": "mutation RemoveDisplayAlias($kind: DisplayAliasKind!, $key: String!) {\n  removeDisplayAlias(kind: $kind, key: $key)\n}",
+  "data": {
+    "removeDisplayAlias": true
+  }
+}

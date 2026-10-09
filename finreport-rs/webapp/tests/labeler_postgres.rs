@@ -1362,3 +1362,88 @@ async fn a_note_only_user_label_changes_nothing_about_the_label() {
     let rule_after = proj::find_rule(&db, rule_id).await.unwrap().map(|r| (r.state, r.revision));
     assert_eq!(rule_after, rule_before, "no rule learned, changed or revoked by a note");
 }
+
+// ---------------------------------------------------------------------------
+// Display aliases: projection
+// ---------------------------------------------------------------------------
+
+type AliasLog = Vec<(webapp::kafka::labeling::AliasKind, String, Option<webapp::kafka::labeling::DisplayAliasRecord>)>;
+
+fn alias_record(
+    user: Uuid,
+    kind: webapp::kafka::labeling::AliasKind,
+    key: &str,
+    alias: &str,
+    revision: chrono::DateTime<Utc>,
+) -> webapp::kafka::labeling::DisplayAliasRecord {
+    webapp::kafka::labeling::DisplayAliasRecord {
+        schema_version: webapp::kafka::labeling::CURRENT_SCHEMA_VERSION,
+        user_id: user,
+        kind,
+        key: key.to_string(),
+        alias: alias.to_string(),
+        revision,
+    }
+}
+
+async fn apply_alias_log(db: &sea_orm::DatabaseConnection, user: Uuid, log: &AliasLog) -> Vec<(String, String, String)> {
+    for (kind, key, record) in log {
+        webapp::projection::display_alias::project_display_alias(db, user, *kind, key, record.clone())
+            .await
+            .unwrap();
+    }
+    use sea_orm::{ColumnTrait, QueryFilter};
+    let mut rows: Vec<_> = entity::entities::display_alias::Entity::find()
+        .filter(entity::entities::display_alias::Column::UserId.eq(user))
+        .all(db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|r| (r.kind, r.key, r.alias))
+        .collect();
+    rows.sort();
+    rows
+}
+
+/// Projection: both key kinds project, a stale record is ignored by the
+/// revision guard, a tombstone removes the row, and replaying the log from
+/// offset 0 into an empty table reproduces it.
+#[tokio::test]
+async fn display_alias_projects_tombstones_and_replays() {
+    use webapp::kafka::labeling::AliasKind::{Account, Counterparty};
+    let pg = TestPostgres::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+
+    let user = Uuid::new_v4();
+    let account = Uuid::new_v4().to_string();
+    let t0 = Utc::now();
+    let log: AliasLog = vec![
+        (Counterparty, "amazon".to_string(), Some(alias_record(user, Counterparty, "amazon", "Shopping", t0))),
+        (Account, account.clone(), Some(alias_record(user, Account, &account, "Joint", t0))),
+        // Stale echo, older than what is stored: ignored.
+        (Counterparty, "amazon".to_string(), Some(alias_record(user, Counterparty, "amazon", "Old", t0 - chrono::Duration::seconds(60)))),
+        // A newer edit replaces it.
+        (Counterparty, "paypal".to_string(), Some(alias_record(user, Counterparty, "paypal", "PP", t0))),
+        (Counterparty, "paypal".to_string(), Some(alias_record(user, Counterparty, "paypal", "PayPal wallet", t0 + chrono::Duration::seconds(5)))),
+        (Counterparty, "lidl".to_string(), Some(alias_record(user, Counterparty, "lidl", "Lidl", t0))),
+        (Counterparty, "lidl".to_string(), None),
+    ];
+    let first = apply_alias_log(&db, user, &log).await;
+    assert_eq!(
+        first,
+        vec![
+            ("account".to_string(), account.clone(), "Joint".to_string()),
+            ("counterparty".to_string(), "amazon".to_string(), "Shopping".to_string()),
+            ("counterparty".to_string(), "paypal".to_string(), "PayPal wallet".to_string()),
+        ],
+        "stale ignored, newer edit won, tombstone removed lidl"
+    );
+
+    use sea_orm::{ColumnTrait, QueryFilter};
+    entity::entities::display_alias::Entity::delete_many()
+        .filter(entity::entities::display_alias::Column::UserId.eq(user))
+        .exec(&db)
+        .await
+        .unwrap();
+    assert_eq!(apply_alias_log(&db, user, &log).await, first, "replay from offset 0 reproduces the table");
+}

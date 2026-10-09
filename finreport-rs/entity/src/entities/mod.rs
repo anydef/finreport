@@ -6,6 +6,7 @@ pub mod account;
 pub mod account_balance;
 pub mod app_user;
 pub mod category;
+pub mod display_alias;
 pub mod goal;
 pub mod learning_exemption;
 pub mod legacy_account;

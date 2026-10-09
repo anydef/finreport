@@ -7,6 +7,7 @@ pub(crate) mod cashflow;
 pub mod categories;
 pub mod cookies;
 pub mod current_user;
+pub mod display_aliases;
 mod events;
 mod held_groups;
 pub mod goals;
@@ -90,4 +91,5 @@ pub fn request_with_auth(
         .data(raw_token)
         .data(LabelSplitCache::default())
         .data(rules::RuleReachCache::default())
+        .data(display_aliases::AliasCache::default())
 }

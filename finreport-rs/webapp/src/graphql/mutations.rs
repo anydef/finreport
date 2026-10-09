@@ -240,6 +240,30 @@ impl MutationRoot {
         crate::graphql::learning_exemptions::remove_learning_exemption(db, publisher, &counterparty_key).await
     }
 
+    /// `setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or
+    /// normalised key; covers every spelling) or one of the caller's accounts
+    /// (`ACCOUNT`, by id). Display only.
+    async fn set_display_alias(
+        &self,
+        ctx: &Context<'_>,
+        kind: crate::graphql::display_aliases::GqlAliasKind,
+        key: String,
+        alias: String,
+    ) -> GqlResult<crate::graphql::display_aliases::DisplayAlias> {
+        crate::graphql::display_aliases::set(ctx, kind, &key, &alias).await
+    }
+
+    /// `removeDisplayAlias`: the original name shows again. True when an
+    /// alias existed.
+    async fn remove_display_alias(
+        &self,
+        ctx: &Context<'_>,
+        kind: crate::graphql::display_aliases::GqlAliasKind,
+        key: String,
+    ) -> GqlResult<bool> {
+        crate::graphql::display_aliases::remove(ctx, kind, &key).await
+    }
+
     /// `createGoal` (iteration 4 §4).
     async fn create_goal(
         &self,

@@ -40,6 +40,10 @@ pub const TOPIC_CATEGORY: &str = "finreport.category";
 /// exemption"). Keyed by the normalised `counterparty_key`, compacted; a
 /// tombstone lifts the exemption.
 pub const TOPIC_LEARNING_EXEMPTION: &str = "finreport.learning-exemption";
+/// A user's display nickname for a merchant or for one of their own accounts.
+/// Keyed `<user_id>:<kind>:<key>` ([`DisplayAliasRecord::topic_key`]),
+/// compacted; a tombstone removes the alias.
+pub const TOPIC_DISPLAY_ALIAS: &str = "finreport.display-alias";
 /// Explicit re-resolution requests (§2.3): a work queue, not state. Keyed
 /// `<source>:<external_id>` or `reapply:<rule-id>`; time-retained (7 d) and
 /// replaceable, unlike the other five topics.
@@ -300,6 +304,74 @@ pub struct LearningExemptionRecord {
 }
 
 // ---------------------------------------------------------------------------
+// Display alias
+// ---------------------------------------------------------------------------
+
+/// What a display alias names. An unlinked own account is only ever a
+/// counterparty string on a linked account's transactions, so it is a
+/// `Counterparty` alias like any merchant; `Account` is for the user's
+/// connected accounts, which are real `account` rows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AliasKind {
+    /// `key` is the normalised `counterparty_key`.
+    Counterparty,
+    /// `key` is the account's id (hyphenated UUID).
+    Account,
+}
+
+impl AliasKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AliasKind::Counterparty => "counterparty",
+            AliasKind::Account => "account",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "counterparty" => Some(AliasKind::Counterparty),
+            "account" => Some(AliasKind::Account),
+            _ => None,
+        }
+    }
+}
+
+/// Topic key for one alias: `<user_id>:<kind>:<key>`. The key part may itself
+/// contain `:`, so parsing splits into at most three pieces.
+pub fn display_alias_topic_key(user_id: Uuid, kind: AliasKind, key: &str) -> String {
+    format!("{user_id}:{}:{key}", kind.as_str())
+}
+
+/// Inverse of [`display_alias_topic_key`]; `None` for anything malformed.
+pub fn parse_display_alias_topic_key(topic_key: &str) -> Option<(Uuid, AliasKind, String)> {
+    let mut parts = topic_key.splitn(3, ':');
+    let user_id = Uuid::parse_str(parts.next()?).ok()?;
+    let kind = AliasKind::parse(parts.next()?)?;
+    let key = parts.next()?;
+    (!key.is_empty()).then(|| (user_id, kind, key.to_string()))
+}
+
+/// Published on [`TOPIC_DISPLAY_ALIAS`]. Aliases are personal: the owner is
+/// part of the key, so two users can nickname the same merchant differently.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DisplayAliasRecord {
+    pub schema_version: u32,
+    pub user_id: Uuid,
+    pub kind: AliasKind,
+    pub key: String,
+    pub alias: String,
+    /// RFC 3339; last-writer-wins (§2.1).
+    pub revision: DateTime<Utc>,
+}
+
+impl DisplayAliasRecord {
+    pub fn topic_key(&self) -> String {
+        display_alias_topic_key(self.user_id, self.kind, &self.key)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // §3 Category
 // ---------------------------------------------------------------------------
 
@@ -550,6 +622,25 @@ mod tests {
         let json = serde_json::to_string(&record).unwrap();
         let round_tripped: LearningExemptionRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(record, round_tripped);
+    }
+
+    #[test]
+    fn display_alias_record_and_topic_key_round_trip() {
+        let record = DisplayAliasRecord {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            user_id: Uuid::new_v4(),
+            kind: AliasKind::Counterparty,
+            key: "foo: bar".to_string(),
+            alias: "Mum".to_string(),
+            revision: Utc::now(),
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        assert_eq!(record, serde_json::from_str::<DisplayAliasRecord>(&json).unwrap());
+        // A `:` inside the key survives the topic-key round trip.
+        let (user, kind, key) = parse_display_alias_topic_key(&record.topic_key()).unwrap();
+        assert_eq!((user, kind, key.as_str()), (record.user_id, record.kind, "foo: bar"));
+        assert!(parse_display_alias_topic_key("not-a-uuid:account:x").is_none());
+        assert!(parse_display_alias_topic_key(&format!("{}:bogus:x", record.user_id)).is_none());
     }
 
     #[test]

@@ -258,3 +258,22 @@ resource "kafka_topic" "learning_exemption" {
     prevent_destroy = true
   }
 }
+
+# Display aliases: per-user nicknames for merchants (kind=counterparty, by
+# normalised counterparty_key) and for the user's own connected accounts
+# (kind=account, by account id). Keyed `<user_id>:<kind>:<key>`; compacted, a
+# tombstone removes the alias. Mirrored in docker-compose.local.yml's
+# finreport-redpanda-init.
+resource "kafka_topic" "display_alias" {
+  name               = "finreport.display-alias"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

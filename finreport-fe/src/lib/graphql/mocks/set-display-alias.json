@@ -1,0 +1,13 @@
+{
+  "query": "mutation SetDisplayAlias($kind: DisplayAliasKind!, $key: String!, $alias: String!) {\n  setDisplayAlias(kind: $kind, key: $key, alias: $alias) {\n    kind\n    key\n    alias\n    rawName\n    transactionCount\n    updatedAt\n  }\n}",
+  "data": {
+    "setDisplayAlias": {
+      "kind": "COUNTERPARTY",
+      "key": "pavlo fedyna",
+      "alias": "Pavlo (savings, other bank)",
+      "rawName": "Pavlo Fedyna",
+      "transactionCount": 6,
+      "updatedAt": "2024-06-20T10:00:00Z"
+    }
+  }
+}

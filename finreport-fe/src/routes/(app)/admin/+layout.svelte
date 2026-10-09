@@ -5,7 +5,8 @@
 
 	const subTabs = [
 		{ label: 'Rules', href: '/admin/rules' },
-		{ label: 'Categories', href: '/admin/categories' }
+		{ label: 'Categories', href: '/admin/categories' },
+		{ label: 'Nicknames', href: '/admin/aliases' }
 	];
 </script>
 

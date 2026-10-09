@@ -1,3 +1,6 @@
+"""
+`displayName` is resolved in `display_aliases.rs` (its `ComplexObject`).
+"""
 type Account {
 	id: UUID!
 	"""
@@ -16,6 +19,11 @@ type Account {
 	label: String
 	currency: String!
 	latestBalance: Balance
+	"""
+	The caller's alias for this account if they set one, else the login
+	label, IBAN or display id. `label` itself stays the login label.
+	"""
+	displayName: String!
 }
 
 """
@@ -316,6 +324,42 @@ enum Direction {
 	SPENDING
 }
 
+"""
+One nickname, with the original name it replaces.
+"""
+type DisplayAlias {
+	kind: DisplayAliasKind!
+	"""
+	The normalised counterparty key, or the account id.
+	"""
+	key: String!
+	alias: String!
+	"""
+	The name shown when there is no alias: the most frequent spelling on
+	the caller's transactions (counterparty) or the account's label /
+	IBAN. Falls back to the key.
+	"""
+	rawName: String!
+	"""
+	Caller's transactions carrying this counterparty key; `null` for an
+	account alias.
+	"""
+	transactionCount: Int
+	updatedAt: DateTime!
+}
+
+enum DisplayAliasKind {
+	"""
+	A merchant, or an own account that is not connected: keyed by the
+	normalised counterparty key.
+	"""
+	COUNTERPARTY
+	"""
+	One of the caller's connected accounts: keyed by the account id.
+	"""
+	ACCOUNT
+}
+
 enum FlagSource {
 	AUTO
 	USER
@@ -592,6 +636,17 @@ type Mutation {
 	"""
 	removeLearningExemption(counterpartyKey: String!): Boolean!
 	"""
+	`setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or
+	normalised key; covers every spelling) or one of the caller's accounts
+	(`ACCOUNT`, by id). Display only.
+	"""
+	setDisplayAlias(kind: DisplayAliasKind!, key: String!, alias: String!): DisplayAlias!
+	"""
+	`removeDisplayAlias`: the original name shows again. True when an
+	alias existed.
+	"""
+	removeDisplayAlias(kind: DisplayAliasKind!, key: String!): Boolean!
+	"""
 	`createGoal` (iteration 4 §4).
 	"""
 	createGoal(input: GoalInput!): Goal!
@@ -674,6 +729,11 @@ type Query {
 	per-merchant name and count are computed over the caller's accounts.
 	"""
 	learningExemptions: [LearningExemption!]!
+	"""
+	`displayAliases`: the caller's own nicknames for merchants and
+	accounts, each with the original name alongside.
+	"""
+	displayAliases: [DisplayAlias!]!
 	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
 	reviewQueue(page: PageInput): ReviewQueue!
 	"""
@@ -868,6 +928,12 @@ type Transaction {
 	counterpartyKey: String
 	label: TransactionLabel
 	splits: [TransactionSplit!]!
+	"""
+	The caller's alias for this counterparty if they set one, else
+	`counterpartyName` (the bank's string, which is never overwritten).
+	Prefer this over `counterpartyName` wherever a name is shown.
+	"""
+	counterpartyDisplayName: String
 	"""
 	Iteration 3 §4: sorted, `[]` when untagged.
 	"""

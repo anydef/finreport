@@ -58,7 +58,9 @@ pub struct Me {
 // Accounts & balances
 // ---------------------------------------------------------------------------
 
+/// `displayName` is resolved in `display_aliases.rs` (its `ComplexObject`).
 #[derive(SimpleObject)]
+#[graphql(complex)]
 pub struct Account {
     pub id: Uuid,
     /// `"comdirect"`.
@@ -131,6 +133,16 @@ impl Transaction {
         let db: &std::sync::Arc<sea_orm::DatabaseConnection> = ctx.data()?;
         let cache = ctx.data::<crate::graphql::labels::LabelSplitCache>().ok();
         crate::graphql::labels::splits_for(db.as_ref(), cache, self.id.0).await
+    }
+
+    /// The caller's alias for this counterparty if they set one, else
+    /// `counterpartyName` (the bank's string, which is never overwritten).
+    /// Prefer this over `counterpartyName` wherever a name is shown.
+    async fn counterparty_display_name(
+        &self,
+        ctx: &async_graphql::Context<'_>,
+    ) -> async_graphql::Result<Option<String>> {
+        crate::graphql::display_aliases::counterparty_display_name(ctx, self).await
     }
 
     /// Iteration 3 §4: sorted, `[]` when untagged.

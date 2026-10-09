@@ -479,6 +479,24 @@ export interface HeldMerchantGroups {
  * learning"): decisions on it never become a rule, so it is labelled (and
  * split) by hand.
  */
+export type DisplayAliasKind = 'COUNTERPARTY' | 'ACCOUNT';
+
+/**
+ * A user's nickname for a merchant (keyed by the normalised counterparty
+ * key, so it covers every spelling) or for one of their connected accounts
+ * (keyed by account id). Display only; the bank's name is `rawName`.
+ */
+export interface DisplayAlias {
+	kind: DisplayAliasKind;
+	key: string;
+	alias: string;
+	rawName: string;
+	/** `null` for an account alias. */
+	transactionCount: number | null;
+	/** RFC 3339 instant. */
+	updatedAt: string;
+}
+
 export interface LearningExemption {
 	/** The normalised merchant key rules and the learner index on. */
 	counterpartyKey: string;
