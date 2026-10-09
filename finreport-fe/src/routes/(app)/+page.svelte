@@ -19,7 +19,8 @@
 		childBreakdownFilter,
 		childLevel,
 		drilldownForBar,
-		type BreakdownBar
+		type BreakdownBar,
+		mergeExpenseAndSavingBreakdowns
 	} from '$lib/breakdownShaping';
 	import { createGraphqlClient } from '$lib/graphqlClient';
 	import { CATEGORY_BREAKDOWN_QUERY } from '$lib/graphql/queries';
@@ -186,17 +187,34 @@
 		navigate({ ...drilldownForBar(bar), offset: 0, resetDrilldown: true });
 	}
 
-	/** Fetch the children of an expanded breakdown row (scoped to it, one level deeper). */
-	async function loadBreakdownChildren(slug: string): Promise<CategoryBreakdownData> {
+	/**
+	 * Fetch the children of an expanded breakdown row (scoped to it, one level
+	 * deeper). The kind has to match the card the row came from, or expanding a
+	 * savings row would ask for its expense children and find none.
+	 */
+	async function loadChildrenOfKind(
+		slug: string,
+		kind: 'EXPENSE' | 'SAVING'
+	): Promise<CategoryBreakdownData> {
 		const result = await createGraphqlClient(fetch)
 			.query(CATEGORY_BREAKDOWN_QUERY, {
 				filter: childBreakdownFilter(data.breakdownFilter, slug, data.categories),
 				level: childLevel(slug, data.categories),
-				kind: 'EXPENSE'
+				kind
 			})
 			.toPromise();
 		if (result.error || !result.data) throw result.error ?? new Error('No data');
 		return result.data.categoryBreakdown as CategoryBreakdownData;
+	}
+
+	/**
+	 * The card mixes both kinds, so the kind to ask for comes from the expanded
+	 * row's own category. Guessing EXPENSE would make a savings row expand to
+	 * nothing.
+	 */
+	function loadBreakdownChildren(slug: string): Promise<CategoryBreakdownData> {
+		const kind = data.categories.find((c) => c.slug === slug)?.kind;
+		return loadChildrenOfKind(slug, kind === 'SAVING' ? 'SAVING' : 'EXPENSE');
 	}
 
 	function onSankeyDimensionChange(dimension: 'counterparty' | 'category') {
@@ -204,9 +222,7 @@
 	}
 
 	const bars = $derived(data.summary ? shapeCashflowBars(data.summary, data.granularity) : []);
-	const graph = $derived(
-		data.graph ? shapeCashflowGraph(data.graph, data.accounts) : undefined
-	);
+	const graph = $derived(data.graph ? shapeCashflowGraph(data.graph, data.accounts) : undefined);
 	const periodLabel = $derived(`${data.start} to ${data.end}`);
 	const filtered = $derived(hasActiveFilters(data.panel));
 	const hasDrilldown = $derived(
@@ -297,10 +313,14 @@
 			</Card>
 		{/if}
 
+		<!-- Savings categories sit in this card rather than beside it: a
+		     `kind: SAVING` row is money that left the current account just as
+		     an expense did. Asking for EXPENSE alone was why savings appeared
+		     nowhere on the dashboard despite being labelled. -->
 		{#if data.breakdown}
-			<Card title="Spending by category">
+			<Card title="Spending and savings by category">
 				<CategoryBreakdown
-					breakdown={data.breakdown}
+					breakdown={mergeExpenseAndSavingBreakdowns(data.breakdown, data.savingsBreakdown)}
 					categories={data.categories}
 					loadChildren={loadBreakdownChildren}
 					scopeKey={JSON.stringify(data.breakdownFilter)}

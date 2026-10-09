@@ -120,8 +120,14 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		endDate: txEnd
 	};
 
-	const [summaryResult, graphResult, transactionsResult, breakdownResult, reimbursementResult] =
-		await Promise.all([
+	const [
+		summaryResult,
+		graphResult,
+		transactionsResult,
+		breakdownResult,
+		savingsBreakdownResult,
+		reimbursementResult
+	] = await Promise.all([
 		client.query(CASHFLOW_SUMMARY_QUERY, { filter: periodFilter, granularity }).toPromise(),
 		client
 			.query(CASHFLOW_GRAPH_QUERY, {
@@ -146,6 +152,17 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				// savings count as saving rather than spending (requirements,
 				// "Categories (iteration 2)").
 				kind: 'EXPENSE'
+			})
+			.toPromise(),
+		// Savings is its own card: a `kind: SAVING` category is money put aside,
+		// not consumed, so folding it into the spending card would inflate
+		// spending with money the user still has. Asking for EXPENSE alone was
+		// why savings was invisible everywhere despite being labelled.
+		client
+			.query(CATEGORY_BREAKDOWN_QUERY, {
+				filter: periodFilter,
+				level: 1,
+				kind: 'SAVING'
 			})
 			.toPromise(),
 		// The netted figure beside the totals; its failure never fails the dashboard.
@@ -180,6 +197,10 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		transactionFilter,
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
 		breakdown: breakdownResult.data?.categoryBreakdown as CategoryBreakdown | undefined,
+		/** `kind: SAVING` rows for the same period; its failure never fails the dashboard. */
+		savingsBreakdown: savingsBreakdownResult.data?.categoryBreakdown as
+			| CategoryBreakdown
+			| undefined,
 		reimbursementSummary: reimbursementResult.data?.reimbursementSummary as
 			| ReimbursementSummary
 			| undefined,

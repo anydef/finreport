@@ -7,6 +7,7 @@ import {
 	drilldownForBar,
 	hasChildCategories,
 	maxBarAmount,
+	mergeExpenseAndSavingBreakdowns,
 	shapeCategoryBreakdown,
 	shapeChildBreakdown
 } from './breakdownShaping';
@@ -143,5 +144,87 @@ describe('category children', () => {
 		]);
 		expect(bars.at(-1)).toMatchObject({ own: true, label: 'Food (no subcategory)' });
 		expect(bars[0].own).toBeUndefined();
+	});
+});
+
+describe('mergeExpenseAndSavingBreakdowns', () => {
+	const row = (slug: string, amount: string, share: number, kind: 'EXPENSE' | 'SAVING') => ({
+		category: { id: slug, slug, name: slug, kind },
+		amount,
+		transactionCount: 1,
+		share
+	});
+
+	// Each response's shares already sum to 1 on their own, so a raw
+	// concatenation would print percentages adding up to 200%.
+	it('recomputes share over the combined total instead of concatenating', () => {
+		const expense = {
+			rows: [
+				row('food', '300.0000', 0.75, 'EXPENSE'),
+				row('transport', '100.0000', 0.25, 'EXPENSE')
+			],
+			uncategorized: null,
+			needsReview: null,
+			currency: 'EUR'
+		} as never;
+		const saving = {
+			rows: [row('savings.stocks_etfs', '600.0000', 1, 'SAVING')],
+			uncategorized: null,
+			needsReview: null,
+			currency: 'EUR'
+		} as never;
+
+		const merged = mergeExpenseAndSavingBreakdowns(expense, saving);
+
+		expect(merged.rows).toHaveLength(3);
+		const total = merged.rows.reduce((s, r) => s + r.share, 0);
+		expect(total).toBeCloseTo(1, 10);
+		// 600 of 1000.
+		expect(merged.rows.find((r) => r.category.slug === 'savings.stocks_etfs')!.share).toBeCloseTo(
+			0.6,
+			10
+		);
+		expect(merged.rows.find((r) => r.category.slug === 'food')!.share).toBeCloseTo(0.3, 10);
+	});
+
+	it('leaves the expense breakdown untouched when there are no savings rows', () => {
+		const expense = {
+			rows: [row('food', '300.0000', 1, 'EXPENSE')],
+			uncategorized: row('uncategorized', '50.0000', 0, 'EXPENSE'),
+			needsReview: null,
+			currency: 'EUR'
+		} as never;
+
+		expect(mergeExpenseAndSavingBreakdowns(expense, undefined)).toBe(expense);
+		expect(
+			mergeExpenseAndSavingBreakdowns(expense, {
+				rows: [],
+				uncategorized: null,
+				needsReview: null,
+				currency: 'EUR'
+			} as never)
+		).toBe(expense);
+	});
+
+	// uncategorized/needsReview carry no kind and are reported separately, so
+	// taking them from both responses would double-count them.
+	it('keeps the expense response uncategorized and needs-review rows only', () => {
+		const expense = {
+			rows: [row('food', '100.0000', 1, 'EXPENSE')],
+			uncategorized: row('uncategorized', '40.0000', 0, 'EXPENSE'),
+			needsReview: row('needs-review', '10.0000', 0, 'EXPENSE'),
+			currency: 'EUR'
+		} as never;
+		const saving = {
+			rows: [row('savings', '100.0000', 1, 'SAVING')],
+			uncategorized: row('uncategorized', '999.0000', 0, 'SAVING'),
+			needsReview: null,
+			currency: 'EUR'
+		} as never;
+
+		const merged = mergeExpenseAndSavingBreakdowns(expense, saving);
+
+		expect(merged.uncategorized!.amount).toBe('40.0000');
+		expect(merged.needsReview!.amount).toBe('10.0000');
 	});
 });

@@ -33,6 +33,10 @@ import transactionsMock from '$lib/graphql/mocks/transactions.json';
 import categoriesMock from '$lib/graphql/mocks/categories.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
 import categoryBreakdownChildrenMock from '$lib/graphql/mocks/category-breakdown-children.json';
+import {
+	savingsBreakdownMock,
+	savingsBreakdownChildrenMock
+} from '$lib/graphql/savingsBreakdownMock';
 import cashflowGraphCategoryMock from '$lib/graphql/mocks/cashflow-graph-category.json';
 import reviewQueueMock from '$lib/graphql/mocks/review-queue.json';
 import rulesMock from '$lib/graphql/mocks/rules.json';
@@ -821,8 +825,13 @@ function mockArchiveGoal(variables: Record<string, unknown> | undefined): unknow
 function mockCategoryBreakdown(variables: Record<string, unknown> | undefined): unknown {
 	const filter = variables?.filter as { categorySlugs?: string[] } | undefined;
 	const level = Number(variables?.level ?? 1);
+	// The dashboard asks this same operation twice per load, once per card, so
+	// the kind - not the operation name - is what tells the two apart here.
+	const saving = variables?.kind === 'SAVING';
 	if (level > 1 && filter?.categorySlugs?.length) {
-		const children = categoryBreakdownChildrenMock.data as Record<string, unknown>;
+		const children = (
+			saving ? savingsBreakdownChildrenMock : categoryBreakdownChildrenMock.data
+		) as Record<string, unknown>;
 		const parent = [...filter.categorySlugs]
 			.sort((a, b) => a.length - b.length)
 			.find((slug) => slug in children);
@@ -831,7 +840,7 @@ function mockCategoryBreakdown(variables: Record<string, unknown> | undefined): 
 			categoryBreakdown: { rows: [], uncategorized: null, needsReview: null, currency: 'EUR' }
 		};
 	}
-	return categoryBreakdownMock.data;
+	return saving ? savingsBreakdownMock : categoryBreakdownMock.data;
 }
 
 function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBackendResult | null {
@@ -968,10 +977,7 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: {
-					data: mockLinkCandidates(
-						body.variables,
-						mockFixtureItems() as unknown as LinkableMock[]
-					)
+					data: mockLinkCandidates(body.variables, mockFixtureItems() as unknown as LinkableMock[])
 				},
 				setCookies: []
 			};
