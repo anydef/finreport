@@ -1161,6 +1161,153 @@ async fn an_exempt_paypal_learns_no_narrow_rule_either() {
     assert!(rule_rows(&db).await.is_empty(), "exempt merchant: no rule of any kind");
 }
 
+// ---------------------------------------------------------------------------
+// Narrow learning at the DEFAULT of one user decision: the first decision
+// learns a broad rule, the conflicting second one must retire it.
+// ---------------------------------------------------------------------------
+
+/// Resolves one PayPal decision by hand, with the default ops (1 user decision).
+async fn decide_one(
+    db: &sea_orm::DatabaseConnection,
+    publisher: &EventPublisher,
+    ops: &LabelingOps,
+    catalog: &categorizer::provider::CategoryCatalog,
+    id: &str,
+    description: &str,
+    slug: &str,
+) {
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let txn = seed_paypal(db, id, description).await;
+    proj::project_user_label(db, txn.id, Some(user_override(&txn, slug))).await.unwrap();
+    label_one_transaction(db, publisher, ops, &provider, catalog, "test-prompt-v1", 0.0, &CostGuard::new(10), &txn)
+        .await
+        .unwrap();
+}
+
+fn paypal_conditions(r: &entity::entities::rule::Model) -> webapp::kafka::labeling::RuleConditions {
+    serde_json::from_value(r.conditions.clone()).expect("conditions json")
+}
+
+#[tokio::test]
+async fn a_conflicting_second_decision_retires_the_broad_rule_through_the_real_chain() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let ops = LabelingOps::real(3, 1, 0.9);
+
+    decide_one(&db, &publisher, &ops, &catalog, "D-N1", PAYPAL_NETFLIX, "personal.gym").await;
+    let after_first = rule_rows(&db).await;
+    assert_eq!(after_first.len(), 1);
+    assert!(paypal_conditions(&after_first[0]).description_contains.is_none(), "the lone decision learns a broad rule");
+
+    decide_one(&db, &publisher, &ops, &catalog, "D-E1", PAYPAL_ETSY, "food.restaurants").await;
+    let rules = rule_rows(&db).await;
+    assert_eq!(rules.len(), 2, "only the two narrow rules remain: {rules:?}");
+    assert!(rules.iter().all(|r| paypal_conditions(r).description_contains.is_some()));
+
+    // A PayPal transaction no narrow rule matches must not be labelled by the
+    // retired broad "paypal -> gym" rule.
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let unmatched = seed_paypal(&db, "D-Z1", "PayPal . ZALANDO SE 1112223334 PP.1112.PP . , Ihr Einkauf bei ZALANDO").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &CostGuard::new(10), &unmatched)
+        .await
+        .unwrap();
+    let label = transaction_label::Entity::find_by_id(unmatched.id).one(&db).await.unwrap().expect("label");
+    assert_ne!(label.label_source, "rule");
+    assert_eq!(label.rule_id, None);
+
+    // ... while a matching one still resolves from its narrow rule.
+    let matching = seed_paypal(&db, "D-E2", "PayPal . ETSY IRELAND UC 9990001 PP.9990.PP . , Ihr Einkauf bei ETSY").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &CostGuard::new(10), &matching)
+        .await
+        .unwrap();
+    let label = transaction_label::Entity::find_by_id(matching.id).one(&db).await.unwrap().expect("label");
+    assert_eq!(label.label_source, "rule");
+    assert_eq!(
+        label.rule_id,
+        Some(webapp::kafka::labeling::learned_narrow_rule_uuid("paypal", "food.restaurants", "etsy"))
+    );
+}
+
+#[tokio::test]
+async fn a_user_touched_broad_rule_survives_and_the_narrow_rules_still_win() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let ops = LabelingOps::real(3, 1, 0.9);
+
+    // The user has approved the broad rule the first decision would learn.
+    let broad_id = webapp::kafka::labeling::learned_rule_uuid("paypal", "personal.gym");
+    proj::project_rule(
+        &db,
+        broad_id,
+        Some(webapp::kafka::labeling::RuleRecord {
+            schema_version: webapp::kafka::labeling::CURRENT_SCHEMA_VERSION,
+            id: broad_id,
+            name: "approved".to_string(),
+            category_slug: "personal.gym".to_string(),
+            conditions: webapp::kafka::labeling::RuleConditions {
+                counterparty_key: Some("paypal".to_string()),
+                ..Default::default()
+            },
+            priority: 0,
+            state: webapp::kafka::labeling::RuleState::Active,
+            origin: webapp::kafka::labeling::RuleOrigin::Learned,
+            auto_approved: false,
+            user_touched: true,
+            confidence: Some(1.0),
+            evidence: None,
+            created_at: Utc::now(),
+            revision: Utc::now(),
+        }),
+    )
+    .await
+    .unwrap();
+
+    decide_one(&db, &publisher, &ops, &catalog, "T-N1", PAYPAL_NETFLIX, "personal.gym").await;
+    decide_one(&db, &publisher, &ops, &catalog, "T-E1", PAYPAL_ETSY, "food.restaurants").await;
+    let rules = rule_rows(&db).await;
+    assert_eq!(rules.len(), 3, "the touched broad rule plus two narrow ones: {rules:?}");
+    assert!(rules.iter().any(|r| r.id == broad_id && r.user_touched));
+
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let etsy = seed_paypal(&db, "T-E2", "PayPal . ETSY IRELAND UC 9990001 PP.9990.PP . , Ihr Einkauf bei ETSY").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &CostGuard::new(10), &etsy)
+        .await
+        .unwrap();
+    let label = transaction_label::Entity::find_by_id(etsy.id).one(&db).await.unwrap().expect("label");
+    assert_eq!(
+        label.rule_id,
+        Some(webapp::kafka::labeling::learned_narrow_rule_uuid("paypal", "food.restaurants", "etsy")),
+        "the narrow rule out-ranks the user's broad one where it matches"
+    );
+}
+
+#[tokio::test]
+async fn an_unambiguous_merchant_keeps_its_broad_rule() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let ops = LabelingOps::real(3, 1, 0.9);
+
+    decide_one(&db, &publisher, &ops, &catalog, "U-N1", PAYPAL_NETFLIX, "personal.gym").await;
+    decide_one(&db, &publisher, &ops, &catalog, "U-N2", "PayPal . SPOTIFY AB 98765 PP.9876.PP", "personal.gym").await;
+    let rules = rule_rows(&db).await;
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].id, webapp::kafka::labeling::learned_rule_uuid("paypal", "personal.gym"));
+    assert!(paypal_conditions(&rules[0]).description_contains.is_none());
+}
+
+
 /// A note is commentary, not an input to labelling: a note-only user-label
 /// record re-runs the chain, but the resolution is identical, so compare-before-
 /// publish suppresses it - no provider call, no republished label, the cache

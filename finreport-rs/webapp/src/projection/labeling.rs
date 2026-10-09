@@ -539,6 +539,33 @@ pub async fn discardable_learned_rule_ids(
     db: &impl ConnectionTrait,
     counterparty_key: &str,
 ) -> Result<Vec<Uuid>, DbErr> {
+    Ok(untouched_learned_rules_for(db, counterparty_key).await?.into_iter().map(|r| r.id).collect())
+}
+
+/// The subset of [`discardable_learned_rule_ids`] that is merchant-wide: no
+/// description condition. These are what description-qualified learning
+/// retires once it has proved the merchant ambiguous; the narrow rules
+/// themselves are never returned.
+pub async fn discardable_broad_learned_rule_ids(
+    db: &impl ConnectionTrait,
+    counterparty_key: &str,
+) -> Result<Vec<Uuid>, DbErr> {
+    Ok(untouched_learned_rules_for(db, counterparty_key)
+        .await?
+        .into_iter()
+        .filter(|r| {
+            ["description_contains", "description_regex"]
+                .iter()
+                .all(|k| r.conditions.get(*k).is_none_or(serde_json::Value::is_null))
+        })
+        .map(|r| r.id)
+        .collect())
+}
+
+async fn untouched_learned_rules_for(
+    db: &impl ConnectionTrait,
+    counterparty_key: &str,
+) -> Result<Vec<rule::Model>, DbErr> {
     let rows = rule::Entity::find()
         .filter(rule::Column::Origin.eq("learned"))
         .filter(rule::Column::UserTouched.eq(false))
@@ -549,7 +576,6 @@ pub async fn discardable_learned_rule_ids(
         .filter(|r| {
             r.conditions.get("counterparty_key").and_then(|v| v.as_str()) == Some(counterparty_key)
         })
-        .map(|r| r.id)
         .collect())
 }
 

@@ -811,7 +811,9 @@ pub async fn maybe_learn_rule(
     // One merchant-wide rule when the merchant is unambiguous, otherwise the
     // description-qualified rules `learn::consider_narrow` could verify.
     let mut published = Vec::new();
-    for candidate in (ops.consider)(&observations) {
+    let candidates = (ops.consider)(&observations);
+    let candidates_were_narrow = candidates.iter().any(|c| c.description_contains.is_some());
+    for candidate in candidates {
         let rule_id = match candidate.description_contains.as_deref() {
             Some(needle) => learned_narrow_rule_uuid(&candidate.counterparty_key, &candidate.category_slug, needle),
             None => learned_rule_uuid(&candidate.counterparty_key, &candidate.category_slug),
@@ -854,6 +856,32 @@ pub async fn maybe_learn_rule(
         publish_rule(publisher, &record).await;
         proj::project_rule(db, rule_id, Some(record.clone())).await?;
         published.push(record);
+    }
+
+    // The merchant is proven ambiguous: a merchant-wide learned rule (from an
+    // earlier, lone decision) would keep labelling every transaction the
+    // narrow rules do not match. Retire it - but only now, after the narrow
+    // rules above are published and projected, so there is no window in
+    // which those transactions have no rule. Tombstoned rather than revoked,
+    // as for exemptions: a revoked learned rule is never re-learned, whereas
+    // a deleted one can be if the evidence later agrees again. A
+    // `user_touched` broad rule is the user's own and stays (the narrow rules
+    // out-rank it on specificity).
+    if candidates_were_narrow {
+        for rule_id in proj::discardable_broad_learned_rule_ids(db, counterparty_key).await? {
+            if let Err(e) = publisher
+                .publish_tombstone_with_headers(
+                    TOPIC_RULE,
+                    &rule_id.to_string(),
+                    labeling_headers(crate::kafka::labeling::ORIGIN_LABELER),
+                )
+                .await
+            {
+                error!(error = %e, %rule_id, "labeler: failed to tombstone superseded broad rule, keeping it");
+                continue;
+            }
+            proj::project_rule(db, rule_id, None).await?;
+        }
     }
     Ok(published)
 }
