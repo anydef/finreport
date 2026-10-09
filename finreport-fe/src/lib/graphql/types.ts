@@ -68,6 +68,8 @@ export interface Account {
 	bic: string | null;
 	institute: string | null;
 	label: string | null;
+	/** The user's nickname, else label, IBAN, display id, external id. Always set. */
+	displayName: string;
 	currency: string;
 	latestBalance: Balance | null;
 }
@@ -83,6 +85,8 @@ export interface Transaction {
 	amount: Decimal;
 	currency: string;
 	counterpartyName: string | null;
+	/** The user's nickname for the counterparty, else `counterpartyName`. Display only. */
+	counterpartyDisplayName?: string | null;
 	counterpartyIban: string | null;
 	description: string | null;
 	transactionType: string | null;

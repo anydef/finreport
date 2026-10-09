@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Modal from '$lib/components/Modal.svelte';
+	import { counterpartyLabel } from '$lib/displayNames';
 	import type { Category, Transaction } from '$lib/graphql/types';
 	import { formatAmount as formatDisplayAmount } from '$lib/format';
 	import { formatAmount, isZeroAmount, parseAmount, remainder } from '$lib/splitMath';
@@ -135,7 +136,7 @@
 <Modal title="Split transaction" onclose={onClose}>
 	<p class="text-xs text-slate-500">
 		Total: {formatDisplayAmount(transaction.amount, transaction.currency)}
-		{#if transaction.counterpartyName}· {transaction.counterpartyName}{/if}
+		{#if counterpartyLabel(transaction)}· {counterpartyLabel(transaction)}{/if}
 	</p>
 
 	<div class="flex flex-col gap-2">

@@ -2,6 +2,7 @@
 	import type { Category, Transaction } from '$lib/graphql/types';
 	import SearchMenu from '$lib/components/SearchMenu.svelte';
 	import { formatAmount, formatDisplayDate } from '$lib/format';
+	import { counterpartyLabel, rawCounterpartyName } from '$lib/displayNames';
 
 	interface Props {
 		transaction: Transaction;
@@ -64,7 +65,7 @@
 	let errorMessage = $state('');
 
 	const title = $derived(
-		transaction.counterpartyName ?? transaction.description ?? 'Unknown counterparty'
+		counterpartyLabel(transaction) ?? transaction.description ?? 'Unknown counterparty'
 	);
 	const label = $derived(transaction.label);
 	const reason = $derived(
@@ -125,7 +126,10 @@
 			{/if}
 			<div>
 				<p class="text-sm font-medium text-slate-900">{title}</p>
-				<p class="text-xs text-slate-500">{formatDisplayDate(transaction.bookingDate)}</p>
+				<p class="text-xs text-slate-500">
+					{formatDisplayDate(transaction.bookingDate)}{#if rawCounterpartyName(transaction)}
+						· bank: {rawCounterpartyName(transaction)}{/if}
+				</p>
 			</div>
 		</div>
 		<p class="text-sm font-semibold text-slate-900">

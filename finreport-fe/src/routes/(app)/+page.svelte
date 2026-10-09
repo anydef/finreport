@@ -204,7 +204,9 @@
 	}
 
 	const bars = $derived(data.summary ? shapeCashflowBars(data.summary, data.granularity) : []);
-	const graph = $derived(data.graph ? shapeCashflowGraph(data.graph) : undefined);
+	const graph = $derived(
+		data.graph ? shapeCashflowGraph(data.graph, data.accounts) : undefined
+	);
 	const periodLabel = $derived(`${data.start} to ${data.end}`);
 	const filtered = $derived(hasActiveFilters(data.panel));
 	const hasDrilldown = $derived(

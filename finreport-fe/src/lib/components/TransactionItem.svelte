@@ -16,6 +16,7 @@
 	import { splitIndicator } from '$lib/splitView';
 	import Badge from './Badge.svelte';
 	import type { Transaction } from '$lib/graphql/types';
+	import { counterpartyLabel, rawCounterpartyName } from '$lib/displayNames';
 
 	interface Props {
 		transaction: Transaction;
@@ -84,7 +85,7 @@
 				checked={selected}
 				disabled={selectLocked}
 				onchange={onselect}
-				aria-label="Select transaction {tx.counterpartyName ?? 'Unknown'} on {formatDisplayDate(
+				aria-label="Select transaction {counterpartyLabel(tx) ?? 'Unknown'} on {formatDisplayDate(
 					tx.bookingDate
 				)}"
 				class="focus-visible:outline-brand h-4 w-4 rounded border-slate-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
@@ -97,10 +98,11 @@
 			bind:this={opener}
 			type="button"
 			aria-expanded={expanded}
+			title={rawCounterpartyName(tx) ? `Bank name: ${rawCounterpartyName(tx)}` : undefined}
 			aria-controls={expanded ? `${uid}-editor` : undefined}
 			class="focus-visible:outline-brand rounded-sm text-left font-medium text-slate-900 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
 		>
-			{tx.counterpartyName ?? 'Unknown'}
+			{counterpartyLabel(tx) ?? 'Unknown'}
 		</button>
 		{#if tx.note}
 			<!-- A glyph, not a pill: the row already carries label-source and split pills. -->

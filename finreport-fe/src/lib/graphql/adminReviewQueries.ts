@@ -53,6 +53,7 @@ query ReviewQueue($page: PageInput) {
 			amount
 			currency
 			counterpartyName
+			counterpartyDisplayName
 			counterpartyKey
 			description
 			label {
@@ -96,6 +97,7 @@ query ReviewHeldTransactions($filter: TransactionFilter, $page: PageInput) {
 			amount
 			currency
 			counterpartyName
+			counterpartyDisplayName
 			counterpartyKey
 			description
 			label {

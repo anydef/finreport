@@ -1,5 +1,5 @@
 {
-  "query": "query Accounts {\n  accounts {\n    id\n    source\n    externalId\n    displayId\n    accountType\n    iban\n    bic\n    institute\n    label\n    currency\n    latestBalance {\n      date\n      amount\n      currency\n    }\n  }\n}",
+  "query": "query Accounts {\n  accounts {\n    id\n    source\n    externalId\n    displayId\n    accountType\n    iban\n    bic\n    institute\n    label\n    displayName\n    currency\n    latestBalance {\n      date\n      amount\n      currency\n    }\n  }\n}",
   "data": {
     "accounts": [
       {
@@ -12,6 +12,7 @@
         "bic": "COBADEFFXXX",
         "institute": null,
         "label": "Main",
+        "displayName": "Pavlo - everyday",
         "currency": "EUR",
         "latestBalance": {
           "date": "2024-06-30",
@@ -29,6 +30,7 @@
         "bic": "COBADEFFXXX",
         "institute": null,
         "label": "Joint",
+        "displayName": "Joint",
         "currency": "EUR",
         "latestBalance": {
           "date": "2024-06-30",

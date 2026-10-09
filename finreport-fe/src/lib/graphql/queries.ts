@@ -41,6 +41,7 @@ query Accounts {
 		bic
 		institute
 		label
+		displayName
 		currency
 		latestBalance {
 			date
@@ -86,6 +87,7 @@ const TRANSACTION_ITEM_FIELDS = `			id
 			amount
 			currency
 			counterpartyName
+			counterpartyDisplayName
 			counterpartyIban
 			description
 			transactionType
@@ -288,6 +290,7 @@ query ReviewQueue($page: PageInput) {
 			amount
 			currency
 			counterpartyName
+			counterpartyDisplayName
 			description
 			label {
 				source

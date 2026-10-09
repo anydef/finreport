@@ -6,6 +6,7 @@
 
 import type { Granularity } from './period';
 import { bucketLabel } from './period';
+import { relabelAccountNodes } from './displayNames';
 import type {
 	CashflowBucket,
 	CashflowGraph,
@@ -13,6 +14,7 @@ import type {
 	CashflowNode,
 	CashflowNodeKind,
 	CashflowSummary,
+	Account,
 	TransactionFilter
 } from './graphql/types';
 
@@ -97,17 +99,23 @@ export interface ShapedSankeyGraph {
  * Shape `cashflowGraph` into the plain node/link records LayerChart's Sankey
  * layout consumes (`nodeId`/`source`/`target` as string ids).
  */
-export function shapeCashflowGraph(graph: CashflowGraph): ShapedSankeyGraph {
+export function shapeCashflowGraph(
+	graph: CashflowGraph,
+	accounts: Pick<Account, 'id' | 'displayName'>[] = []
+): ShapedSankeyGraph {
 	return {
-		nodes: graph.nodes.map((node: CashflowNode) => ({
-			id: node.id,
-			label: node.label,
-			kind: normalizeNodeKind(node.kind),
-			depth: node.depth,
-			value: decimalToNumber(node.value),
-			refType: node.refType,
-			refId: node.refId
-		})),
+		nodes: relabelAccountNodes(
+			graph.nodes.map((node: CashflowNode) => ({
+				id: node.id,
+				label: node.label,
+				kind: normalizeNodeKind(node.kind),
+				depth: node.depth,
+				value: decimalToNumber(node.value),
+				refType: node.refType,
+				refId: node.refId
+			})),
+			accounts
+		),
 		links: graph.links.map((link: CashflowLink) => ({
 			source: link.sourceId,
 			target: link.targetId,

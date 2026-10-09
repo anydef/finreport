@@ -4,6 +4,14 @@
     "displayAliases": [
       {
         "kind": "COUNTERPARTY",
+        "key": "amazon",
+        "alias": "Online orders",
+        "rawName": "Amazon",
+        "transactionCount": 5,
+        "updatedAt": "2024-06-21T09:30:00Z"
+      },
+      {
+        "kind": "COUNTERPARTY",
         "key": "pavlo fedyna",
         "alias": "Pavlo (savings, other bank)",
         "rawName": "Pavlo Fedyna",

@@ -21,6 +21,7 @@
 	import RecurringBadge from './RecurringBadge.svelte';
 	import { categoryOptionGroups } from '$lib/categoryTree';
 	import { formatAmount, formatDisplayDate } from '$lib/format';
+	import { rawCounterpartyName } from '$lib/displayNames';
 	import { labelSourceBadge, needsReviewBadge } from '$lib/labelBadge';
 	import { untrack } from 'svelte';
 	import {
@@ -249,6 +250,11 @@
 				{/if}
 				<dt class="text-slate-500">Status</dt>
 				<dd>{tx.bookingStatus}</dd>
+				{#if rawCounterpartyName(tx)}
+					<!-- The nickname is shown in the row; the bank's own string stays visible as evidence. -->
+					<dt class="text-slate-500">Bank name</dt>
+					<dd class="break-words">{rawCounterpartyName(tx)}</dd>
+				{/if}
 				{#if tx.counterpartyIban}
 					<dt class="text-slate-500">IBAN</dt>
 					<dd class="break-all">{tx.counterpartyIban}</dd>

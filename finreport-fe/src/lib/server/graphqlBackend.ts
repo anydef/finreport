@@ -150,6 +150,8 @@ interface MockTransaction {
 	accountId: string;
 	amount: string;
 	counterpartyName: string | null;
+	/** Fixture-served nickname; search and sort still read `counterpartyName`, as the server does. */
+	counterpartyDisplayName?: string | null;
 	description: string | null;
 	label: {
 		status: string;

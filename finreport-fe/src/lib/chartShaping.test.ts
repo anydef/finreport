@@ -83,6 +83,15 @@ describe('shapeCashflowGraph', () => {
 		});
 	});
 
+	it('labels account nodes with the account display name, leaving drill-down refs alone', () => {
+		const id = '2b0fe9c2-2f4b-5753-95ad-133501e3bd5d';
+		const shaped = shapeCashflowGraph(netDeficit, [{ id, displayName: 'Pavlo - everyday' }]);
+		const node = shaped.nodes.find((n) => n.refType === 'account' && n.refId === id);
+		expect(node?.label).toBe('Pavlo - everyday');
+		expect(node && drilldownFilterForNode(node)).toEqual({ accountIds: [id] });
+		expect(shapeCashflowGraph(netDeficit).nodes.find((n) => n.refId === id)?.label).toBe('Main');
+	});
+
 	it('includes both a NET and a DEFICIT account node in the same graph', () => {
 		const shaped = shapeCashflowGraph(netDeficit);
 		const kinds = shaped.nodes.filter((n) => n.refType === 'account').map((n) => n.kind);

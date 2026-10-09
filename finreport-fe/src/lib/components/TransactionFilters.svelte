@@ -7,6 +7,7 @@
 	 */
 	import type { Snippet } from 'svelte';
 	import Tree from './Tree.svelte';
+	import { accountLabel } from '$lib/displayNames';
 	import Button from './Button.svelte';
 	import Card from './Card.svelte';
 	import { activeCategories, buildCategoryTree } from '$lib/categoryTree';
@@ -42,7 +43,6 @@
 	let { value, accounts, categories, tags, matchCount, scopeNote, onchange, lead }: Props =
 		$props();
 
-	const accountLabel = (a: Account) => a.label ?? a.displayId ?? a.id;
 	const tree = $derived(buildCategoryTree(activeCategories(categories)));
 	const chips = $derived(
 		activeFilters(value, {

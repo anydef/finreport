@@ -1,5 +1,5 @@
 {
-  "query": "query Transactions($filter: TransactionFilter, $page: PageInput) {\n  transactions(filter: $filter, page: $page) {\n    items {\n      id\n      accountId\n      source\n      externalId\n      bookingDate\n      valutaDate\n      bookingStatus\n      amount\n      currency\n      counterpartyName\n      counterpartyIban\n      description\n      transactionType\n      label {\n        category {\n          id\n          slug\n          name\n          kind\n        }\n        source\n        confidence\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n      }\n      splits {\n        index\n        amount\n        category {\n          id\n          slug\n          name\n          kind\n        }\n      }\n      tags\n      transfer {\n        counterpartTransactionId\n        counterpartAccountId\n        match\n      }\n      recurring {\n        isRecurring\n        source\n        seriesId\n        cadence\n        medianAmount\n      }\n    }\n    totalCount\n    limit\n    offset\n  }\n}",
+  "query": "query Transactions($filter: TransactionFilter, $page: PageInput) {\n  transactions(filter: $filter, page: $page) {\n    items {\n      id\n      accountId\n      source\n      externalId\n      bookingDate\n      valutaDate\n      bookingStatus\n      amount\n      currency\n      counterpartyName\n      counterpartyDisplayName\n      counterpartyIban\n      description\n      transactionType\n      label {\n        category {\n          id\n          slug\n          name\n          kind\n        }\n        source\n        confidence\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n      }\n      splits {\n        index\n        amount\n        category {\n          id\n          slug\n          name\n          kind\n        }\n      }\n      tags\n      transfer {\n        counterpartTransactionId\n        counterpartAccountId\n        match\n      }\n      recurring {\n        isRecurring\n        source\n        seriesId\n        cadence\n        medianAmount\n      }\n    }\n    totalCount\n    limit\n    offset\n  }\n}",
   "variables": {
     "filter": {
       "accountIds": [
@@ -27,6 +27,7 @@
           "amount": "2500.00",
           "currency": "EUR",
           "counterpartyName": "ACME GmbH",
+          "counterpartyDisplayName": "ACME GmbH",
           "counterpartyIban": null,
           "description": "Gehalt",
           "transactionType": "Überweisungsgutschrift",
@@ -53,6 +54,7 @@
           "amount": "-950.00",
           "currency": "EUR",
           "counterpartyName": "Hausverwaltung Mustermann",
+          "counterpartyDisplayName": "Hausverwaltung Mustermann",
           "counterpartyIban": "DE02500105170123456789",
           "description": "Miete",
           "transactionType": "Lastschrift",
@@ -94,6 +96,7 @@
           "amount": "-100.00",
           "currency": "EUR",
           "counterpartyName": null,
+          "counterpartyDisplayName": null,
           "counterpartyIban": null,
           "description": "Bargeldauszahlung",
           "transactionType": "Barauszahlung",
@@ -153,6 +156,7 @@
           "amount": "-9.99",
           "currency": "EUR",
           "counterpartyName": "Spotify",
+          "counterpartyDisplayName": "Spotify",
           "counterpartyIban": null,
           "description": "Spotify Premium",
           "transactionType": "Lastschrift",
@@ -194,6 +198,7 @@
           "amount": "-49.99",
           "currency": "EUR",
           "counterpartyName": "Amazon",
+          "counterpartyDisplayName": "Online orders",
           "counterpartyIban": null,
           "description": "Online purchase",
           "transactionType": "Kartenzahlung",
@@ -231,6 +236,7 @@
           "amount": "-10.50",
           "currency": "EUR",
           "counterpartyName": "Markthalle Neun",
+          "counterpartyDisplayName": "Markthalle Neun",
           "counterpartyIban": null,
           "description": "Wochenmarkt",
           "transactionType": "Lastschrift",
@@ -270,6 +276,7 @@
           "amount": "-23.40",
           "currency": "EUR",
           "counterpartyName": "Lidl",
+          "counterpartyDisplayName": "Lidl",
           "counterpartyIban": null,
           "description": "Lidl Berlin",
           "transactionType": "Lastschrift",

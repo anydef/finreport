@@ -1,5 +1,5 @@
 {
-  "query": "query ReviewQueue($page: PageInput) {\n  reviewQueue(page: $page) {\n    transactions {\n      id\n      accountId\n      bookingDate\n      amount\n      currency\n      counterpartyName\n      description\n      label {\n        source\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n        confidence\n      }\n    }\n    pendingRules {\n      id\n      name\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      conditions\n      priority\n      state\n      origin\n      autoApproved\n      confidence\n      evidenceCount\n      matchingTransactionCount\n      createdAt\n    }\n    totalCount\n  }\n}",
+  "query": "query ReviewQueue($page: PageInput) {\n  reviewQueue(page: $page) {\n    transactions {\n      id\n      accountId\n      bookingDate\n      amount\n      currency\n      counterpartyName\n      counterpartyDisplayName\n      description\n      label {\n        source\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n        confidence\n      }\n    }\n    pendingRules {\n      id\n      name\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      conditions\n      priority\n      state\n      origin\n      autoApproved\n      confidence\n      evidenceCount\n      matchingTransactionCount\n      createdAt\n    }\n    totalCount\n  }\n}",
   "data": {
     "reviewQueue": {
       "transactions": [
@@ -10,6 +10,7 @@
           "amount": "-49.99",
           "currency": "EUR",
           "counterpartyName": "Amazon",
+          "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
           "description": "Online purchase",
           "label": {
@@ -28,6 +29,7 @@
           "amount": "-18.40",
           "currency": "EUR",
           "counterpartyName": "Amazon",
+          "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
           "description": "Marketplace order",
           "label": {
@@ -46,6 +48,7 @@
           "amount": "-72.15",
           "currency": "EUR",
           "counterpartyName": "Amazon",
+          "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
           "description": "Prime Video and books",
           "label": {
@@ -64,6 +67,7 @@
           "amount": "-12.99",
           "currency": "EUR",
           "counterpartyName": "Amazon",
+          "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
           "description": "Kindle book",
           "label": {
@@ -82,6 +86,7 @@
           "amount": "-54.10",
           "currency": "EUR",
           "counterpartyName": "REWE Markt",
+          "counterpartyDisplayName": "REWE Markt",
           "counterpartyKey": "rewe",
           "description": "Card payment",
           "label": {
@@ -100,6 +105,7 @@
           "amount": "-33.72",
           "currency": "EUR",
           "counterpartyName": "REWE Markt",
+          "counterpartyDisplayName": "REWE Markt",
           "counterpartyKey": "rewe",
           "description": "Card payment",
           "label": {
@@ -118,6 +124,7 @@
           "amount": "-61.05",
           "currency": "EUR",
           "counterpartyName": "REWE Markt",
+          "counterpartyDisplayName": "REWE Markt",
           "counterpartyKey": "rewe",
           "description": "Card payment",
           "label": {
@@ -136,6 +143,7 @@
           "amount": "12.40",
           "currency": "EUR",
           "counterpartyName": "Rewe Sagt Danke",
+          "counterpartyDisplayName": "Rewe Sagt Danke",
           "counterpartyKey": "rewe",
           "description": "Refund deposit",
           "label": {
@@ -154,6 +162,7 @@
           "amount": "-27.30",
           "currency": "EUR",
           "counterpartyName": "Lidl Filiale 112",
+          "counterpartyDisplayName": "Lidl Filiale 112",
           "counterpartyKey": "lidl",
           "description": "Card payment",
           "label": {
@@ -172,6 +181,7 @@
           "amount": "-19.85",
           "currency": "EUR",
           "counterpartyName": "Lidl Filiale 112",
+          "counterpartyDisplayName": "Lidl Filiale 112",
           "counterpartyKey": "lidl",
           "description": "Card payment",
           "label": {
@@ -190,6 +200,7 @@
           "amount": "-120.00",
           "currency": "EUR",
           "counterpartyName": "Acme Co-Working",
+          "counterpartyDisplayName": "Acme Co-Working",
           "counterpartyKey": "acme co working",
           "description": "Monthly desk rental",
           "label": {
@@ -208,6 +219,7 @@
           "amount": "-9.99",
           "currency": "EUR",
           "counterpartyName": "Kleinanbieter Meyer",
+          "counterpartyDisplayName": "Kleinanbieter Meyer",
           "counterpartyKey": "kleinanbieter meyer",
           "description": "Card payment",
           "label": {
@@ -226,6 +238,7 @@
           "amount": "-33.00",
           "currency": "EUR",
           "counterpartyName": "Unknown shop",
+          "counterpartyDisplayName": "Unknown shop",
           "counterpartyKey": null,
           "description": "POS purchase",
           "label": {
@@ -244,6 +257,7 @@
           "amount": "-5.50",
           "currency": "EUR",
           "counterpartyName": null,
+          "counterpartyDisplayName": null,
           "counterpartyKey": null,
           "description": "Card payment",
           "label": {
