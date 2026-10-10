@@ -7,12 +7,16 @@ Personal-finance reporting: a Rust Comdirect API client + GraphQL backend, feedi
 - `finreport-rs/` — Cargo workspace (resolver 3). Members:
   - `webapp` — actix-web + async-graphql server; binaries in `webapp/src/bin/` for one-off jobs (`import_transactions`, `categorize`, `db_importer`, `init_session`, `graphql_schema_exporter`)
   - `comdirect-rs` — Comdirect REST API client
-  - `categorizer` — transaction categorization logic (taxonomy lives in `prompts/categories.json`)
+  - `categorizer` — transaction categorization logic (taxonomy lives in `prompts/taxonomy.json`)
   - `entity` — sea-orm generated entities (do not hand-edit; regenerate, see below)
   - `migration` — sea-orm migrations
   - `utils` — shared settings/config (`utils::settings::Settings`)
 - `finreport-fe/` — SvelteKit frontend, talks to the GraphQL backend. See `finreport-fe/CLAUDE.md` for frontend-specific commands.
-- `prompts/` — LLM categorization prompt (`categorize.txt`) + category taxonomy (`categories.json`)
+- `prompts/` — LLM categorization prompt (`categorize.txt`) + category taxonomy
+  (`taxonomy.json`, what `category-seed` publishes). `categories.json` is **dead**:
+  nothing in the repo reads it, it predates the `slug`/`kind` shape, and its
+  subcategory names disagree with the live ones (`child savings` vs
+  `child_savings`). Edit `taxonomy.json`.
 - `docs/` — Comdirect Postman collection, plus `docs/multi-agent-setup.md` tracking this repo's multi-agent prep
 - `terraform/` — deploy infra (Portainer stack)
 - `.gitea/` — CI
@@ -260,6 +264,44 @@ the excess of an over-reimbursement reported as `surplus`.
   projection, so a replay cannot fail on it).
 - The list resolvers prefetch `Transaction.link` per page (`graphql::links::prefetch_page`).
 
+## Savings
+
+Two separate things, both easy to get wrong:
+
+**`kind: SAVING` categories.** A saving-kind category is money put aside, not
+consumed. `categoryBreakdown` drops only `kind: TRANSFER` by default, so
+savings rows come back unless a caller filters them out — and the dashboard
+did exactly that, asking for `kind: EXPENSE` alone, which is why 64 labelled
+savings transactions were invisible on it. The dashboard now fetches both
+kinds and merges them (`mergeExpenseAndSavingBreakdowns`). **`share` is
+computed per kind** in `graphql/breakdown.rs`, so each response's rows already
+sum to 1: concatenating two responses raw prints percentages adding to 200%.
+The merge helper recomputes `share` over the combined total. `/compare` still
+defaults to `$kind: CategoryKind! = EXPENSE` and so still excludes savings.
+
+**Savings accounts** (not built yet; a mock-only preview lives at
+`/savings-preview`, driven by `graphql/savingsMock.ts`). The user marks
+accounts as savings, per user, like a nickname — a reporting choice, not a
+fact the bank reports. The figure is **net balance change**, decided
+deliberately: transfers in, withdrawals out, interest or salary paid straight
+in, and a payment made directly from a savings account all count. A movement
+between two savings accounts counts as neither, since it changes no total.
+
+- `transaction_insight.transfer_counterpart_id` holds the other side and the
+  detector flags **both** rows, so count only the savings-account side and
+  drop a row whose counterpart is also a savings account, or every internal
+  transfer is counted twice.
+- Money spent straight from a savings account is in the savings figure **and**
+  in the spending card. The two are each correct but are **not** a partition;
+  the card says so (`savingsView.ts`'s overlap note) rather than letting a
+  reader add them up.
+- `Account.isSavings` is optional in the frontend types only because nothing
+  serves it yet. Make it required with the resolver.
+- Do not add an operation to `finreport-fe/src/lib/graphql/queries.ts` before
+  the schema serves it: `queries.test.ts` validates every exported operation
+  against the frozen `schema.graphql` and will fail. That guard is why the
+  preview reads its mock module directly instead of faking GraphQL.
+
 ## Backend database profiles
 
 The backend can run locally against either Postgres:
@@ -353,4 +395,38 @@ Binding for every agent working in this repo:
   concept, and the old `assistant_usage_events` spend query does not apply.
 - **Code quality:** code must be readable, well modularized and well tested.
 - **Local runnability:** everything must be runnable locally. Docker is fine, e.g. Postgres via `just db-up` or a local Kafka broker for dev.
+- **Never start a server.** No dev server, preview server or other
+  long-running process on the user's behalf — not on a non-default port, and
+  not to check your own work. Print the command instead (`just dev-fe-mocks`,
+  then the URL) and let them run it. Verify with tests and `npm run check`; if
+  something genuinely needs a browser, say so in your report.
+- **One mergeable slice per agent.** Split a feature on seams that can be
+  verified and merged independently — storage (topic, migration, entity,
+  projection) / the read side (resolver, SQL, tests) / UI wiring — rather than
+  one end-to-end brief. A brief covering all three ran over six minutes with
+  nothing reviewable. If a slice cannot be cut below roughly 15 minutes of
+  agent work, tell the user the expected wait before launching it.
+- **Use the `just` recipes.** `just dev-fe-mocks` is the documented way to
+  review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
+  raw `npx vite dev` skips that. Same for `just test` / `just lint`.
+- **Test baselines**, so a delegated run can be checked rather than trusted:
+  **517** Rust unit tests via `just test`, **582** frontend via
+  `npm run test:unit`. Report the verbatim `test result:` lines and show the
+  addition. A truncated `cargo test` run stops at the first failing crate and
+  undercounts badly — pass `--no-fail-fast` when totalling.
+- **A single red run is not yet evidence.** The shared `CARGO_TARGET_DIR`
+  means a concurrent build in another worktree can clobber artifacts and
+  produce bogus "unresolved import"/"Unknown field" errors, or a spurious test
+  failure. `touch finreport-rs/entity/src/lib.rs finreport-rs/webapp/src/lib.rs`
+  and retry before believing it.
+- **Integration tests need `finreport-wp4-pg`** on `127.0.0.1:55435`
+  (`webapp/tests/common/mod.rs` expects exactly that container). If every test
+  fails at `common/mod.rs` with `PoolTimedOut`, the container is down —
+  `docker start finreport-wp4-pg` — it is not your change. Use your own
+  database on it, or your own container under a distinct name, and clean up.
+- **Resolving a merge by unioning both sides is a trap.** Two branches adding
+  a topic, a migration and a dispatch arm in the same places look additive,
+  but a conflict that splits mid-function leaves the closing brace attached to
+  the wrong block. Build after every such resolution, and bump any
+  `[&str; N]` array length the union changed.
 - **Judgement calls:** agents may make their own assumptions and decisions, unless they are security-critical or harmful. Those go to the user.
