@@ -438,3 +438,50 @@ problem is not correctness — it is how rarely it will fire.
 - Pre-existing prettier issue in `finreport-fe/src/lib/graphql/schema.graphql`
   (the mirrored SDL is not prettier-formatted).
 - The root `README.md` still documents `sqlx-cli`; the project uses `sea-orm-cli`.
+
+## Rules clarity and safety (2026-10-23)
+
+- **A rule with no conditions matches every transaction** — S, do before more
+  hand-written rules exist. `graphql/rules.rs`'s `validate_conditions` rejects
+  unknown keys, a bad regex and a bad direction, but accepts `{}`.
+  `labeling/rules.rs`'s `count_matching` states the consequence outright: "A
+  rule with no conditions at all matches every input." Learned rules always set
+  `counterparty_key`, so only a hand-created rule can trip this. Reject an
+  empty condition set at write time.
+- **Learned rule names read like free-text patterns** — XS, pure wording.
+  `labeling/processor.rs:828` builds `Learned: <key> -> <slug>`, which a user
+  reasonably read as a substring match that "will match everything". The
+  condition is exact equality on the normalized `counterparty_key`. Either name
+  it `counterparty = "<key>"` or show the condition summary next to the name
+  wherever the bare name appears.
+
+## Amazon follow-ups (2026-10-23)
+
+- **No column aliases** — S. The parser now resolves columns by name and
+  ignores unknown ones, so order and extra columns are fine, but a *renamed*
+  required column (e.g. `Item ASIN` -> `ASIN`) still rejects the file whole.
+  The message names the missing column, so it is diagnosable; add aliases only
+  when a real export shows one.
+- **`first_number` on promotion text is a guess** — XS. Checked against a real
+  header but not against real promotion values; a currency symbol or a
+  different format may read wrong.
+- **The upload outcome always says "No transaction was changed or split."** —
+  XS. `amazonView.ts:225` prints it unconditionally so an upload can never read
+  as an action on transactions, which is right in general but redundant when
+  the file was rejected whole and nothing was read. Drop the split sentence
+  when `read === 0`.
+- **Locale-formatted bare amounts are mostly handled** — nil. `parse_decimal`
+  reads `1.234,56` and `5,98`; `1,234` is ambiguous and is read as a thousands
+  separator.
+
+## Housekeeping (2026-10-23)
+
+- **~110 merged branches are still around** — XS. `git branch --merged main`
+  lists every `*-integrate`, `docs/*`, `fix/*` and `worktree-agent-*` branch
+  from previous iterations. Not deleted because nobody asked; a sweep of
+  `--merged` branches is safe but is the user's call.
+- **`docs/comdirect_rest_api.postman_collection.json` holds real account data**
+  — S, privacy. Saved example responses carry real IBANs, counterparty names,
+  family members' names and ~6 months of real transactions. Pre-existing and
+  committed long ago, so the history carries it too; scrubbing the file only
+  helps future readers. Worth deciding on deliberately.
