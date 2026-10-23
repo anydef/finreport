@@ -73,11 +73,8 @@ export interface Account {
 	/**
 	 * Marked by the user as an account they save into. Per user, like a
 	 * nickname: it is a reporting choice, not a fact the bank tells us.
-	 *
-	 * Optional because no backend serves it yet - the savings preview reads it
-	 * from `graphql/savingsMock`. Make it required with the resolver.
 	 */
-	isSavings?: boolean;
+	isSavings: boolean;
 	currency: string;
 	latestBalance: Balance | null;
 }

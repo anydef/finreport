@@ -42,6 +42,7 @@ query Accounts {
 		institute
 		label
 		displayName
+		isSavings
 		currency
 		latestBalance {
 			date
@@ -713,5 +714,34 @@ query ReimbursementSummary($filter: TransactionFilter) {
 		net
 		linkedCount
 		partiallyReimbursedCount
+	}
+}`;
+
+export const SAVINGS_SUMMARY_QUERY = `
+query SavingsSummary($filter: TransactionFilter!) {
+	savingsSummary(filter: $filter) {
+		currency
+		netPutAside
+		paidIn
+		withdrawn
+		internalTransferCount
+		spentDirectly
+		accounts {
+			account {
+				id
+				displayName
+			}
+			paidIn
+			withdrawn
+			net
+		}
+	}
+}`;
+
+export const SET_ACCOUNT_SAVINGS_MUTATION = `
+mutation SetAccountSavings($accountId: UUID!, $isSavings: Boolean!) {
+	setAccountSavings(accountId: $accountId, isSavings: $isSavings) {
+		id
+		isSavings
 	}
 }`;

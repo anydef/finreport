@@ -279,8 +279,8 @@ sum to 1: concatenating two responses raw prints percentages adding to 200%.
 The merge helper recomputes `share` over the combined total. `/compare` still
 defaults to `$kind: CategoryKind! = EXPENSE` and so still excludes savings.
 
-**Savings accounts** (not built yet; a mock-only preview lives at
-`/savings-preview`, driven by `graphql/savingsMock.ts`). The user marks
+**Savings accounts** (built: toggle at `/admin/accounts`, card on the dashboard;
+mock mode keeps its flags in `graphql/savingsMock.ts`). The user marks
 accounts as savings, per user, like a nickname — a reporting choice, not a
 fact the bank reports. The figure is **net balance change**, decided
 deliberately: transfers in, withdrawals out, interest or salary paid straight
@@ -295,13 +295,11 @@ between two savings accounts counts as neither, since it changes no total.
   in the spending card. The two are each correct but are **not** a partition;
   the card says so (`savingsView.ts`'s overlap note) rather than letting a
   reader add them up.
-- `Account.isSavings` is optional in the frontend types only because nothing
-  serves it yet. Make it required with the resolver.
-- Do not add an operation to `finreport-fe/src/lib/graphql/queries.ts` before
-  the schema serves it: `queries.test.ts` validates every exported operation
-  against the frozen `schema.graphql` and will fail. That guard is why the
-  preview reads its mock module directly instead of faking GraphQL.
-
+- A mixed-currency savings set makes `savingsSummary` return a `VALIDATION`
+  error; `savingsCardState` turns that into an explanatory line, and any other
+  error or a null summary renders nothing, so the dashboard never fails on it.
+- `queries.test.ts` validates every operation in `queries.ts` against the frozen
+  `schema.graphql`, so an operation cannot be added before the schema serves it.
 ## Backend database profiles
 
 The backend can run locally against either Postgres:

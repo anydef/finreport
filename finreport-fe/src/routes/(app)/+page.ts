@@ -7,6 +7,7 @@ import {
 	CATEGORIES_QUERY,
 	CATEGORY_BREAKDOWN_QUERY,
 	REIMBURSEMENT_SUMMARY_QUERY,
+	SAVINGS_SUMMARY_QUERY,
 	TAGS_QUERY,
 	TRANSACTIONS_QUERY
 } from '$lib/graphql/queries';
@@ -19,10 +20,12 @@ import type {
 	Category,
 	CategoryBreakdown,
 	ReimbursementSummary,
+	SavingsSummary,
 	TagCount,
 	TransactionFilter,
 	TransactionPage
 } from '$lib/graphql/types';
+import { savingsCardState } from '$lib/savingsView';
 import {
 	defaultGranularity,
 	parsePeriodSelection,
@@ -126,7 +129,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		transactionsResult,
 		breakdownResult,
 		savingsBreakdownResult,
-		reimbursementResult
+		reimbursementResult,
+		savingsResult
 	] = await Promise.all([
 		client.query(CASHFLOW_SUMMARY_QUERY, { filter: periodFilter, granularity }).toPromise(),
 		client
@@ -166,7 +170,10 @@ export const load: PageLoad = async ({ fetch, url }) => {
 			})
 			.toPromise(),
 		// The netted figure beside the totals; its failure never fails the dashboard.
-		client.query(REIMBURSEMENT_SUMMARY_QUERY, { filter: periodFilter }).toPromise()
+		client.query(REIMBURSEMENT_SUMMARY_QUERY, { filter: periodFilter }).toPromise(),
+		// Same period + panel filter as every other card. Its failure never fails
+		// the dashboard either (see `savingsCardState`).
+		client.query(SAVINGS_SUMMARY_QUERY, { filter: periodFilter }).toPromise()
 	]);
 
 	const error = [accountsResult, summaryResult, graphResult, transactionsResult].some(
@@ -204,6 +211,15 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		reimbursementSummary: reimbursementResult.data?.reimbursementSummary as
 			| ReimbursementSummary
 			| undefined,
+		savings: savingsCardState(
+			savingsResult.data?.savingsSummary as SavingsSummary | null | undefined,
+			savingsResult.error
+				? {
+						code: savingsResult.error.graphQLErrors[0]?.extensions?.code as string | undefined,
+						message: savingsResult.error.graphQLErrors[0]?.message
+					}
+				: null
+		),
 		today: toDateInputValue(today)
 	};
 };

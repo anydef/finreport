@@ -9,6 +9,7 @@
 	import ReimbursementNote from '$lib/components/ReimbursementNote.svelte';
 	import CashflowBarChart from '$lib/components/CashflowBarChart.svelte';
 	import CashflowSankey from '$lib/components/CashflowSankey.svelte';
+	import SavingsCard from '$lib/components/SavingsCard.svelte';
 	import CategoryBreakdown from '$lib/components/CategoryBreakdown.svelte';
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
@@ -328,6 +329,8 @@
 				/>
 			</Card>
 		{/if}
+
+		<SavingsCard state={data.savings} />
 
 		<Card title="Transactions">
 			{#if hasDrilldown}
