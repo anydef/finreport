@@ -719,6 +719,76 @@ async fn a_user_override_makes_a_sibling_resolve_to_the_users_category() {
     assert_eq!(label.rule_id, Some(rule.id));
 }
 
+/// Every record on `finreport.llm-cache` from the beginning, as
+/// `(key, payload)`; a tombstone has a `None` payload.
+fn read_llm_cache_topic(bootstrap: &str) -> Vec<(String, Option<Vec<u8>>)> {
+    use rdkafka::consumer::{BaseConsumer, Consumer};
+    use rdkafka::message::Message;
+    use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
+    use std::time::{Duration, Instant};
+
+    let consumer: BaseConsumer = rdkafka::ClientConfig::new()
+        .set("bootstrap.servers", bootstrap)
+        .set("group.id", "labeler-postgres-test-reader")
+        .set("enable.auto.commit", "false")
+        .create()
+        .expect("consumer");
+    let mut tpl = TopicPartitionList::new();
+    tpl.add_partition_offset(webapp::kafka::labeling::TOPIC_LLM_CACHE, 0, Offset::Beginning).unwrap();
+    consumer.assign(&tpl).expect("assign");
+    let (_, high) = consumer
+        .fetch_watermarks(webapp::kafka::labeling::TOPIC_LLM_CACHE, 0, Duration::from_secs(10))
+        .expect("watermarks");
+    let mut out = Vec::new();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while (out.len() as i64) < high && Instant::now() < deadline {
+        if let Some(Ok(m)) = consumer.poll(Duration::from_millis(200)) {
+            out.push((
+                String::from_utf8_lossy(m.key().unwrap_or_default()).to_string(),
+                m.payload().map(<[u8]>::to_vec),
+            ));
+        }
+    }
+    out
+}
+
+/// The cache is a projection like every other table, so what the labeler
+/// writes to it must also be on `finreport.llm-cache` (answer, then the
+/// tombstone for a contradicted entry), or a replay silently drops it.
+#[tokio::test]
+async fn llm_cache_answers_and_tombstones_are_published_to_the_topic() {
+    let pg = TestPostgres::start().await;
+    let broker = TestKafka::start().await;
+    let db = webapp::db::seaql::init_db(pg.database_url()).await.expect("connect to test Postgres");
+    let publisher = EventPublisher::connect(broker.bootstrap_servers()).expect("connect test Kafka producer");
+
+    seed_categories(&db, &["uncategorized", "personal.gym", "food.restaurants"]).await;
+    let catalog = proj::build_catalog(&db).await.expect("build catalog");
+    let provider = categorizer::provider::fake::FakeProvider::new();
+    let ops = LabelingOps::real(u32::MAX, u32::MAX, 0.9);
+    let cost_guard = CostGuard::new(10);
+    let fp = fitness_first_fingerprint();
+
+    let txn = seed_fitness_first(&db, "PUBLISH-A").await;
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+        .await
+        .expect("llm label");
+    let records = read_llm_cache_topic(broker.bootstrap_servers());
+    assert_eq!(records.len(), 1, "the paid-for answer is on the topic: {records:?}");
+    assert_eq!(records[0].0, fp, "keyed by fingerprint so compaction keeps the newest");
+    let payload: webapp::kafka::labeling::CacheRecord =
+        serde_json::from_slice(records[0].1.as_ref().expect("an answer, not a tombstone")).expect("CacheRecord JSON");
+    assert_eq!(payload.fingerprint, fp);
+
+    proj::project_user_label(&db, txn.id, Some(user_override(&txn, "food.restaurants"))).await.unwrap();
+    label_one_transaction(&db, &publisher, &ops, &provider, &catalog, "test-prompt-v1", 0.0, &cost_guard, &txn)
+        .await
+        .unwrap();
+    let records = read_llm_cache_topic(broker.bootstrap_servers());
+    assert_eq!(records.len(), 2, "answer then tombstone: {records:?}");
+    assert_eq!(records[1], (fp, None), "the dropped entry is tombstoned so a replay cannot revive it");
+}
+
 /// With no rule able to form, the invalidation alone still stops the stale
 /// answer being served from the cache: the sibling is re-asked (one provider
 /// call), not handed the rejected entry.

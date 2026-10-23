@@ -597,13 +597,11 @@ Open, deliberately not fixed in those slices:
 
 ## Labeling-engine findings from the proposal slice (2026-10-23)
 
-- **The labeler never publishes the LLM cache to Kafka** — M, real
-  inconsistency. `resolve_transaction` calls only `project_llm_cache`
-  (Postgres); `TOPIC_LLM_CACHE` is used solely for the labeler's lag check. So
-  the cache is not a projection like everything else, and a replay or
-  `just dev-reset` discards every answer the labeler paid an LLM for.
-  `proposePurchaseOrderCategories` publishes *and* projects, so the new path is
-  more durable than the old one. Close the gap on the labeler's side.
+- **The labeler never published the LLM cache to Kafka** - fixed. Answers and
+  contradiction tombstones now go through `labeling::cache_publish`
+  (publish, then project), shared with the proposal mutation. A publish failure
+  is logged at `error` and still projected, like labels; a replay would then
+  lose that one entry, which is refilled by the next LLM call.
 - **Two independent LLM cost guards** — S. The labeler's guard is per process;
   the proposal mutation builds a fresh `CostGuard` per call, so the two spend
   against separate budgets and `APP_llm_max_requests_per_run` no longer bounds
