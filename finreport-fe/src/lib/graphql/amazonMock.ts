@@ -89,6 +89,17 @@ const BLOCKED = order('308-7777777-8888888', '2026-10-14', '40.0000', [
 	['Office chair cushion', '30.0000'],
 	['Desk mat', '10.0000']
 ]);
+/** Items add to 24.50 but the charge is 27.49: 2.99 of shipping is the remainder. */
+const SHIPPED = order(
+	'309-2468024-1357911',
+	'2026-10-16',
+	'27.4900',
+	[
+		['Bamboo cutting board', '16.0000'],
+		['Silicone spatula set', '8.5000']
+	],
+	'2.9900'
+);
 const GIFT = order('306-3333333-4444444', '2026-10-01', '5.0000', [['Greeting card', '5.0000']]);
 
 const matches: PurchaseOrderMatch[] = [
@@ -150,11 +161,20 @@ const matches: PurchaseOrderMatch[] = [
 		charges: [charge(8, '2026-10-14', '-40.0000', '01308-7777777-8888888 AMZN Mktp DE')],
 		refunds: [],
 		applications: []
+	},
+	{
+		order: SHIPPED,
+		kind: 'ORDER_ID',
+		state: 'APPLY',
+		reasons: [],
+		charges: [charge(9, '2026-10-16', '-27.4900', '2468024-1357911 AMZN Mktp DE')],
+		refunds: [],
+		applications: []
 	}
 ];
 
 const report: PurchaseOrderMatchReport = {
-	orderCount: 6,
+	orderCount: 7,
 	matches,
 	unmatchedOrders: [GIFT],
 	unmatchedCharges: [charge(5, '2026-10-02', '-7.7700', '01999-9999999-9999999 AMZN Mktp DE')],
@@ -185,12 +205,25 @@ export function mockPurchaseOrderMatches(): { purchaseOrderMatches: PurchaseOrde
 const BLOCKED_REASON = 'it already has a split that was not made from an order; left as it is';
 
 /** A free (zero) item makes no part, as on the server. */
-function partsFor(m: PurchaseOrderMatch, categories: string[]): AppliedPart[] {
-	return m.order.items.flatMap((item, i) =>
+function partsFor(
+	m: PurchaseOrderMatch,
+	categories: string[],
+	remainderCategory: string | null
+): AppliedPart[] {
+	const parts = m.order.items.flatMap((item, i) =>
 		Number(item.lineTotal) === 0
 			? []
 			: [{ amount: `-${item.lineTotal}`, categorySlug: categories[i] ?? '', label: item.title }]
 	);
+	// The remainder is its own explicit part, as the server's `build_parts`.
+	if (Number(m.order.remainder) !== 0) {
+		parts.push({
+			amount: `-${m.order.remainder}`,
+			categorySlug: remainderCategory ?? '',
+			label: 'Shipping & adjustments'
+		});
+	}
+	return parts;
 }
 
 /** One part is a pinned category, two or more a split - the server's rule. */
@@ -221,7 +254,7 @@ export function mockApplyPurchaseOrderSplit(
 		if (match.order.orderId === BLOCKED.orderId) {
 			return { ...base, status: 'SKIPPED', reason: BLOCKED_REASON };
 		}
-		const parts = partsFor(match, input.itemCategories);
+		const parts = partsFor(match, input.itemCategories, input.remainderCategory);
 		if (parts.length === 0) {
 			return {
 				...base,

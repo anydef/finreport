@@ -260,6 +260,11 @@ export function emptyChoices(order: PurchaseOrder): ApplyChoices {
 
 const isZero = (decimal: string): boolean => decimalToNumber(decimal) === 0;
 
+/** Whether the order has a non-item part of its charge (shipping, tax, a promotion, rounding). */
+export function hasRemainder(order: PurchaseOrder): boolean {
+	return !isZero(order.remainder);
+}
+
 /** Items that become a part: a free (zero) item makes none and needs no category. */
 function splittableIndexes(order: PurchaseOrder): number[] {
 	return order.items.flatMap((item, i) => (isZero(item.lineTotal) ? [] : [i]));

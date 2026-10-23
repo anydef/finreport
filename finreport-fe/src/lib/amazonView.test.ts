@@ -23,6 +23,7 @@ import {
 	categoryPickerGroups,
 	chargedTotal,
 	confirmActionLabel,
+	hasRemainder,
 	intactNote,
 	isSinglePart,
 	chargeLabel,
@@ -45,7 +46,8 @@ describe('buildReview', () => {
 		expect(review.ready.map((r) => r.orderId)).toEqual([
 			'303-9169011-8123555',
 			'307-5555555-6666666',
-			'308-7777777-8888888'
+			'308-7777777-8888888',
+			'309-2468024-1357911'
 		]);
 		expect(review.reviewCount).toBe(2);
 		expect(review.noCharge.map((o) => o.orderId)).toEqual(['306-3333333-4444444']);
@@ -123,7 +125,7 @@ describe('chargedTotal', () => {
 describe('reviewHeadline', () => {
 	it('counts the sections', () => {
 		expect(reviewHeadline(buildReview(report()))).toBe(
-			'3 orders match cleanly, 2 need review, 1 with no bank charge.'
+			'4 orders match cleanly, 2 need review, 1 with no bank charge.'
 		);
 	});
 });
@@ -294,6 +296,32 @@ describe('applying a match', () => {
 		choices.remainderCategory = 'fees';
 		expect(applyBlocker(row, choices)).toBeNull();
 		expect(buildApplyInput(row, choices).remainderCategory).toBe('fees');
+	});
+
+	it('reports a remainder only when the order has a non-zero one', () => {
+		const rows = buildReview(report()).ready;
+		const shipped = rows.find((r) => r.orderId === '309-2468024-1357911')!;
+		expect(hasRemainder(shipped.order)).toBe(true);
+		expect(rows.filter((r) => hasRemainder(r.order))).toHaveLength(1);
+	});
+
+	it('applies the mock order with a remainder as a split including the shipping part', () => {
+		const shipped = buildReview(report()).ready.find((r) => r.orderId === '309-2468024-1357911')!;
+		const choices = { itemCategories: ['a', 'b'], remainderCategory: '' };
+		expect(applyBlocker(shipped, choices)).toContain('shipping');
+		choices.remainderCategory = 'fees';
+		resetAmazonMock();
+		const result = mockApplyPurchaseOrderSplit({ input: buildApplyInput(shipped, choices) });
+		if (!('data' in result)) throw new Error('expected data');
+		const outcome = result.data.applyPurchaseOrderSplit.outcomes[0];
+		const parts = outcome.parts;
+		expect(parts.map((p) => p.label)).toEqual([
+			'Bamboo cutting board',
+			'Silicone spatula set',
+			'Shipping & adjustments'
+		]);
+		expect(parts[2]).toMatchObject({ amount: '-2.9900', categorySlug: 'fees' });
+		expect(outcome.appliedAs).toBe('SPLIT');
 	});
 
 	it('says plainly that it changes transactions and can be undone', () => {
