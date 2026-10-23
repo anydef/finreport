@@ -10,4 +10,5 @@ pub mod kafka;
 pub mod labeling;
 pub mod links;
 pub mod projection;
+pub mod savings;
 mod service;
