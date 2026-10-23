@@ -1569,3 +1569,235 @@ async fn label_rule_is_exposed_for_rule_labels_only_and_survives_a_deleted_rule(
     assert_eq!(gone["source"], "RULE", "the label still says a rule set it");
     assert!(gone["rule"].is_null(), "a deleted rule is null, not an error");
 }
+
+// ---------------------------------------------------------------------------
+// Amazon purchase orders: the upload mutation and the match report
+// ---------------------------------------------------------------------------
+
+mod purchase_orders {
+    use super::*;
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, Set};
+    use serde_json::Value;
+    use uuid::Uuid;
+    use webapp::kafka::purchase_orders::TOPIC_PURCHASE_ORDER;
+
+    const HEADER: &str = "Order ID,Order Date,Total Amount,Total Savings,Status,Item ASIN,Item Quantity,Item Price,Item Discount,Promotions,Item Title,Item URL,Details URL,Recipient Name,Recipient Street,Recipient City,Recipient State,Recipient Zip,Recipient Country";
+
+    /// An id in Amazon's shape, unique per call so tests sharing a database
+    /// never meet each other's orders.
+    fn order_id() -> String {
+        let n = Uuid::new_v4().as_u128();
+        format!("{:03}-{:07}-{:07}", n % 1000, (n >> 16) % 10_000_000, (n >> 48) % 10_000_000)
+    }
+
+    /// One single-item order per row: (order id, total, item price, status).
+    fn csv(rows: &[(&str, &str, &str, &str)]) -> String {
+        let mut out = format!("{HEADER}\n");
+        for (i, (id, total, price, status)) in rows.iter().enumerate() {
+            out.push_str(&format!(
+                "{id},2026-10-01,{total} EUR,,{status},B00{i},1,{price},,,Item {i},u,d,Home Person,Home Street 1,Hometown,,12345,DE\n"
+            ));
+        }
+        out
+    }
+
+    async fn kafka_with_topic() -> (testcontainers::ContainerAsync<testcontainers_modules::kafka::apache::Kafka>, String) {
+        use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
+        use rdkafka::client::DefaultClientContext;
+        use rdkafka::ClientConfig;
+        use testcontainers::runners::AsyncRunner;
+        use testcontainers_modules::kafka::apache::{Kafka, KAFKA_PORT};
+
+        let container = Kafka::default().start().await.expect("start Kafka testcontainer");
+        let host = container.get_host().await.unwrap();
+        let port = container.get_host_port_ipv4(KAFKA_PORT).await.unwrap();
+        let bootstrap = format!("{host}:{port}");
+        let admin: AdminClient<DefaultClientContext> =
+            ClientConfig::new().set("bootstrap.servers", &bootstrap).create().unwrap();
+        admin
+            .create_topics(
+                &[NewTopic::new(TOPIC_PURCHASE_ORDER, 1, TopicReplication::Fixed(1))],
+                &AdminOptions::new().request_timeout(Some(Duration::from_secs(10))),
+            )
+            .await
+            .expect("create purchase-order topic");
+        (container, bootstrap)
+    }
+
+    struct Tenant {
+        user: AuthenticatedUser,
+        account: Uuid,
+    }
+
+    async fn tenant(db: &DatabaseConnection, name: &str) -> Tenant {
+        let (user_id, username) = common::seed_user(db, name, "pw").await;
+        let account = common::seed_account(db, "EUR", name).await;
+        common::link(db, user_id, account).await;
+        Tenant { user: AuthenticatedUser { user_id, username, account_ids: vec![account] }, account }
+    }
+
+    async fn bank_line(db: &DatabaseConnection, account: Uuid, date: &str, amount: &str, name: &str, description: &str) -> Uuid {
+        let id = common::seed_transaction(db, account, date, amount, Some(name)).await;
+        let mut model: entity::entities::transaction::ActiveModel =
+            entity::entities::transaction::Entity::find_by_id(id).one(db).await.unwrap().unwrap().into();
+        model.description = Set(Some(description.to_string()));
+        model.update(db).await.unwrap();
+        id
+    }
+
+    async fn gql(schema: &webapp::graphql::AppSchema, user: &AuthenticatedUser, query: String) -> async_graphql::Response {
+        schema.execute(authed(Request::new(query), Some(user.clone()))).await
+    }
+
+    fn upload_query(files: &[String]) -> String {
+        let list = files.iter().map(|f| serde_json::to_string(f).unwrap()).collect::<Vec<_>>().join(",");
+        format!(
+            "mutation {{ uploadPurchaseOrders(files: [{list}]) {{ newOrders updatedOrders unchangedOrders files {{ index orderCount error }} }} }}"
+        )
+    }
+
+    async fn stored_count(db: &DatabaseConnection, user: Uuid) -> usize {
+        entity::entities::purchase_order::Entity::find()
+            .all(db)
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|o| o.user_id == user)
+            .count()
+    }
+
+    const REPORT: &str = "{ purchaseOrderMatches { orderCount \
+        matches { order { orderId } kind state reasons { code message } charges { transactionId amount } } \
+        unmatchedOrders { orderId } unmatchedCharges { transactionId } subscriptionCharges { transactionId } } }";
+
+    #[tokio::test]
+    async fn upload_stores_orders_and_a_re_upload_changes_nothing() {
+        let db = common::db().await;
+        let (_kafka, bootstrap) = kafka_with_topic().await;
+        let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+        let t = tenant(&db, &format!("po-up-{}", Uuid::new_v4().simple())).await;
+        let (a, b) = (order_id(), order_id());
+        let file = csv(&[(&a, "10.00", "10.00", "Delivered"), (&b, "5.00", "5.00", "Delivered")]);
+
+        let first = gql(&schema, &t.user, upload_query(&[file.clone()])).await;
+        assert!(first.errors.is_empty(), "{:?}", first.errors);
+        let first = first.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
+        assert_eq!((first["newOrders"].as_i64(), first["unchangedOrders"].as_i64()), (Some(2), Some(0)));
+        assert_eq!(stored_count(&db, t.user.user_id).await, 2);
+
+        let again = gql(&schema, &t.user, upload_query(&[file])).await;
+        assert!(again.errors.is_empty(), "{:?}", again.errors);
+        let again = again.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
+        assert_eq!(
+            (again["newOrders"].as_i64(), again["updatedOrders"].as_i64(), again["unchangedOrders"].as_i64()),
+            (Some(0), Some(0), Some(2)),
+            "nothing is republished for an unchanged order"
+        );
+        assert_eq!(stored_count(&db, t.user.user_id).await, 2);
+
+        let moved = gql(&schema, &t.user, upload_query(&[csv(&[(&a, "10.00", "10.00", "Return started")])])).await;
+        let moved = moved.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
+        assert_eq!((moved["updatedOrders"].as_i64(), moved["newOrders"].as_i64()), (Some(1), Some(0)));
+    }
+
+    #[tokio::test]
+    async fn a_bad_file_is_rejected_whole_while_a_good_one_imports_and_no_cell_is_echoed() {
+        let db = common::db().await;
+        let (_kafka, bootstrap) = kafka_with_topic().await;
+        let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+        let t = tenant(&db, &format!("po-bad-{}", Uuid::new_v4().simple())).await;
+        let id = order_id();
+        let good = csv(&[(&id, "10.00", "10.00", "Delivered")]);
+        let bad = good.replace("2026-10-01", "not-a-date");
+        assert_ne!(bad, good);
+
+        let r = gql(&schema, &t.user, upload_query(&[bad, good])).await;
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let data = r.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
+        assert_eq!(data["newOrders"], 1);
+        let error = data["files"][0]["error"].as_str().expect("first file rejected").to_string();
+        assert!(data["files"][1]["error"].is_null());
+        for leak in ["Home Person", "Home Street", "Hometown", "12345", "not-a-date"] {
+            assert!(!error.contains(leak), "error echoed a cell: {error}");
+        }
+        assert_eq!(stored_count(&db, t.user.user_id).await, 1);
+
+        // A wrong header imports nothing and says so without quoting a row.
+        let r = gql(&schema, &t.user, upload_query(&["Foo,Bar\nHome Person,Home Street 1\n".to_string()])).await;
+        let data = r.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
+        assert_eq!(data["newOrders"], 0);
+        assert!(!data["files"][0]["error"].as_str().unwrap().contains("Home"));
+        assert_eq!(stored_count(&db, t.user.user_id).await, 1);
+    }
+
+    #[tokio::test]
+    async fn upload_without_a_broker_fails_with_kafka_unavailable() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let t = tenant(&db, &format!("po-nok-{}", Uuid::new_v4().simple())).await;
+        let r = gql(&schema, &t.user, upload_query(&[csv(&[(&order_id(), "1.00", "1.00", "Delivered")])])).await;
+        let code = r.errors[0].extensions.as_ref().and_then(|e| e.get("code")).cloned();
+        assert_eq!(code, Some(async_graphql::Value::from("KAFKA_UNAVAILABLE")));
+        assert_eq!(stored_count(&db, t.user.user_id).await, 0);
+    }
+
+    #[tokio::test]
+    async fn the_report_tells_apply_review_subscription_and_unclaimed_apart_and_never_crosses_users() {
+        let db = common::db().await;
+        let (_kafka, bootstrap) = kafka_with_topic().await;
+        let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+        let alice = tenant(&db, &format!("po-rep-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("po-rep-b-{}", Uuid::new_v4().simple())).await;
+        let (clean, split, gift) = (order_id(), order_id(), order_id());
+
+        // clean: one order, one charge. split: one item, two charges (cannot
+        // be assigned). gift: no bank line at all.
+        let file = csv(&[
+            (&clean, "13.45", "13.45", "Delivered"),
+            (&split, "22.59", "22.59", "Delivered"),
+            (&gift, "5.00", "5.00", "Delivered"),
+        ]);
+        let up = gql(&schema, &alice.user, upload_query(&[file])).await;
+        assert!(up.errors.is_empty(), "{:?}", up.errors);
+
+        let amazon = "AMAZON PAYMENTS EUROPE S.C.A.";
+        let line = |id: &str| format!("01{id} AMZN Mktp DE");
+        let clean_tx = bank_line(&db, alice.account, "2026-10-08", "-13.45", amazon, &line(&clean)).await;
+        let s1 = bank_line(&db, alice.account, "2026-09-24", "-13.60", amazon, &line(&split)).await;
+        let s2 = bank_line(&db, alice.account, "2026-09-23", "-8.99", amazon, &line(&split)).await;
+        let sub = bank_line(&db, alice.account, "2026-10-07", "-8.99", "AMAZON EU S.A R.L.", "01D01-8109513-9170236 AMZNPrime DE").await;
+        let stray = bank_line(&db, alice.account, "2026-10-02", "-7.77", amazon, &line("999-9999999-9999999")).await;
+        // Bob has an Amazon line carrying Alice's clean order id: it must not
+        // show on Alice's report, and Bob (no orders) sees an empty one.
+        let bobs = bank_line(&db, bob.account, "2026-10-08", "-13.45", amazon, &line(&clean)).await;
+
+        let r = gql(&schema, &alice.user, REPORT.to_string()).await;
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let report = r.data.into_json().unwrap()["purchaseOrderMatches"].clone();
+        assert_eq!(report["orderCount"], 3);
+        let matches = report["matches"].as_array().unwrap();
+        let find = |id: &str| matches.iter().find(|m| m["order"]["orderId"] == id).unwrap_or_else(|| panic!("no match for {id}"));
+
+        let c = find(&clean);
+        assert_eq!(c["state"], "APPLY");
+        assert!(c["reasons"].as_array().unwrap().is_empty());
+        assert_eq!(c["charges"][0]["transactionId"], clean_tx.to_string());
+
+        let s = find(&split);
+        assert_eq!(s["state"], "NEEDS_REVIEW");
+        assert_eq!(s["reasons"][0]["code"], "ITEMS_DO_NOT_RECONCILE_TO_CHARGES");
+        assert_eq!(s["reasons"][0]["message"], "order spans 2 charges; items do not reconcile to them");
+        let charged: Vec<String> = s["charges"].as_array().unwrap().iter().map(|c| c["transactionId"].as_str().unwrap().to_string()).collect();
+        assert!(charged.contains(&s1.to_string()) && charged.contains(&s2.to_string()));
+
+        assert_eq!(report["unmatchedOrders"][0]["orderId"], gift);
+        assert_eq!(report["subscriptionCharges"][0]["transactionId"], sub.to_string());
+        assert_eq!(report["unmatchedCharges"][0]["transactionId"], stray.to_string());
+        assert!(!report.to_string().contains(&bobs.to_string()), "another user's transaction leaked");
+
+        let theirs = gql(&schema, &bob.user, REPORT.to_string()).await;
+        let theirs: Value = theirs.data.into_json().unwrap()["purchaseOrderMatches"].clone();
+        assert_eq!(theirs["orderCount"], 0, "Alice's orders are not Bob's");
+        assert!(theirs["matches"].as_array().unwrap().is_empty());
+    }
+}

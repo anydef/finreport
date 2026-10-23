@@ -665,6 +665,13 @@ type Mutation {
 	"""
 	setAccountSavings(accountId: UUID!, isSavings: Boolean!): Account!
 	"""
+	`uploadPurchaseOrders`: record Amazon order-history CSV files (the full
+	text of each) as purchase-order evidence. A file with an unrecognised
+	header or an unreadable cell is rejected whole and reported by
+	position; the others still import. It splits nothing.
+	"""
+	uploadPurchaseOrders(files: [String!]!): PurchaseOrderUploadResult!
+	"""
 	`setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or
 	normalised key; covers every spelling) or one of the caller's accounts
 	(`ACCOUNT`, by id). Display only.
@@ -733,6 +740,150 @@ input PageInput {
 	"""
 	limit: Int! = 50
 	offset: Int! = 0
+}
+
+type PurchaseOrder {
+	orderId: String!
+	orderDate: Date!
+	total: Decimal!
+	currency: String!
+	"""
+	`total` minus the items: shipping, tax, gift cards, promotions.
+	"""
+	remainder: Decimal!
+	items: [PurchaseOrderItem!]!
+}
+
+"""
+A bank line the matcher looked at. Light on purpose: a report row, not a
+full `Transaction`, so it carries no per-row resolvers.
+"""
+type PurchaseOrderCharge {
+	transactionId: UUID!
+	bookingDate: Date!
+	"""
+	Signed, as on the bank statement.
+	"""
+	amount: Decimal!
+	currency: String!
+	counterpartyName: String
+	description: String
+}
+
+type PurchaseOrderFileResult {
+	"""
+	Position in the `files` argument, from 0.
+	"""
+	index: Int!
+	orderCount: Int!
+	"""
+	Why the file was rejected: column names and line numbers, never a
+	cell. `null` when the file was read.
+	"""
+	error: String
+}
+
+type PurchaseOrderItem {
+	asin: String!
+	quantity: Int!
+	title: String!
+	"""
+	What this item contributes to the order, as resolved by the parser.
+	"""
+	lineTotal: Decimal!
+	"""
+	The export's status text. Free text and localised.
+	"""
+	status: String!
+	returned: Boolean!
+}
+
+type PurchaseOrderMatch {
+	order: PurchaseOrder!
+	kind: PurchaseOrderMatchKind!
+	state: PurchaseOrderMatchState!
+	"""
+	Empty for `APPLY`.
+	"""
+	reasons: [PurchaseOrderReviewReason!]!
+	"""
+	Every debit joined to the order (several for a multi-shipment order).
+	"""
+	charges: [PurchaseOrderCharge!]!
+	"""
+	Credits carrying the order id. Informational; never split.
+	"""
+	refunds: [PurchaseOrderCharge!]!
+}
+
+enum PurchaseOrderMatchKind {
+	"""
+	Joined on the order id in the bank description.
+	"""
+	ORDER_ID
+	"""
+	Joined on amount and date only; always needs review.
+	"""
+	AMOUNT_AND_DATE
+}
+
+type PurchaseOrderMatchReport {
+	orderCount: Int!
+	"""
+	Orders joined to at least one charge, whatever their state.
+	"""
+	matches: [PurchaseOrderMatch!]!
+	"""
+	Orders with no bank line: gift-card-only, not yet charged, or outside
+	the imported bank history.
+	"""
+	unmatchedOrders: [PurchaseOrder!]!
+	"""
+	Amazon-looking bank lines no order claims.
+	"""
+	unmatchedCharges: [PurchaseOrderCharge!]!
+	"""
+	`D01-` Prime / Music charges, recognised and set aside.
+	"""
+	subscriptionCharges: [PurchaseOrderCharge!]!
+}
+
+enum PurchaseOrderMatchState {
+	"""
+	Exactly one assignment reconciles; safe to apply once splitting exists.
+	"""
+	APPLY
+	"""
+	A person must look at it; `reasons` say why.
+	"""
+	NEEDS_REVIEW
+}
+
+type PurchaseOrderReviewReason {
+	"""
+	Stable machine name of the reason (`ITEMS_DO_NOT_RECONCILE_TO_CHARGES`, ...).
+	"""
+	code: String!
+	"""
+	The matcher's own user-facing wording, shown as is.
+	"""
+	message: String!
+}
+
+type PurchaseOrderUploadResult {
+	files: [PurchaseOrderFileResult!]!
+	"""
+	Orders not seen before.
+	"""
+	newOrders: Int!
+	"""
+	Orders seen before whose content changed (a status moved, say).
+	"""
+	updatedOrders: Int!
+	"""
+	Orders already stored exactly as uploaded; nothing was published.
+	"""
+	unchangedOrders: Int!
 }
 
 type Query {
@@ -808,6 +959,12 @@ type Query {
 	nothing; see `SavingsSummary`.
 	"""
 	savingsSummary(filter: TransactionFilter!): SavingsSummary
+	"""
+	The caller's uploaded Amazon orders matched against their bank lines:
+	which would apply cleanly, which need review and why (the matcher's
+	own wording), and what was set aside (subscriptions, unclaimed lines).
+	"""
+	purchaseOrderMatches: PurchaseOrderMatchReport!
 	"""
 	What is waiting for the user: uncategorised and held-for-review
 	transactions with their worth. All-time, across the caller's accounts.
