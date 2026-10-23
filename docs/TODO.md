@@ -207,6 +207,66 @@ by agreeing where it goes.
   carry the topic, partition, offset, key, headers, the raw value and the
   mapper's error, and a way to mark one resolved once it has been dealt with.
 
+## Savings (2026-10-09/10)
+
+The category side is done and merged. The account side is designed, previewed
+and half-built; the rest is below. See the Savings section of `CLAUDE.md` for
+the semantics, which the user decided and which should not be re-litigated.
+
+- **Finish the savings-account backend** — L, high value. A Sonnet agent got
+  partway and hit a session rate limit. Its snapshot is commit `e33b115` on
+  branch `worktree-agent-a9f446fa3306daebc`, in the worktree
+  `.claude/worktrees/agent-a9f446fa3306daebc`. **Assume it does not build** -
+  it stopped mid-`graphql/accounts.rs` and was never compiled or tested.
+  Present but unverified: migration `m20270401_000001_account_savings`, the
+  `account_savings` entity, `graphql/savings.rs`, the topic in
+  `terraform/kafka/main.tf` + `docker-compose.local.yml`, the projection
+  dispatch, `just dev-reset` truncation, regenerated SDL, and a start on
+  `Account.isSavings` plus integration tests. Still missing:
+  `setAccountSavings`, the `savingsSummary` resolver and its SQL, unit tests
+  for the netting, the `/admin/accounts` page, dashboard wiring, deleting
+  `routes/(app)/savings-preview/` and `graphql/savingsMock.ts`, and making
+  `Account.isSavings` required.
+  Split it into three briefs, not one (storage / read side / UI wiring) - the
+  single end-to-end brief is what ran long.
+- **Four open questions on the card's shape** — S, needs the user not an agent.
+  Unanswered when the work paused, so the preview was built on my own choices:
+  (1) is "Put aside / net / 900.00 in, 250.00 out" the right headline, or
+  should in and out be separate figures; (2) keep the overlap disclosure
+  (`50.00 EUR of this was spent straight from a savings account, so it also
+  appears under spending`); (3) keep the excluded-internal-movement note;
+  (4) is `/admin/accounts` the right home for the savings toggle. Also whether
+  the per-account In/Out/Net table is the right level of detail. Review with
+  `just dev-fe-mocks` at `/savings-preview`.
+- **`/compare` still excludes savings** — S. `CATEGORY_COMPARISON_QUERY` in
+  `finreport-fe/src/lib/graphql/queries.ts` defaults to
+  `$kind: CategoryKind! = EXPENSE`, the same default that hid savings on the
+  dashboard. Left alone deliberately: comparing a savings contribution
+  month-over-month may deserve its own column or card rather than silently
+  joining the expense table, so decide the presentation before changing the
+  default.
+- **Goals ignore `TransactionFilter`** — S, known gap from the reimbursement
+  work. Goals use their own scope, so goal progress still counts
+  reimbursement-side money and will count savings flows too. Not covered by
+  any test.
+
+## Housekeeping
+
+- **Delete `prompts/categories.json`** — XS. Dead since May 2026: nothing in
+  the repo reads it, `category-seed` takes `prompts/taxonomy.json`, and its
+  subcategory names disagree with the live ones (`child savings` vs
+  `child_savings`). `CLAUDE.md` pointed at it until 2026-10-10. Left in place
+  only because deleting it was never asked for.
+- **Jumbled justfile comments** — XS. The comment block above `dev-fe-mocks`
+  opens with "Run the frontend locally, tower profile (talks to the deployed
+  Unraid backend)", which belongs on `dev-fe-tower`; that recipe now has no
+  comment at all.
+- **Two new topics are not applied** — S, blocks the deployed stack.
+  `finreport.display-alias` and `finreport.transaction-link` exist in
+  `terraform/kafka/main.tf` and locally, but no `terraform apply` has run
+  against the central broker, so the deployed projector cannot consume them.
+  Nothing from 2026-10-09 is deployed at all: it needs a redeploy too.
+
 ## Open debt
 
 - Pre-existing prettier issue in `finreport-fe/src/lib/graphql/schema.graphql`
