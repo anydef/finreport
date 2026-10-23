@@ -4,14 +4,12 @@ use std::fmt;
 /// value**: cells in this file can hold the user's home address.
 #[derive(Debug)]
 pub enum ParseError {
-    /// The header row is not the known column set. Names the first mismatch.
+    /// Required header columns are missing. Carries only static column names
+    /// and a count: nothing read from the file, because a headerless file
+    /// would put a data row (an address) where the header should be.
     UnrecognisedHeader {
-        position: usize,
-        expected: &'static str,
-        /// False when the row is shorter than the expected header. The found
-        /// text is deliberately not kept: a headerless file would put a data
-        /// row (an address) into the error.
-        present: bool,
+        missing: Vec<&'static str>,
+        columns: usize,
     },
     /// A cell could not be read as what its column requires.
     BadCell {
@@ -30,16 +28,14 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ParseError::UnrecognisedHeader {
-                position,
-                expected,
-                present,
-            } => write!(
-                f,
-                "unrecognised Amazon CSV header: column {} should be {expected:?} but is {}",
-                position + 1,
-                if *present { "something else" } else { "missing" }
-            ),
+            ParseError::UnrecognisedHeader { missing, columns } => {
+                let names: Vec<String> = missing.iter().map(|n| format!("{n:?}")).collect();
+                write!(
+                    f,
+                    "unrecognised Amazon CSV header: missing required column(s) {} (header had {columns} columns)",
+                    names.join(", ")
+                )
+            }
             ParseError::BadCell {
                 line,
                 column,

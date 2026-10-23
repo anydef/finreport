@@ -7,6 +7,7 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 const ORDERS: &str = include_str!("fixtures/orders.csv");
+const NEW_SHAPE: &str = include_str!("fixtures/orders_2025_shape.csv");
 const REEXPORT: &str = include_str!("fixtures/orders_reexport.csv");
 
 fn d(s: &str) -> Decimal {
@@ -129,24 +130,73 @@ fn bom_crlf_and_trailing_blank_lines() {
 }
 
 #[test]
-fn bad_header_fails_loudly_naming_the_column() {
-    let swapped = ORDERS.replacen("Order Date,Total Amount", "Total Amount,Order Date", 1);
+fn missing_required_column_fails_naming_it() {
     let renamed = ORDERS.replacen("Item Price", "Unit Price", 1);
-    let missing = ORDERS.replacen(",Recipient Country", "", 1);
-    let extra = ORDERS.replacen("Recipient Country\n", "Recipient Country,Gift Wrap\n", 1);
-    let cases = [
-        (swapped, 2, "Order Date"),
-        (renamed, 8, "Item Price"),
-        (missing, 19, "Recipient Country"),
-        (extra, 20, "<end of header>"),
-    ];
-    for (csv, column, name) in cases {
+    let no_title = ORDERS.replacen(",Item Title", "", 1);
+    let cases = [(renamed, "Item Price"), (no_title, "Item Title")];
+    for (csv, name) in cases {
         let err = parse_orders(csv.as_bytes()).expect_err("must fail");
         assert!(matches!(err, ParseError::UnrecognisedHeader { .. }), "{err:?}");
         let msg = err.to_string();
-        assert!(msg.contains(&format!("column {column}")), "{msg}");
-        assert!(msg.contains(name), "{msg}");
+        assert!(msg.contains(&format!("{name:?}")), "{msg}");
+        assert!(msg.contains("columns)"), "{msg}");
     }
+}
+
+#[test]
+fn column_order_and_extra_columns_do_not_matter() {
+    // Reverse every row's cells and append an unknown column.
+    let mut rdr = csv::Reader::from_reader(ORDERS.as_bytes());
+    let headers: Vec<String> = rdr.headers().unwrap().iter().map(String::from).collect();
+    let rows: Vec<Vec<String>> =
+        rdr.records().map(|r| r.unwrap().iter().map(String::from).collect()).collect();
+    let mut w = csv::Writer::from_writer(vec![]);
+    let rev = |v: &Vec<String>| {
+        let mut v = v.clone();
+        v.reverse();
+        v.push("future".to_string());
+        v
+    };
+    w.write_record(rev(&headers)).unwrap();
+    for r in &rows {
+        w.write_record(rev(r)).unwrap();
+    }
+    let reordered = w.into_inner().unwrap();
+    assert_eq!(parse_orders(reordered.as_slice()).unwrap(), orders());
+}
+
+#[test]
+fn current_export_shape_takes_currency_from_its_column() {
+    let all = parse_orders(NEW_SHAPE.as_bytes()).expect("new shape parses");
+    assert_eq!(all.len(), 14);
+    let o = all.iter().find(|o| o.order_id == "304-6374005-4280367").unwrap();
+    assert_eq!(o.total, d("5.98"));
+    assert_eq!(o.currency, "EUR");
+    assert_eq!(o.items[0].asin, "B0C1Z84ZQ1");
+    assert!(o.items[0].title.starts_with("VIEVRE"));
+    // Same orders as the old shape, bar the extra empty-status one.
+    assert_eq!(&all[..13], orders().as_slice());
+}
+
+#[test]
+fn arriving_delivered_and_empty_status_all_parse() {
+    let all = parse_orders(NEW_SHAPE.as_bytes()).unwrap();
+    let status = |id: &str| {
+        let o = all.iter().find(|o| o.order_id == id).unwrap();
+        (o.items[0].status.clone(), o.items[0].returned)
+    };
+    assert_eq!(status("304-6374005-4280367"), ("Arriving today".into(), false));
+    assert_eq!(status("303-9169011-8123555"), ("Delivered 7 October".into(), false));
+    assert_eq!(status("306-0000009-0000009"), (String::new(), false));
+}
+
+#[test]
+fn bare_amount_without_any_currency_stays_an_error() {
+    let csv = ORDERS.replacen("5.98 EUR", "5.98", 1);
+    assert!(matches!(
+        parse_orders(csv.as_bytes()),
+        Err(ParseError::BadCell { column: "Total Amount", .. })
+    ));
 }
 
 #[test]
@@ -155,6 +205,23 @@ fn headerless_file_error_leaks_nothing() {
     let err = parse_orders(without_header.as_bytes()).unwrap_err();
     assert!(!err.to_string().contains("Mustermann"));
     assert!(!format!("{err:?}").contains("Mustermann"));
+    assert!(matches!(err, ParseError::UnrecognisedHeader { .. }));
+
+    let headerless = "304-1,2026-10-08,5.98,EUR,Schwentinestr 5,Kiel\n";
+    let err = parse_orders(headerless.as_bytes()).unwrap_err();
+    assert!(!err.to_string().contains("Schwentinestr"), "{err}");
+    assert!(!format!("{err:?}").contains("Schwentinestr"), "{err:?}");
+}
+
+#[test]
+fn recipient_columns_in_new_shape_are_not_stored() {
+    let all = parse_orders(NEW_SHAPE.as_bytes()).unwrap();
+    let json = serde_json::to_string(&all).unwrap();
+    let debug = format!("{all:?}");
+    for v in ["Test Person", "1 Example Street", "Testville", "Teststate", "Testland"] {
+        assert!(NEW_SHAPE.contains(v));
+        assert!(!json.contains(v) && !debug.contains(v), "leaks {v:?}");
+    }
 }
 
 #[test]
