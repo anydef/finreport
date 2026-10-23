@@ -24,3 +24,5 @@ pub use super::transaction_tag::Entity as TransactionTag;
 pub use super::transaction_user_label::Entity as TransactionUserLabel;
 pub use super::user_account::Entity as UserAccount;
 pub use super::user_session::Entity as UserSession;
+pub use super::purchase_order::Entity as PurchaseOrder;
+pub use super::purchase_order_item::Entity as PurchaseOrderItem;

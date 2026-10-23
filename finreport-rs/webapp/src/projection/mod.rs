@@ -16,6 +16,7 @@ pub mod legacy;
 pub mod links;
 pub mod mapper;
 pub mod offsets;
+pub mod purchase_orders;
 pub mod records;
 pub mod upsert;
 
@@ -75,7 +76,7 @@ const INGEST_PARTITION: i32 = 0;
 /// ever advanced. `transaction-insight` (iteration 3 §2.3/§3) is the
 /// detector's own output, consumed the same way, and `goal` (iteration 4
 /// §2.1) is the user's goal decisions, projected by `projection::goals`.
-pub const LABELING_PROJECTION_TOPICS: [&str; 11] = [
+pub const LABELING_PROJECTION_TOPICS: [&str; 12] = [
     crate::kafka::labeling::TOPIC_CATEGORY,
     crate::kafka::labeling::TOPIC_TRANSACTION_LABEL,
     crate::kafka::labeling::TOPIC_LLM_CACHE,
@@ -87,6 +88,7 @@ pub const LABELING_PROJECTION_TOPICS: [&str; 11] = [
     crate::kafka::labeling::TOPIC_DISPLAY_ALIAS,
     crate::kafka::links::TOPIC_TRANSACTION_LINK,
     crate::kafka::savings::TOPIC_ACCOUNT_SAVINGS,
+    crate::kafka::purchase_orders::TOPIC_PURCHASE_ORDER,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +135,7 @@ pub enum LabelingTopic {
     DisplayAlias,
     TransactionLink,
     AccountSavings,
+    PurchaseOrder,
 }
 
 /// Maps a §2.2 topic name to the [`LabelingTopic`] WP3's projector dispatches
@@ -157,6 +160,7 @@ pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
         crate::kafka::labeling::TOPIC_DISPLAY_ALIAS => Some(LabelingTopic::DisplayAlias),
         crate::kafka::links::TOPIC_TRANSACTION_LINK => Some(LabelingTopic::TransactionLink),
         crate::kafka::savings::TOPIC_ACCOUNT_SAVINGS => Some(LabelingTopic::AccountSavings),
+        crate::kafka::purchase_orders::TOPIC_PURCHASE_ORDER => Some(LabelingTopic::PurchaseOrder),
         _ => None,
     }
 }
@@ -577,6 +581,35 @@ async fn apply_labeling_record(
                 Ok(parsed) => account_savings::project_account_savings(txn, user_id, account_id, Some(parsed)).await,
                 Err(e) => {
                     error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison account-savings record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::PurchaseOrder => {
+            // Keyed `<user_id>:<source>:<order_id>` (see `purchase_order_topic_key`).
+            let Some((user_id, source, order_id)) = record
+                .key
+                .as_deref()
+                .and_then(crate::kafka::purchase_orders::parse_purchase_order_topic_key)
+            else {
+                warn!(topic = %record.topic, offset = record.offset, "projector: purchase-order record with no/invalid key, skipped");
+                return Ok(());
+            };
+            if record.payload.is_empty() {
+                return purchase_orders::project_purchase_order(txn, user_id, &source, &order_id, None).await;
+            }
+            // Never log the serde error's text: it can quote payload values.
+            // Class and position locate the fault without echoing data.
+            match serde_json::from_slice::<crate::kafka::purchase_orders::PurchaseOrderRecord>(&record.payload) {
+                Ok(parsed) if parsed.topic_key() == record.key.as_deref().unwrap_or_default() => {
+                    purchase_orders::project_purchase_order(txn, user_id, &source, &order_id, Some(parsed)).await
+                }
+                Ok(_) => {
+                    error!(topic = %record.topic, offset = record.offset, "projector: purchase-order payload disagrees with its key, skipped");
+                    Ok(())
+                }
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, class = ?e.classify(), line = e.line(), column = e.column(), "projector: poison purchase-order record, skipped");
                     Ok(())
                 }
             }
@@ -1049,6 +1082,18 @@ mod account_savings_dispatch_tests {
     fn account_savings_topic_is_projected_and_consumed() {
         let topic = crate::kafka::savings::TOPIC_ACCOUNT_SAVINGS;
         assert_eq!(labeling_topic_for(topic), Some(LabelingTopic::AccountSavings));
+        assert!(LABELING_PROJECTION_TOPICS.contains(&topic));
+    }
+}
+
+#[cfg(test)]
+mod purchase_order_dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn purchase_order_topic_is_projected_and_consumed() {
+        let topic = crate::kafka::purchase_orders::TOPIC_PURCHASE_ORDER;
+        assert_eq!(labeling_topic_for(topic), Some(LabelingTopic::PurchaseOrder));
         assert!(LABELING_PROJECTION_TOPICS.contains(&topic));
     }
 }

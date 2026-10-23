@@ -20,6 +20,7 @@ mod m20270201_000001_learning_exemption;
 mod m20270301_000001_display_alias;
 mod m20270301_000001_transaction_links;
 mod m20270401_000001_account_savings;
+mod m20270501_000001_purchase_order;
 
 pub struct Migrator;
 
@@ -67,6 +68,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20270301_000001_transaction_links::Migration),
             // Per-user flag marking an account as savings (savings reporting).
             Box::new(m20270401_000001_account_savings::Migration),
+            // Retailer orders (Amazon CSV) kept as evidence about transactions.
+            Box::new(m20270501_000001_purchase_order::Migration),
         ]
     }
 }
