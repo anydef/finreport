@@ -379,6 +379,7 @@ pub(crate) fn rule_direction_str(amount: rust_decimal::Decimal) -> &'static str 
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_transaction(
     db: &impl ConnectionTrait,
+    publisher: Option<&EventPublisher>,
     ops: &LabelingOps,
     provider: &dyn LabelProvider,
     catalog: &CategoryCatalog,
@@ -539,7 +540,7 @@ pub async fn resolve_transaction(
         reasoning: suggestion.reasoning.clone(),
         created_at: Utc::now(),
     };
-    proj::project_llm_cache(db, &fp, Some(cache_record)).await?;
+    crate::labeling::cache_publish::publish_and_project_cache(db, publisher, &fp, Some(cache_record)).await?;
 
     Ok(Some(suggestion_to_resolution(
         &suggestion,
@@ -597,6 +598,7 @@ fn cache_fingerprint(
 /// Returns whether an entry was removed.
 pub async fn invalidate_contradicted_cache_entry(
     db: &impl ConnectionTrait,
+    publisher: Option<&EventPublisher>,
     ops: &LabelingOps,
     provider: &dyn LabelProvider,
     prompt_version: &str,
@@ -610,7 +612,7 @@ pub async fn invalidate_contradicted_cache_entry(
     if cached.category_id == Some(user_category_id) {
         return Ok(false);
     }
-    proj::project_llm_cache(db, &fp, None).await?;
+    crate::labeling::cache_publish::publish_and_project_cache(db, publisher, &fp, None).await?;
     info!(transaction_id = %txn.id, fingerprint = %fp, "labeler: dropped llm-cache entry contradicted by a user override");
     Ok(true)
 }
@@ -987,7 +989,7 @@ pub async fn label_one_transaction(
     };
 
     let Some(resolved) =
-        resolve_transaction(db, ops, provider, catalog, prompt_version, llm_min_confidence, cost_guard, txn)
+        resolve_transaction(db, Some(publisher), ops, provider, catalog, prompt_version, llm_min_confidence, cost_guard, txn)
             .await?
     else {
         return Ok(());
@@ -1005,7 +1007,7 @@ pub async fn label_one_transaction(
     if resolved.source == LabelSource::User
         && let Some(user_category_id) = resolved.category_id
     {
-        invalidate_contradicted_cache_entry(db, ops, provider, prompt_version, txn, user_category_id).await?;
+        invalidate_contradicted_cache_entry(db, Some(publisher), ops, provider, prompt_version, txn, user_category_id).await?;
     }
 
     if matches!(
@@ -1943,7 +1945,7 @@ mod tests {
         let catalog = catalog_of(&["food.groceries"]);
         let cost_guard = CostGuard::new(10);
 
-        let result = resolve_transaction(&db, &ops, &PanicProvider, &catalog, "1", 0.5, &cost_guard, &txn)
+        let result = resolve_transaction(&db, None, &ops, &PanicProvider, &catalog, "1", 0.5, &cost_guard, &txn)
             .await
             .expect("resolution must succeed");
 
@@ -2134,7 +2136,7 @@ mod tests {
         };
         let catalog = catalog_of(&["food.groceries"]);
         let resolved =
-            resolve_transaction(&db, &ops, &InventingProvider, &catalog, "1", 0.5, &CostGuard::new(10), &txn)
+            resolve_transaction(&db, None, &ops, &InventingProvider, &catalog, "1", 0.5, &CostGuard::new(10), &txn)
                 .await
                 .expect("resolves")
                 .expect("Some");

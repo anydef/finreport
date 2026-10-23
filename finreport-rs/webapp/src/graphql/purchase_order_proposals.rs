@@ -40,12 +40,13 @@ use amazon_orders::{Item, Order};
 use crate::graphql::current_user::AuthenticatedUser;
 use crate::graphql::purchase_orders::{stored_orders, validation_error};
 use crate::kafka::labeling::{
-    category_uuid, CacheRecord, RuleRecord, CURRENT_SCHEMA_VERSION, ORIGIN_LABELER, TOPIC_LLM_CACHE,
+    category_uuid, CacheRecord, RuleRecord, CURRENT_SCHEMA_VERSION,
 };
 use crate::kafka::producer::EventPublisher;
+use crate::labeling::cache_publish::publish_and_project_cache;
 use crate::labeling::fingerprint::{fingerprint, Direction};
 use crate::labeling::normalize::normalize;
-use crate::labeling::processor::{cache_entry_is_usable, labeling_headers, validate_suggestion, CostGuard};
+use crate::labeling::processor::{cache_entry_is_usable, validate_suggestion, CostGuard};
 use crate::labeling::rules::{most_specific_match, RuleMatchInput};
 use crate::projection::labeling as proj;
 
@@ -209,21 +210,14 @@ pub struct KafkaCacheSink<'a> {
 #[async_trait::async_trait]
 impl CacheSink for KafkaCacheSink<'_> {
     async fn store(&self, record: &CacheRecord) {
-        match self.publisher {
-            Some(publisher) => match serde_json::to_vec(record) {
-                Ok(value) => {
-                    if let Err(e) = publisher
-                        .publish_with_headers(TOPIC_LLM_CACHE, &record.fingerprint, &value, labeling_headers(ORIGIN_LABELER))
-                        .await
-                    {
-                        error!(error = %e, "purchase-order proposals: failed to publish llm-cache record");
-                    }
-                }
-                Err(e) => error!(error = %e, "purchase-order proposals: failed to serialize llm-cache record"),
-            },
-            None => warn!("purchase-order proposals: no Kafka broker, llm-cache answer kept in Postgres only"),
-        }
-        if let Err(e) = proj::project_llm_cache(self.db, &record.fingerprint, Some(record.clone())).await {
+        if let Err(e) = publish_and_project_cache(
+            self.db,
+            self.publisher.map(|p| p.as_ref()),
+            &record.fingerprint,
+            Some(record.clone()),
+        )
+        .await
+        {
             error!(error = %e, "purchase-order proposals: failed to project llm-cache record");
         }
     }
