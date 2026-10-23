@@ -255,7 +255,8 @@ impl MutationRoot {
     /// `uploadPurchaseOrders`: record Amazon order-history CSV files (the full
     /// text of each) as purchase-order evidence. A file with an unrecognised
     /// header or an unreadable cell is rejected whole and reported by
-    /// position; the others still import. It splits nothing.
+    /// position; the others still import. It splits nothing; applying is a
+    /// separate, explicit mutation.
     async fn upload_purchase_orders(
         &self,
         ctx: &Context<'_>,
@@ -264,6 +265,35 @@ impl MutationRoot {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         crate::graphql::purchase_orders::upload_purchase_orders(db, publisher(ctx), user, files).await
+    }
+
+    /// `applyPurchaseOrderSplit`: **changes transactions.** Splits each bank
+    /// charge of an order the matcher still reports as `APPLY` into one part
+    /// per item (plus a shipping-and-adjustments part), in the categories the
+    /// caller chose. A transaction that already has a split or a pinned
+    /// category is skipped and reported, never overwritten. Applying again is
+    /// a no-op. Undo with `undoPurchaseOrderSplit`.
+    async fn apply_purchase_order_split(
+        &self,
+        ctx: &Context<'_>,
+        input: crate::graphql::purchase_order_apply::ApplyPurchaseOrderInput,
+    ) -> GqlResult<crate::graphql::purchase_order_apply::PurchaseOrderApplyResult> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::purchase_order_apply::apply_purchase_order(db, publisher(ctx), user, input).await
+    }
+
+    /// `undoPurchaseOrderSplit`: removes the splits that applying this order
+    /// wrote, but only those still exactly as written; a split the user has
+    /// since changed is left alone.
+    async fn undo_purchase_order_split(
+        &self,
+        ctx: &Context<'_>,
+        order_id: String,
+    ) -> GqlResult<crate::graphql::purchase_order_apply::PurchaseOrderApplyResult> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::purchase_order_apply::undo_purchase_order(db, publisher(ctx), user, order_id).await
     }
 
     /// `setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or

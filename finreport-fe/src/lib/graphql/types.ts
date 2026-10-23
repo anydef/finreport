@@ -672,6 +672,50 @@ export interface PurchaseOrderMatch {
 	reasons: PurchaseOrderReviewReason[];
 	charges: PurchaseOrderCharge[];
 	refunds: PurchaseOrderCharge[];
+	/** Splits already made from this order. */
+	applications: PurchaseOrderApplication[];
+}
+
+/** One part of a split made from an order. Signed like the transaction. */
+export interface AppliedPart {
+	amount: Decimal;
+	categorySlug: string;
+	/** Item title, or "Shipping & adjustments". */
+	label: string;
+}
+
+export interface PurchaseOrderApplication {
+	transactionId: string;
+	appliedAt: string;
+	parts: AppliedPart[];
+	/** The live split still equals what was applied, so undo will remove it. */
+	intact: boolean;
+}
+
+export type ChargeOutcomeStatus =
+	| 'APPLIED'
+	| 'ALREADY_APPLIED'
+	| 'SKIPPED'
+	| 'UNDONE'
+	| 'LEFT_ALONE';
+
+export interface ChargeOutcome {
+	transactionId: string;
+	status: ChargeOutcomeStatus;
+	reason: string | null;
+	parts: AppliedPart[];
+}
+
+export interface PurchaseOrderApplyResult {
+	orderId: string;
+	outcomes: ChargeOutcome[];
+}
+
+export interface ApplyPurchaseOrderInput {
+	orderId: string;
+	/** One category slug per item of the order, in the order's item order. */
+	itemCategories: string[];
+	remainderCategory: string | null;
 }
 
 export interface PurchaseOrderMatchReport {

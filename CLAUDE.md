@@ -302,8 +302,27 @@ Revision-guarded last-writer-wins; a tombstone deletes the order and its items.
   the result names each rejected file by position with the parser's
   column/line message. `purchaseOrderMatches` returns the match report in three
   queries (orders, items, Amazon-looking bank lines) with each charge's detail
-  already in hand: no per-row resolvers. Uploading **splits nothing**; turning
-  an `Apply` match into parts is a later slice.
+  already in hand: no per-row resolvers. Uploading **splits nothing**.
+- **Applying (`applyPurchaseOrderSplit` / `undoPurchaseOrderSplit`, the only
+  Amazon code that changes transactions).** Per order, explicit, never from an
+  upload. The server re-runs the matcher and applies only a still-`Apply`
+  match; the client sends one category slug per item and **no amount**. A part
+  is an amount and a category only (`transaction_split` has no description or
+  tag column, and item titles are not categorised here), so the *user picks the
+  category per item* and the title is kept in `purchase_order_split.parts`.
+  `graphql/purchase_order_apply.rs` holds the pure decisions: `build_parts`
+  (exact `Decimal` sum or refuse), `decide` (apply / already applied / skip),
+  `undo_decision`. A transaction with **any** split or a pinned category is
+  skipped and reported, because `splitTransaction` itself would overwrite both.
+  `purchase_order_split` (PK = transaction id) is the provenance record: apply
+  claims it first, so a double apply cannot both win, and undo removes a split
+  only while it still equals the record, else it leaves the user's version.
+  Undo goes through `unsplitTransaction`'s path, so tags, note and recurring are
+  kept; the transaction falls back to its rule/LLM category. The table is not
+  truncated by `just dev-reset`; a stale row is detected, never trusted.
+  An `Apply` match always has items summing to the order total, so the
+  shipping-and-adjustments remainder part exists in code but cannot occur until
+  the matcher accepts orders with a remainder.
 - Page grouping lives in `finreport-fe/src/lib/amazonView.ts`; the matcher's
   reason `message` is shown verbatim, only the group titles are the page's own.
   The mock is `graphql/amazonMock.ts`.

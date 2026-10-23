@@ -99,7 +99,7 @@ pub struct PurchaseOrderCharge {
 
 #[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
 pub enum PurchaseOrderMatchState {
-    /// Exactly one assignment reconciles; safe to apply once splitting exists.
+    /// Exactly one assignment reconciles; `applyPurchaseOrderSplit` accepts it.
     Apply,
     /// A person must look at it; `reasons` say why.
     NeedsReview,
@@ -132,6 +132,8 @@ pub struct PurchaseOrderMatch {
     pub charges: Vec<PurchaseOrderCharge>,
     /// Credits carrying the order id. Informational; never split.
     pub refunds: Vec<PurchaseOrderCharge>,
+    /// Splits already made from this order (`applyPurchaseOrderSplit`).
+    pub applications: Vec<crate::graphql::purchase_order_apply::PurchaseOrderApplication>,
 }
 
 #[derive(SimpleObject, Clone, Debug, PartialEq, Default)]
@@ -313,6 +315,7 @@ pub fn assemble_report(
                 reasons,
                 charges: charges_of(m.charges.iter().map(|c| c.transaction_id.as_str()).collect()),
                 refunds: charges_of(m.refund_transaction_ids.iter().map(String::as_str).collect()),
+                applications: vec![],
             })
         })
         .collect();
@@ -341,7 +344,7 @@ pub fn assemble_report(
     }
 }
 
-fn validation_error(message: impl Into<String>) -> async_graphql::Error {
+pub(crate) fn validation_error(message: impl Into<String>) -> async_graphql::Error {
     async_graphql::Error::new(message.into()).extend_with(|_, e| e.set("code", "VALIDATION"))
 }
 
@@ -498,19 +501,26 @@ pub async fn upload_purchase_orders(
 // Match report
 // ---------------------------------------------------------------------------
 
-/// `purchaseOrderMatches`: the user's stored orders against the Amazon-looking
-/// lines of their own accounts. Three queries however many orders there are
-/// (orders, items, candidate lines); the candidate query returns the full rows
-/// the report prints, so nothing is fetched per row.
-pub async fn fetch_match_report(
+/// Everything the matcher saw and said, for a caller that needs more than the
+/// assembled report (the apply mutation re-verifies against exactly this).
+pub struct MatchInputs {
+    pub orders: Vec<Order>,
+    pub report: MatchReport,
+    /// The Amazon-looking lines of the caller's own accounts, by id string.
+    pub transactions: HashMap<String, transaction::Model>,
+}
+
+/// Loads the user's orders and candidate bank lines and runs the matcher.
+/// Three queries however many orders there are.
+pub async fn load_match_inputs(
     db: &DatabaseConnection,
     user: &AuthenticatedUser,
-) -> async_graphql::Result<PurchaseOrderMatchReport> {
+) -> async_graphql::Result<MatchInputs> {
     let orders = stored_orders(db, user.user_id, None).await?;
     if orders.is_empty() || user.account_ids.is_empty() {
         // With no orders there is nothing to match against; listing every
         // Amazon line as "unclaimed" would be noise, not information.
-        return Ok(PurchaseOrderMatchReport { order_count: orders.len() as i32, ..Default::default() });
+        return Ok(MatchInputs { orders, report: MatchReport::default(), transactions: HashMap::new() });
     }
     let amazonish = Condition::any()
         .add(Expr::cust("transaction.description ILIKE '%amazon%'"))
@@ -524,11 +534,61 @@ pub async fn fetch_match_report(
         .order_by_asc(transaction::Column::Id)
         .all(db)
         .await?;
-
     let candidates: Vec<Candidate> = rows.iter().map(candidate_for).collect();
     let report = match_orders(&orders, &candidates);
-    let txs: HashMap<String, transaction::Model> = rows.into_iter().map(|t| (t.id.to_string(), t)).collect();
-    Ok(assemble_report(&orders, &report, &txs))
+    let transactions = rows.into_iter().map(|t| (t.id.to_string(), t)).collect();
+    Ok(MatchInputs { orders, report, transactions })
+}
+
+/// `purchaseOrderMatches`: the user's stored orders against the Amazon-looking
+/// lines of their own accounts, plus the splits already applied from them.
+pub async fn fetch_match_report(
+    db: &DatabaseConnection,
+    user: &AuthenticatedUser,
+) -> async_graphql::Result<PurchaseOrderMatchReport> {
+    let inputs = load_match_inputs(db, user).await?;
+    if inputs.orders.is_empty() || user.account_ids.is_empty() {
+        return Ok(PurchaseOrderMatchReport { order_count: inputs.orders.len() as i32, ..Default::default() });
+    }
+    let mut out = assemble_report(&inputs.orders, &inputs.report, &inputs.transactions);
+    attach_applications(db, user, &mut out).await?;
+    Ok(out)
+}
+
+/// Fills each match's `applications` from the application records, flagging
+/// those whose live split no longer equals what was applied.
+async fn attach_applications(
+    db: &DatabaseConnection,
+    user: &AuthenticatedUser,
+    report: &mut PurchaseOrderMatchReport,
+) -> async_graphql::Result<()> {
+    use crate::graphql::purchase_order_apply as apply;
+    let rows = apply::applications_for_user(db, user.user_id).await?;
+    if rows.is_empty() {
+        return Ok(());
+    }
+    let ids: Vec<Uuid> = rows.iter().map(|r| r.transaction_id).collect();
+    let live = apply::live_splits(db, &ids).await?;
+    let mut by_order: HashMap<String, Vec<apply::PurchaseOrderApplication>> = HashMap::new();
+    for row in &rows {
+        let parts: Vec<apply::StoredPart> = serde_json::from_value(row.parts.clone()).unwrap_or_default();
+        let intact = live
+            .get(&row.transaction_id)
+            .is_some_and(|l| apply::split_matches_record(&parts, l));
+        by_order.entry(row.order_id.clone()).or_default().push(apply::PurchaseOrderApplication {
+            transaction_id: GqlUuid(row.transaction_id),
+            applied_at: crate::graphql::scalars::DateTime(row.applied_at.with_timezone(&Utc)),
+            parts: apply::to_applied_parts(&parts),
+            intact,
+        });
+    }
+    for m in &mut report.matches {
+        if let Some(mut apps) = by_order.remove(&m.order.order_id) {
+            apps.sort_by_key(|a| a.transaction_id.0);
+            m.applications = apps;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]

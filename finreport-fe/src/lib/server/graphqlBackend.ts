@@ -31,7 +31,12 @@ import {
 	mockSavingsSummary,
 	setSavingsAccount
 } from '$lib/graphql/savingsMock';
-import { mockPurchaseOrderMatches, mockUploadPurchaseOrders } from '$lib/graphql/amazonMock';
+import {
+	mockApplyPurchaseOrderSplit,
+	mockPurchaseOrderMatches,
+	mockUndoPurchaseOrderSplit,
+	mockUploadPurchaseOrders
+} from '$lib/graphql/amazonMock';
 import { withMockRuleLabel } from '$lib/graphql/ruleLabelMock';
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
@@ -891,6 +896,14 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			};
 		case 'PurchaseOrderMatches':
 			return { status: 200, body: { data: mockPurchaseOrderMatches() }, setCookies: [] };
+		case 'ApplyPurchaseOrderSplit':
+			return { status: 200, body: mockApplyPurchaseOrderSplit(body.variables), setCookies: [] };
+		case 'UndoPurchaseOrderSplit':
+			return {
+				status: 200,
+				body: { data: mockUndoPurchaseOrderSplit(body.variables) },
+				setCookies: []
+			};
 		case 'UploadPurchaseOrders':
 			return {
 				status: 200,

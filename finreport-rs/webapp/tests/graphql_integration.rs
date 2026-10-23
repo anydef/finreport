@@ -1616,7 +1616,10 @@ mod purchase_orders {
             ClientConfig::new().set("bootstrap.servers", &bootstrap).create().unwrap();
         admin
             .create_topics(
-                &[NewTopic::new(TOPIC_PURCHASE_ORDER, 1, TopicReplication::Fixed(1))],
+                &[
+                    NewTopic::new(TOPIC_PURCHASE_ORDER, 1, TopicReplication::Fixed(1)),
+                    NewTopic::new(TOPIC_USER_LABEL, 1, TopicReplication::Fixed(1)),
+                ],
                 &AdminOptions::new().request_timeout(Some(Duration::from_secs(10))),
             )
             .await
@@ -1799,5 +1802,275 @@ mod purchase_orders {
         let theirs: Value = theirs.data.into_json().unwrap()["purchaseOrderMatches"].clone();
         assert_eq!(theirs["orderCount"], 0, "Alice's orders are not Bob's");
         assert!(theirs["matches"].as_array().unwrap().is_empty());
+    }
+
+    // -----------------------------------------------------------------
+    // Applying a match: the first thing here that changes the user's data
+    // -----------------------------------------------------------------
+
+    /// One two-item order whose items (13.60 + 8.99) equal the 22.59 charged.
+    fn two_item_csv(id: &str) -> String {
+        format!(
+            "{HEADER}\n\
+             {id},2026-10-01,22.59 EUR,,Delivered,B001,1,13.60,,,Anker Ladegeraet,u,d,Home Person,Home Street 1,Hometown,,12345,DE\n\
+             {id},2026-10-01,22.59 EUR,,Delivered,B002,1,8.99,,,USB Kabel,u,d,Home Person,Home Street 1,Hometown,,12345,DE\n"
+        )
+    }
+
+    const AMAZON: &str = "AMAZON PAYMENTS EUROPE S.C.A.";
+
+    struct Cats {
+        a: String,
+        b: String,
+        rest: String,
+    }
+
+    async fn cats(db: &DatabaseConnection) -> Cats {
+        let n = Uuid::new_v4().simple().to_string();
+        let (_, a) = common::seed_category(db, &format!("expense.poa{n}"), "PO A", "EXPENSE").await;
+        let (_, b) = common::seed_category(db, &format!("expense.pob{n}"), "PO B", "EXPENSE").await;
+        let (_, rest) = common::seed_category(db, &format!("expense.por{n}"), "PO Rest", "EXPENSE").await;
+        Cats { a, b, rest }
+    }
+
+    fn apply_query(order: &str, c: &Cats) -> String {
+        format!(
+            r#"mutation {{ applyPurchaseOrderSplit(input: {{ orderId: "{order}", itemCategories: ["{}", "{}"], remainderCategory: "{}" }}) {{
+                orderId outcomes {{ transactionId status reason parts {{ amount categorySlug label }} }} }} }}"#,
+            c.a, c.b, c.rest
+        )
+    }
+
+    fn undo_query(order: &str) -> String {
+        format!(
+            r#"mutation {{ undoPurchaseOrderSplit(orderId: "{order}") {{ orderId outcomes {{ transactionId status reason }} }} }}"#
+        )
+    }
+
+    async fn splits_of(db: &DatabaseConnection, tx: Uuid) -> Vec<(i32, Decimal)> {
+        use sea_orm::{ColumnTrait, QueryFilter};
+        let mut v: Vec<_> = entity::entities::transaction_split::Entity::find()
+            .filter(entity::entities::transaction_split::Column::TransactionId.eq(tx))
+            .all(db)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|s| (s.part_index, s.amount))
+            .collect();
+        v.sort();
+        v
+    }
+
+    async fn applications_of(db: &DatabaseConnection, tx: Uuid) -> usize {
+        entity::entities::purchase_order_split::Entity::find_by_id(tx).one(db).await.unwrap().iter().count()
+    }
+
+    struct Applied {
+        schema: webapp::graphql::AppSchema,
+        _kafka: testcontainers::ContainerAsync<testcontainers_modules::kafka::apache::Kafka>,
+        db: Arc<DatabaseConnection>,
+        t: Tenant,
+        order: String,
+        tx: Uuid,
+        cats: Cats,
+    }
+
+    /// An uploaded two-item order with its single matching bank line.
+    async fn ready() -> Applied {
+        let db = common::db().await;
+        let (kafka, bootstrap) = kafka_with_topic().await;
+        let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+        let t = tenant(&db, &format!("po-apply-{}", Uuid::new_v4().simple())).await;
+        let order = order_id();
+        let up = gql(&schema, &t.user, upload_query(&[two_item_csv(&order)])).await;
+        assert!(up.errors.is_empty(), "{:?}", up.errors);
+        let tx = bank_line(&db, t.account, "2026-10-02", "-22.59", AMAZON, &format!("01{order} AMZN Mktp DE")).await;
+        let cats = cats(&db).await;
+        Applied { schema, _kafka: kafka, db, t, order, tx, cats }
+    }
+
+    impl Applied {
+        async fn run(&self, query: String) -> async_graphql::Response {
+            gql(&self.schema, &self.t.user, query).await
+        }
+        async fn apply(&self) -> Value {
+            let r = self.run(apply_query(&self.order, &self.cats)).await;
+            assert!(r.errors.is_empty(), "{:?}", r.errors);
+            r.data.into_json().unwrap()["applyPurchaseOrderSplit"]["outcomes"][0].clone()
+        }
+    }
+
+    const REPORT_WITH_APPLICATIONS: &str =
+        "{ purchaseOrderMatches { matches { state applications { transactionId intact parts { amount label } } } } }";
+
+    #[tokio::test]
+    async fn applying_splits_the_charge_into_parts_that_sum_to_it_exactly() {
+        let w = ready().await;
+        let out = w.apply().await;
+        assert_eq!(out["status"], "APPLIED", "{out}");
+        let rows = splits_of(&w.db, w.tx).await;
+        assert_eq!(rows.len(), 2, "one part per item; nothing is left over to need a remainder part");
+        assert_eq!(rows.iter().map(|r| r.1).sum::<Decimal>(), Decimal::from_str("-22.59").unwrap());
+        assert_eq!(rows[0].1, Decimal::from_str("-13.60").unwrap());
+        assert_eq!(out["parts"][0]["label"], "Anker Ladegeraet");
+        assert_eq!(out["parts"][1]["label"], "USB Kabel");
+
+        let r = w.run(REPORT_WITH_APPLICATIONS.to_string()).await;
+        let report = r.data.into_json().unwrap()["purchaseOrderMatches"].clone();
+        let app = &report["matches"][0]["applications"][0];
+        assert_eq!(app["intact"], true);
+        assert_eq!(app["parts"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn applying_twice_changes_nothing() {
+        let w = ready().await;
+        assert_eq!(w.apply().await["status"], "APPLIED");
+        let before = splits_of(&w.db, w.tx).await;
+        let again = w.apply().await;
+        assert_eq!(again["status"], "ALREADY_APPLIED", "{again}");
+        assert_eq!(splits_of(&w.db, w.tx).await, before);
+        // A re-upload of the same file followed by another apply is also a no-op.
+        let up = w.run(upload_query(&[two_item_csv(&w.order)])).await;
+        assert!(up.errors.is_empty());
+        assert_eq!(w.apply().await["status"], "ALREADY_APPLIED");
+        assert_eq!(splits_of(&w.db, w.tx).await, before);
+        assert_eq!(applications_of(&w.db, w.tx).await, 1);
+        // Different categories on a second apply are refused, not stacked.
+        let other = Cats { a: w.cats.b.clone(), b: w.cats.a.clone(), rest: w.cats.rest.clone() };
+        let r = w.run(apply_query(&w.order, &other)).await;
+        let out = r.data.into_json().unwrap()["applyPurchaseOrderSplit"]["outcomes"][0].clone();
+        assert_eq!(out["status"], "SKIPPED");
+        assert_eq!(splits_of(&w.db, w.tx).await, before);
+    }
+
+    #[tokio::test]
+    async fn a_users_own_split_is_skipped_and_never_overwritten() {
+        let w = ready().await;
+        let manual = format!(
+            r#"mutation {{ splitTransaction(transactionId: "{}", parts: [
+                {{ amount: "-20.00", categorySlug: "{}" }}, {{ amount: "-2.59", categorySlug: "{}" }}
+            ]) {{ id }} }}"#,
+            w.tx, w.cats.a, w.cats.b
+        );
+        let r = w.run(manual).await;
+        assert!(r.errors.is_empty(), "{:?}", r.errors);
+        let before = splits_of(&w.db, w.tx).await;
+        let out = w.apply().await;
+        assert_eq!(out["status"], "SKIPPED", "{out}");
+        assert!(out["reason"].as_str().unwrap().contains("split"));
+        assert_eq!(splits_of(&w.db, w.tx).await, before, "the user's split is untouched");
+        assert_eq!(applications_of(&w.db, w.tx).await, 0);
+
+        // Undo has nothing of ours to remove, so the user's split survives it too.
+        let undo = w.run(undo_query(&w.order)).await;
+        assert!(undo.errors.is_empty());
+        assert_eq!(splits_of(&w.db, w.tx).await, before);
+    }
+
+    #[tokio::test]
+    async fn a_pinned_category_is_skipped_and_stays_pinned() {
+        let w = ready().await;
+        let pin = format!(
+            r#"mutation {{ setTransactionCategory(transactionId: "{}", categorySlug: "{}") {{ id }} }}"#,
+            w.tx, w.cats.a
+        );
+        assert!(w.run(pin).await.errors.is_empty());
+        let out = w.apply().await;
+        assert_eq!(out["status"], "SKIPPED", "{out}");
+        assert!(splits_of(&w.db, w.tx).await.is_empty());
+        let pinned = entity::entities::transaction_user_label::Entity::find_by_id(w.tx)
+            .one(&*w.db)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(pinned.category_id.is_some(), "the user's category survived");
+    }
+
+    #[tokio::test]
+    async fn a_needs_review_match_cannot_be_applied() {
+        let db = common::db().await;
+        let (_kafka, bootstrap) = kafka_with_topic().await;
+        let schema = create_schema(db.clone(), settings_with_kafka(&bootstrap));
+        let t = tenant(&db, &format!("po-nr-{}", Uuid::new_v4().simple())).await;
+        let id = order_id();
+        let up = gql(&schema, &t.user, upload_query(&[csv(&[(&id, "22.59", "22.59", "Delivered")])])).await;
+        assert!(up.errors.is_empty());
+        let s1 = bank_line(&db, t.account, "2026-09-24", "-13.60", AMAZON, &format!("01{id} AMZN Mktp DE")).await;
+        let s2 = bank_line(&db, t.account, "2026-09-23", "-8.99", AMAZON, &format!("01{id} AMZN Mktp DE")).await;
+        let c = cats(&db).await;
+        let r = gql(&schema, &t.user, apply_query(&id, &c)).await;
+        assert!(!r.errors.is_empty(), "a NeedsReview order must be refused");
+        assert!(r.errors[0].message.contains("needs review"), "{:?}", r.errors);
+        assert!(splits_of(&db, s1).await.is_empty() && splits_of(&db, s2).await.is_empty());
+        // An id nobody uploaded is refused the same way.
+        let r = gql(&schema, &t.user, apply_query("000-0000000-0000000", &c)).await;
+        assert!(!r.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn undo_restores_the_state_before_applying_and_only_that() {
+        let w = ready().await;
+        // Prior state: a tag the user set, no split, no category.
+        let tag = format!(
+            r#"mutation {{ setTransactionTags(transactionId: "{}", tags: ["amazon-test"]) {{ id }} }}"#,
+            w.tx
+        );
+        let tagged = w.run(tag).await;
+        assert!(tagged.errors.is_empty(), "{:?}", tagged.errors);
+        let tags_of = |label: Option<entity::entities::transaction_user_label::Model>| label.map(|l| (l.category_id, l.note));
+        let label_before = entity::entities::transaction_user_label::Entity::find_by_id(w.tx).one(&*w.db).await.unwrap();
+
+        assert_eq!(w.apply().await["status"], "APPLIED");
+        let undo = w.run(undo_query(&w.order)).await;
+        assert!(undo.errors.is_empty(), "{:?}", undo.errors);
+        let out = undo.data.into_json().unwrap()["undoPurchaseOrderSplit"]["outcomes"][0].clone();
+        assert_eq!(out["status"], "UNDONE", "{out}");
+        assert!(splits_of(&w.db, w.tx).await.is_empty());
+        assert_eq!(applications_of(&w.db, w.tx).await, 0);
+        let label_after = entity::entities::transaction_user_label::Entity::find_by_id(w.tx).one(&*w.db).await.unwrap();
+        assert_eq!(tags_of(label_after), tags_of(label_before), "category and note are as before applying");
+
+        // Undoing again is a no-op, and the order can be applied afresh.
+        let again = w.run(undo_query(&w.order)).await;
+        assert!(again.data.into_json().unwrap()["undoPurchaseOrderSplit"]["outcomes"].as_array().unwrap().is_empty());
+        assert_eq!(w.apply().await["status"], "APPLIED");
+    }
+
+    #[tokio::test]
+    async fn undo_leaves_a_split_the_user_changed_after_applying() {
+        let w = ready().await;
+        assert_eq!(w.apply().await["status"], "APPLIED");
+        let mine = format!(
+            r#"mutation {{ splitTransaction(transactionId: "{}", parts: [
+                {{ amount: "-20.00", categorySlug: "{}" }}, {{ amount: "-2.59", categorySlug: "{}" }}
+            ]) {{ id }} }}"#,
+            w.tx, w.cats.a, w.cats.b
+        );
+        assert!(w.run(mine).await.errors.is_empty());
+        let before = splits_of(&w.db, w.tx).await;
+        let undo = w.run(undo_query(&w.order)).await;
+        let out = undo.data.into_json().unwrap()["undoPurchaseOrderSplit"]["outcomes"][0].clone();
+        assert_eq!(out["status"], "LEFT_ALONE", "{out}");
+        assert_eq!(splits_of(&w.db, w.tx).await, before, "the user's later split survives undo");
+        assert_eq!(applications_of(&w.db, w.tx).await, 0, "the stale record is forgotten");
+    }
+
+    #[tokio::test]
+    async fn another_users_transaction_cannot_be_split_or_unsplit() {
+        let w = ready().await;
+        let bob = tenant(&w.db, &format!("po-apply-bob-{}", Uuid::new_v4().simple())).await;
+        // Bob uploads the very same order, but his accounts hold no matching line.
+        let up = gql(&w.schema, &bob.user, upload_query(&[two_item_csv(&w.order)])).await;
+        assert!(up.errors.is_empty(), "{:?}", up.errors);
+        let r = gql(&w.schema, &bob.user, apply_query(&w.order, &w.cats)).await;
+        assert!(!r.errors.is_empty(), "Bob has no charge for this order");
+        assert!(splits_of(&w.db, w.tx).await.is_empty(), "Alice's transaction was not touched");
+
+        assert_eq!(w.apply().await["status"], "APPLIED");
+        let before = splits_of(&w.db, w.tx).await;
+        let undo = gql(&w.schema, &bob.user, undo_query(&w.order)).await;
+        assert!(undo.data.into_json().unwrap()["undoPurchaseOrderSplit"]["outcomes"].as_array().unwrap().is_empty());
+        assert_eq!(splits_of(&w.db, w.tx).await, before, "Bob cannot undo Alice's split");
     }
 }

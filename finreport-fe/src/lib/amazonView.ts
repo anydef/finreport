@@ -12,7 +12,12 @@
 
 import { decimalToNumber } from './chartShaping';
 import type {
+	ApplyPurchaseOrderInput,
+	Category,
+	ChargeOutcome,
 	PurchaseOrder,
+	PurchaseOrderApplication,
+	PurchaseOrderApplyResult,
 	PurchaseOrderCharge,
 	PurchaseOrderMatch,
 	PurchaseOrderMatchReport,
@@ -34,6 +39,8 @@ export interface MatchRow {
 	/** True when the join was on amount and date only, not the order id. */
 	fuzzy: boolean;
 	order: PurchaseOrder;
+	/** Splits already made from this order; empty until the user applies it. */
+	applications: PurchaseOrderApplication[];
 }
 
 export interface ReviewGroup {
@@ -46,8 +53,10 @@ export interface ReviewGroup {
 }
 
 export interface AmazonReview {
-	/** Orders that would apply cleanly. */
+	/** Orders that would apply cleanly and have not been applied. */
 	ready: MatchRow[];
+	/** Orders the user has applied (whatever the matcher says about them now). */
+	applied: MatchRow[];
 	/** Everything the matcher would not apply, grouped by why. */
 	reviewGroups: ReviewGroup[];
 	reviewCount: number;
@@ -127,7 +136,8 @@ export function matchRow(match: PurchaseOrderMatch): MatchRow {
 		reasons: match.reasons.map((r) => r.message),
 		state: match.state === 'APPLY' ? 'apply' : 'review',
 		fuzzy: match.kind === 'AMOUNT_AND_DATE',
-		order: match.order
+		order: match.order,
+		applications: match.applications ?? []
 	};
 }
 
@@ -138,9 +148,16 @@ function groupFor(match: PurchaseOrderMatch): (typeof GROUPS)[number] {
 
 export function buildReview(report: PurchaseOrderMatchReport): AmazonReview {
 	const ready: MatchRow[] = [];
+	const applied: MatchRow[] = [];
 	const byCode = new Map<string, ReviewGroup>();
 	for (const match of report.matches) {
 		const row = matchRow(match);
+		// Applied wins over the matcher's current opinion: the user must always
+		// be able to see, and undo, what they applied.
+		if (row.applications.length > 0) {
+			applied.push(row);
+			continue;
+		}
 		if (row.state === 'apply') {
 			ready.push(row);
 			continue;
@@ -158,6 +175,7 @@ export function buildReview(report: PurchaseOrderMatchReport): AmazonReview {
 	const reviewGroups = other ? [...known, other] : known;
 	return {
 		ready,
+		applied,
 		reviewGroups,
 		reviewCount: reviewGroups.reduce((n, g) => n + g.rows.length, 0),
 		noCharge: report.unmatchedOrders,
@@ -175,6 +193,7 @@ export function reviewHeadline(review: AmazonReview): string {
 		`${review.ready.length} ${review.ready.length === 1 ? 'order' : 'orders'} match cleanly`,
 		`${review.reviewCount} need${review.reviewCount === 1 ? 's' : ''} review`
 	];
+	if (review.applied.length > 0) parts.push(`${review.applied.length} applied`);
 	if (review.noCharge.length > 0) parts.push(`${review.noCharge.length} with no bank charge`);
 	return parts.join(', ') + '.';
 }
@@ -211,4 +230,128 @@ export function uploadOutcome(result: PurchaseOrderUploadResult): UploadOutcome 
 /** Short label for a bank line in a list. */
 export function chargeLabel(charge: PurchaseOrderCharge): string {
 	return charge.counterpartyName ?? charge.description ?? 'Bank line';
+}
+
+// -- Applying a match -----------------------------------------------------------
+//
+// Applying is the one action on this page that changes transactions. These
+// functions decide whether the button may be pressed and what is sent; the
+// server re-verifies everything and computes every amount itself, so the only
+// thing the client contributes is a category slug per item.
+
+export interface ApplyChoices {
+	/** One slug per item of the order, in item order; '' = not chosen. */
+	itemCategories: string[];
+	remainderCategory: string;
+}
+
+export function emptyChoices(order: PurchaseOrder): ApplyChoices {
+	return { itemCategories: order.items.map(() => ''), remainderCategory: '' };
+}
+
+const isZero = (decimal: string): boolean => decimalToNumber(decimal) === 0;
+
+/** Items that become a part: a free (zero) item makes none and needs no category. */
+function splittableIndexes(order: PurchaseOrder): number[] {
+	return order.items.flatMap((item, i) => (isZero(item.lineTotal) ? [] : [i]));
+}
+
+/** Why Apply is not available yet, or null when it is. */
+export function applyBlocker(row: MatchRow, choices: ApplyChoices): string | null {
+	if (row.state !== 'apply') return 'The matcher no longer reports this order as a clean match.';
+	const needed = splittableIndexes(row.order);
+	const hasRemainder = !isZero(row.order.remainder);
+	if (needed.length + (hasRemainder ? 1 : 0) < 2) {
+		return 'Nothing to split: a single item with no shipping or adjustments stays one transaction.';
+	}
+	if (needed.some((i) => !choices.itemCategories[i])) {
+		return 'Choose a category for every item.';
+	}
+	if (hasRemainder && !choices.remainderCategory) {
+		return 'Choose a category for shipping and adjustments.';
+	}
+	return null;
+}
+
+export function buildApplyInput(row: MatchRow, choices: ApplyChoices): ApplyPurchaseOrderInput {
+	return {
+		orderId: row.orderId,
+		itemCategories: row.order.items.map((_, i) => choices.itemCategories[i] ?? ''),
+		remainderCategory: isZero(row.order.remainder) ? null : choices.remainderCategory || null
+	};
+}
+
+/** Plain statement of what pressing Apply will do, shown before it is confirmed. */
+export function applyWarning(row: MatchRow): string {
+	const n = row.charges.length;
+	const charges = n === 1 ? 'the bank charge' : `each of the ${n} bank charges`;
+	return (
+		`This changes your transactions. ${charges[0].toUpperCase()}${charges.slice(1)} for this order ` +
+		`will be replaced by one split part per item, in the categories you chose. A transaction you have ` +
+		`already split or categorised yourself is left as it is. You can undo it afterwards.`
+	);
+}
+
+export interface CategoryOption {
+	slug: string;
+	label: string;
+}
+
+/** Spending categories to choose from: live, expense or saving, parents before children. */
+export function categoryOptions(categories: Category[]): CategoryOption[] {
+	return categories
+		.filter((c) => !c.archived && (c.kind === 'EXPENSE' || c.kind === 'SAVING'))
+		.sort((a, b) => a.slug.localeCompare(b.slug))
+		.map((c) => ({ slug: c.slug, label: `${'\u2003'.repeat(c.depth)}${c.name}` }));
+}
+
+export interface ActionOutcome {
+	tone: 'good' | 'warn' | 'bad';
+	lines: string[];
+}
+
+function count(outcomes: ChargeOutcome[], status: ChargeOutcome['status']): ChargeOutcome[] {
+	return outcomes.filter((o) => o.status === status);
+}
+
+/** What to tell the user after an apply or an undo. Skipped charges are named with their reason. */
+export function describeOutcomes(
+	result: PurchaseOrderApplyResult,
+	mode: 'apply' | 'undo'
+): ActionOutcome {
+	const { outcomes } = result;
+	const lines: string[] = [];
+	if (outcomes.length === 0) {
+		return {
+			tone: 'warn',
+			lines: [mode === 'undo' ? 'Nothing to undo for this order.' : 'No charge was found to split.']
+		};
+	}
+	const done = count(outcomes, mode === 'apply' ? 'APPLIED' : 'UNDONE');
+	const already = count(outcomes, 'ALREADY_APPLIED');
+	const problems = [...count(outcomes, 'SKIPPED'), ...count(outcomes, 'LEFT_ALONE')];
+	if (done.length > 0) {
+		const verb = mode === 'apply' ? 'Split' : 'Restored';
+		lines.push(
+			`${verb} ${plural(done.length, 'transaction', 'transactions')}` +
+				(mode === 'apply'
+					? ` into ${plural(
+							done.reduce((n, o) => n + o.parts.length, 0),
+							'part',
+							'parts'
+						)}.`
+					: ' to how they were before.')
+		);
+	}
+	if (already.length > 0) {
+		lines.push(
+			`${plural(already.length, 'transaction was', 'transactions were')} already split; nothing changed.`
+		);
+	}
+	for (const o of problems) {
+		lines.push(`Left unchanged: ${o.reason ?? 'no reason given'}`);
+	}
+	if (done.length === 0 && already.length === 0) lines.push('No transaction was changed.');
+	const tone = problems.length === 0 ? 'good' : done.length + already.length > 0 ? 'warn' : 'bad';
+	return { tone, lines };
 }

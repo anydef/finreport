@@ -314,5 +314,19 @@ any unreadable row is rejected whole, because an order is one row per item and
 a partial import would store an order with items missing; files in one upload
 are independent.
 
-**Still to build:** turning an `Apply` match into actual split parts through
-the existing labelling chain.
+**Slice 3 (built): applying.** `applyPurchaseOrderSplit` /
+`undoPurchaseOrderSplit`, per order and explicit; see CLAUDE.md for the
+mechanism. Two places this deliberately departs from section 2.4:
+
+- *Categories are chosen by the user per item, not derived from the title.*
+  A split part is an amount and a category (no description column), and there
+  is no item-title categoriser; routing titles through the labeling chain is
+  still to build. Until then the item title is kept in `purchase_order_split`.
+- *The remainder part is dormant.* The matcher returns `Apply` only when the
+  items sum to the order total exactly, so shipping, gift-card and promotion
+  remainders arrive as `NEEDS_REVIEW` (`ORDER_ITEMS_DO_NOT_RECONCILE`) and are
+  never applied. `build_parts` handles a remainder if the matcher ever allows
+  one. The earlier note that the crate "shares remainders pro rata" was wrong:
+  it emits an explicit remainder, as section 2.4 asks.
+
+**Still to build:** categorising item titles through the labeling chain.
