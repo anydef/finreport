@@ -24,10 +24,29 @@ import type {
 	PurchaseOrderApplyResult,
 	PurchaseOrderCharge,
 	PurchaseOrderMatch,
+	ProposalSource,
 	PurchaseOrderItemProposal,
 	PurchaseOrderMatchReport,
 	PurchaseOrderUploadResult
 } from './types';
+
+/**
+ * Stored suggestions per order id, one entry per item (the read path's
+ * `suggestedCategorySlug` / `suggestionSource`). Orders not listed get none.
+ * The real read path yields only RULE, CACHE or NONE; LLM is mocked on one
+ * item so the badge for it can be reviewed too.
+ */
+const STORED_SUGGESTIONS: Record<string, [string | null, ProposalSource][]> = {
+	'303-9169011-8123555': [['personal', 'RULE']],
+	'307-5555555-6666666': [
+		['household_items_supplies', 'CACHE'],
+		['personal', 'RULE']
+	],
+	'309-2468024-1357911': [
+		['household_items_supplies', 'LLM'],
+		[null, 'NONE']
+	]
+};
 
 function order(
 	orderId: string,
@@ -48,7 +67,9 @@ function order(
 			title,
 			lineTotal,
 			status: 'Delivered',
-			returned: false
+			returned: false,
+			suggestedCategorySlug: STORED_SUGGESTIONS[orderId]?.[i]?.[0] ?? null,
+			suggestionSource: STORED_SUGGESTIONS[orderId]?.[i]?.[1] ?? 'NONE'
 		}))
 	};
 }

@@ -22,7 +22,9 @@
 		applicationLabel,
 		applyActionLabel,
 		applyBlocker,
+		allItemsSuggested,
 		applyProposals,
+		prefillFromStored,
 		applyWarning,
 		buildApplyInput,
 		buildReview,
@@ -72,20 +74,29 @@
 	let acting = $state<string | null>(null);
 	let actionOutcome = $state<(ActionOutcome & { orderId: string }) | null>(null);
 
-	// Read-only (safe in a template); writes happen in `setChoice`.
-	function choicesFor(row: MatchRow): ApplyChoices {
+	// `choices` holds only what the user picked (or a fresh run filled). The
+	// stored suggestions are layered over it when read, never written into it,
+	// so a refetch or re-render cannot overwrite a pick.
+	function userChoicesFor(row: MatchRow): ApplyChoices {
 		return choices[row.orderId] ?? emptyChoices(row.order);
 	}
 
+	// Read-only (safe in a template); writes happen in `setChoice`.
+	function choicesFor(row: MatchRow): ApplyChoices {
+		const own = userChoicesFor(row);
+		const { itemCategories } = prefillFromStored(row.order, own.itemCategories, knownSlugs);
+		return { ...own, itemCategories };
+	}
+
 	function setChoice(row: MatchRow, itemIndex: number, slug: string) {
-		const current = choicesFor(row);
+		const current = userChoicesFor(row);
 		const itemCategories = [...current.itemCategories];
 		itemCategories[itemIndex] = slug;
 		choices[row.orderId] = { ...current, itemCategories };
 	}
 
 	function setRemainderChoice(row: MatchRow, slug: string) {
-		choices[row.orderId] = { ...choicesFor(row), remainderCategory: slug };
+		choices[row.orderId] = { ...userChoicesFor(row), remainderCategory: slug };
 	}
 
 	// -- Proposals: suggestions only. They fill empty pickers; applying stays
@@ -108,12 +119,14 @@
 					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not get suggestions.']
 				};
 			} else {
+				// Merged over the user's own picks only, so a fresh run replaces a
+				// stored suggestion but never a pick.
 				const merged = applyProposals(
-					choicesFor(row).itemCategories,
+					userChoicesFor(row).itemCategories,
 					result.data.proposePurchaseOrderCategories as PurchaseOrderItemProposal[],
 					knownSlugs
 				);
-				choices[row.orderId] = { ...choicesFor(row), itemCategories: merged.itemCategories };
+				choices[row.orderId] = { ...userChoicesFor(row), itemCategories: merged.itemCategories };
 				suggestions[row.orderId] = merged;
 			}
 		} finally {
@@ -220,8 +233,10 @@
 </script>
 
 {#snippet suggestionNote(row: MatchRow, i: number, chosen: string)}
-	{@const filled = suggestions[row.orderId]?.filled[i]}
-	{@const other = suggestions[row.orderId]?.notFilled[i]}
+	{@const fresh = suggestions[row.orderId]}
+	{@const stored = prefillFromStored(row.order, userChoicesFor(row).itemCategories, knownSlugs)}
+	{@const filled = fresh?.filled[i] ?? (fresh?.notFilled[i] ? undefined : stored.filled[i])}
+	{@const other = fresh?.notFilled[i] ?? stored.notFilled[i]}
 	{#if filled && filled.categorySlug === chosen}
 		{@const label = proposalSourceLabel(filled.source)}
 		<Badge text={label.text} variant={label.variant} />
@@ -441,8 +456,17 @@
 									onclick={() => proposeOrder(row)}
 									disabled={acting !== null}
 								>
-									{acting === row.orderId ? 'Working…' : 'Suggest categories'}
+									{acting === row.orderId
+										? 'Working…'
+										: allItemsSuggested(row.order)
+											? 'Suggest again'
+											: 'Suggest categories'}
 								</Button>
+								{#if allItemsSuggested(row.order)}
+									<span class="text-xs text-slate-500"
+										>Every item already has a suggestion; this asks again.</span
+									>
+								{/if}
 								<Button
 									variant="secondary"
 									onclick={() => (confirming = row.orderId)}

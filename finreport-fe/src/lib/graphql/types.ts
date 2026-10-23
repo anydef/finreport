@@ -633,6 +633,9 @@ export interface PurchaseOrderItem {
 	/** The export's status text: free text and localised. */
 	status: string;
 	returned: boolean;
+	/** A stored suggestion (rule or LLM cache only); null when there is none. */
+	suggestedCategorySlug: string | null;
+	suggestionSource: ProposalSource;
 }
 
 export interface PurchaseOrder {
