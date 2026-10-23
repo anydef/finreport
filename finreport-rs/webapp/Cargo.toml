@@ -8,6 +8,7 @@ comdirect-rs = { path = "../comdirect-rs" }
 categorizer = {path = "../categorizer"}
 migration = { path = "../migration" }
 entity = { path = "../entity" }
+amazon-orders = { path = "../amazon-orders" }
 
 dotenv = "0.15.0"
 rand = "0.9.1"

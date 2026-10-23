@@ -313,3 +313,22 @@ resource "kafka_topic" "transaction_link" {
     prevent_destroy = true
   }
 }
+
+# Purchase orders (Amazon CSV ingest): retailer orders kept as evidence about
+# bank transactions, never as transactions. Keyed
+# `<user_id>:<source>:<order_id>`; compacted, a tombstone deletes the order.
+# Must never carry the export's recipient-address columns. Mirrored in
+# docker-compose.local.yml's finreport-redpanda-init.
+resource "kafka_topic" "purchase_order" {
+  name               = "finreport.purchase-order"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

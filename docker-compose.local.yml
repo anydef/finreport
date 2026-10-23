@@ -108,6 +108,10 @@ services:
         # deletes the link (user-declared reimbursement <-> expense ties).
         $$RPK topic create finreport.transaction-link \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        # Purchase orders (Amazon CSV): keyed <user_id>:<source>:<order_id>,
+        # compacted; a tombstone deletes the order. Never holds address data.
+        $$RPK topic create finreport.purchase-order \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 
   finreport-be:

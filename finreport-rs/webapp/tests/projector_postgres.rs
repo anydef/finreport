@@ -693,3 +693,247 @@ async fn a_poison_transaction_link_record_is_skipped_without_wedging_the_batch()
     assert!(link_state(db.connection(), bad).await.is_none());
     assert!(link_state(db.connection(), good).await.is_some());
 }
+
+// ---------------------------------------------------------------------------
+// finreport.purchase-order
+// ---------------------------------------------------------------------------
+
+const ORDER_TOPIC: &str = "finreport.purchase-order";
+const ORDER_ID: &str = "304-9357930-8158714";
+
+fn order_user() -> Uuid {
+    Uuid::from_bytes([7; 16])
+}
+
+fn order_key(user: Uuid, order_id: &str) -> String {
+    format!("{user}:amazon:{order_id}")
+}
+
+fn order_payload(user: Uuid, order_id: &str, total: &str, titles: &[&str], revision_secs: i64) -> serde_json::Value {
+    json!({
+        "schema_version": 1,
+        "user_id": user,
+        "source": "amazon",
+        "revision": Utc.timestamp_opt(1_800_000_000 + revision_secs, 0).unwrap().to_rfc3339(),
+        "order": {
+            "order_id": order_id,
+            "order_date": "2026-09-23",
+            "total": total,
+            "currency": "EUR",
+            "items": titles.iter().map(|t| json!({
+                "asin": "B000TEST01",
+                "quantity": 2,
+                "price": "4.4950",
+                "discount": null,
+                "promotion": null,
+                "promotion_amount": null,
+                "title": t,
+                "status": "Delivered 7 October",
+                "returned": false,
+                "line_total": "8.99",
+            })).collect::<Vec<_>>(),
+            "price_basis": "UnitPrice",
+            "discounts_netted": false,
+            "remainder": "0",
+        },
+    })
+}
+
+fn order_record(offset: i64, key: &str, payload: Option<serde_json::Value>) -> ConsumedRecord {
+    ConsumedRecord {
+        topic: ORDER_TOPIC.to_string(),
+        partition: 0,
+        offset,
+        key: Some(key.to_string()),
+        payload: payload.map(|p| serde_json::to_vec(&p).unwrap()).unwrap_or_default(),
+        envelope: envelope(None, "user"),
+    }
+}
+
+type OrderState = (String, String, String, Vec<(i32, String, String)>);
+
+/// Order columns plus items in position order; amounts as `Decimal` text.
+async fn order_state(db: &sea_orm::DatabaseConnection, user: Uuid, order_id: &str) -> Option<OrderState> {
+    use entity::entities::{purchase_order, purchase_order_item};
+    use sea_orm::{ColumnTrait, QueryFilter, QueryOrder};
+    let order = purchase_order::Entity::find_by_id((user, "amazon".to_string(), order_id.to_string())).one(db).await.unwrap()?;
+    let items = purchase_order_item::Entity::find()
+        .filter(purchase_order_item::Column::UserId.eq(user))
+        .filter(purchase_order_item::Column::OrderId.eq(order_id))
+        .order_by_asc(purchase_order_item::Column::Position)
+        .all(db)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|i| (i.position, i.title, i.price.to_string()))
+        .collect();
+    Some((order.total.to_string(), order.price_basis, order.revision.to_rfc3339(), items))
+}
+
+#[tokio::test]
+async fn a_purchase_order_projects_reimports_replays_and_tombstones() {
+    let db = support::TestPostgres::start().await;
+    let registry = MapperRegistry::with_default_mappers();
+    let user = order_user();
+    let key = order_key(user, ORDER_ID);
+
+    let v1 = order_record(0, &key, Some(order_payload(user, ORDER_ID, "22.59", &["Kaesemesser", "Brotkorb"], 1)));
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&v1)).await.unwrap();
+    let first = order_state(db.connection(), user, ORDER_ID).await.expect("order projected");
+    assert_eq!(first.0, "22.5900", "total kept as an exact decimal");
+    assert_eq!(first.1, "unit_price");
+    assert_eq!(first.3, vec![(0, "Kaesemesser".into(), "4.4950".into()), (1, "Brotkorb".into(), "4.4950".into())]);
+
+    // A re-import of the same record changes nothing.
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&v1)).await.unwrap();
+    assert_eq!(order_state(db.connection(), user, ORDER_ID).await.as_ref(), Some(&first));
+
+    // A newer upload replaces the items wholesale; a late stale echo loses.
+    let v2 = order_record(1, &key, Some(order_payload(user, ORDER_ID, "22.59", &["Kaesemesser"], 2)));
+    process_batch(db.connection(), GROUP, &registry, None, &[v2.clone(), v1.clone()]).await.unwrap();
+    let edited = order_state(db.connection(), user, ORDER_ID).await.unwrap();
+    assert_eq!(edited.3.len(), 1, "stale revision must not win");
+
+    // Replaying the whole log from offset 0 into a fresh database reproduces it.
+    let fresh = support::TestPostgres::start().await;
+    process_batch(fresh.connection(), GROUP, &registry, None, &[v1, v2]).await.unwrap();
+    assert_eq!(order_state(fresh.connection(), user, ORDER_ID).await, Some(edited));
+
+    // The same order id for another user is a separate order.
+    let other = Uuid::from_bytes([8; 16]);
+    let theirs = order_record(2, &order_key(other, ORDER_ID), Some(order_payload(other, ORDER_ID, "5.00", &["Other"], 1)));
+    process_batch(db.connection(), GROUP, &registry, None, &[theirs]).await.unwrap();
+    assert_eq!(order_state(db.connection(), other, ORDER_ID).await.unwrap().0, "5.0000");
+
+    // A tombstone deletes the order and its items - only that user's.
+    let tombstone = order_record(3, &key, None);
+    process_batch(db.connection(), GROUP, &registry, None, std::slice::from_ref(&tombstone)).await.unwrap();
+    assert_eq!(order_state(db.connection(), user, ORDER_ID).await, None);
+    assert!(order_state(db.connection(), other, ORDER_ID).await.is_some());
+    process_batch(db.connection(), GROUP, &registry, None, &[tombstone]).await.unwrap();
+    assert_eq!(order_state(db.connection(), user, ORDER_ID).await, None);
+}
+
+#[tokio::test]
+async fn a_poison_purchase_order_record_is_skipped_without_wedging_the_batch() {
+    let db = support::TestPostgres::start().await;
+    let registry = MapperRegistry::with_default_mappers();
+    let user = order_user();
+    let mismatched = order_payload(user, "999-0000000-0000000", "1.00", &["x"], 1);
+    let records = [
+        order_record(0, &order_key(user, "111-1111111-1111111"), Some(json!({"nonsense": true}))),
+        order_record(1, "not-a-key", Some(order_payload(user, ORDER_ID, "1.00", &["x"], 1))),
+        // Payload says one order, key says another: refuse rather than guess.
+        order_record(2, &order_key(user, "222-2222222-2222222"), Some(mismatched)),
+        order_record(3, &order_key(user, ORDER_ID), Some(order_payload(user, ORDER_ID, "22.59", &["ok"], 1))),
+    ];
+    process_batch(db.connection(), GROUP, &registry, None, &records).await.unwrap();
+    assert!(order_state(db.connection(), user, "111-1111111-1111111").await.is_none());
+    assert!(order_state(db.connection(), user, "222-2222222-2222222").await.is_none());
+    assert!(order_state(db.connection(), user, "999-0000000-0000000").await.is_none());
+    assert!(order_state(db.connection(), user, ORDER_ID).await.is_some());
+}
+
+/// Privacy: the export's recipient-address columns must never be stored. The
+/// tables have no column for them (checked against the live schema), and a
+/// record that smuggles address fields in still projects with every one of
+/// those values absent from every text column of both tables.
+#[tokio::test]
+async fn no_recipient_address_data_is_stored() {
+    use sea_orm::{ConnectionTrait, Statement};
+    let db = support::TestPostgres::start().await;
+    let registry = MapperRegistry::with_default_mappers();
+    let user = order_user();
+    let secrets = ["Erika Mustermann", "Musterstrasse 12", "Hamburg", "20095", "Germany"];
+
+    let mut payload = order_payload(user, ORDER_ID, "22.59", &["Kaesemesser"], 1);
+    payload["order"]["recipient_name"] = json!(secrets[0]);
+    payload["order"]["recipient_street"] = json!(secrets[1]);
+    payload["order"]["recipient_city"] = json!(secrets[2]);
+    payload["order"]["recipient_zip"] = json!(secrets[3]);
+    payload["order"]["recipient_country"] = json!(secrets[4]);
+    payload["order"]["items"][0]["recipient_street"] = json!(secrets[1]);
+    payload["recipient_name"] = json!(secrets[0]);
+    process_batch(db.connection(), GROUP, &registry, None, &[order_record(0, &order_key(user, ORDER_ID), Some(payload))])
+        .await
+        .unwrap();
+    assert!(order_state(db.connection(), user, ORDER_ID).await.is_some(), "the order itself projects");
+
+    let backend = db.connection().get_database_backend();
+    let columns = db
+        .connection()
+        .query_all(Statement::from_string(
+            backend,
+            "SELECT column_name FROM information_schema.columns WHERE table_name IN ('purchase_order','purchase_order_item')",
+        ))
+        .await
+        .unwrap();
+    assert!(!columns.is_empty());
+    for row in columns {
+        let name: String = row.try_get("", "column_name").unwrap();
+        assert!(
+            !["recipient", "street", "zip", "address", "city"].iter().any(|w| name.contains(w)),
+            "address-like column {name}"
+        );
+    }
+
+    for table in ["purchase_order", "purchase_order_item"] {
+        let dump = db
+            .connection()
+            .query_one(Statement::from_string(backend, format!("SELECT COALESCE(string_agg(t::text, ' '), '') AS dump FROM {table} t")))
+            .await
+            .unwrap()
+            .unwrap();
+        let dump: String = dump.try_get("", "dump").unwrap();
+        assert!(!dump.is_empty(), "{table} has a row to inspect");
+        for secret in secrets {
+            assert!(!dump.contains(secret), "{table} leaked {secret:?}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_purchase_order_migration_applies_reverses_and_reapplies() {
+    use migration::{Migrator, MigratorTrait};
+    use sea_orm::{ConnectionTrait, Statement};
+    let base = std::env::var("FINREPORT_TEST_DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:55435/finreport_wp4".to_string());
+    let admin_url = base.rsplit_once('/').unwrap().0.to_string();
+    let name = format!("finreport_mig_{}", Uuid::new_v4().simple());
+    let admin = sea_orm::Database::connect(format!("{admin_url}/postgres")).await.unwrap();
+    admin
+        .execute(Statement::from_string(admin.get_database_backend(), format!("CREATE DATABASE {name}")))
+        .await
+        .unwrap();
+
+    async fn tables(conn: &sea_orm::DatabaseConnection) -> usize {
+        conn.query_all(Statement::from_string(
+            conn.get_database_backend(),
+            "SELECT 1 AS one FROM information_schema.tables WHERE table_name IN ('purchase_order','purchase_order_item')",
+        ))
+        .await
+        .unwrap()
+        .len()
+    }
+
+    let conn = sea_orm::Database::connect(format!("{admin_url}/{name}")).await.unwrap();
+    let applied = Migrator::up(&conn, None).await;
+    let after_up = tables(&conn).await;
+    // Reverse everything (robust to later migrations landing on top).
+    let reversed = Migrator::down(&conn, None).await;
+    let after_down = tables(&conn).await;
+    let reapplied = Migrator::up(&conn, None).await;
+    let after_reapply = tables(&conn).await;
+    conn.close().await.unwrap();
+    admin
+        .execute(Statement::from_string(admin.get_database_backend(), format!("DROP DATABASE {name} WITH (FORCE)")))
+        .await
+        .unwrap();
+
+    applied.unwrap();
+    reversed.unwrap();
+    reapplied.unwrap();
+    assert_eq!(after_up, 2, "up creates both tables");
+    assert_eq!(after_down, 0, "down drops both");
+    assert_eq!(after_reapply, 2, "up again re-creates them");
+}
