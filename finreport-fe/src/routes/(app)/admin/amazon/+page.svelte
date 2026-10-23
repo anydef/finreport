@@ -308,6 +308,7 @@
 										label="Category for {item.title}"
 										placeholder="Choose a category…"
 										id="amazon-{row.orderId}-{i}"
+										disabled={acting !== null}
 									/>
 								</li>
 							{/each}
