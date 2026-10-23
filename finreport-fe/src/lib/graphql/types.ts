@@ -739,3 +739,17 @@ export interface PurchaseOrderUploadResult {
 	updatedOrders: number;
 	unchangedOrders: number;
 }
+
+export type ProposalSource = 'RULE' | 'CACHE' | 'LLM' | 'NONE';
+
+export interface PurchaseOrderItemProposal {
+	/** 0-based index into the order's items. */
+	position: number;
+	asin: string;
+	title: string;
+	categorySlug: string | null;
+	source: ProposalSource;
+	confidence: number | null;
+	/** Machine-readable code when `source` is NONE. */
+	reason: string | null;
+}

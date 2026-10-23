@@ -1,12 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
 	mockApplyPurchaseOrderSplit,
+	mockProposePurchaseOrderCategories,
 	mockPurchaseOrderMatches,
 	mockUndoPurchaseOrderSplit,
 	mockUploadPurchaseOrders,
 	resetAmazonMock
 } from './graphql/amazonMock';
-import type { PurchaseOrderMatch, PurchaseOrderUploadResult } from './graphql/types';
+import type {
+	PurchaseOrderItemProposal,
+	PurchaseOrderMatch,
+	PurchaseOrderUploadResult
+} from './graphql/types';
 import {
 	applyBlocker,
 	applyWarning,
@@ -19,7 +24,10 @@ import {
 	emptyChoices,
 	matchRow,
 	reviewHeadline,
-	uploadOutcome
+	uploadOutcome,
+	applyProposals,
+	proposalReasonText,
+	proposalSourceLabel
 } from './amazonView';
 import type { Category } from './graphql/types';
 
@@ -353,5 +361,74 @@ describe('describeOutcomes', () => {
 		expect(describeOutcomes({ orderId: 'o', outcomes: [] }, 'undo').lines[0]).toBe(
 			'Nothing to undo for this order.'
 		);
+	});
+});
+
+describe('proposals', () => {
+	const known = new Set(['personal', 'household_items_supplies']);
+	const p = (
+		position: number,
+		categorySlug: string | null,
+		source: PurchaseOrderItemProposal['source'],
+		reason: string | null = null
+	): PurchaseOrderItemProposal => ({
+		position,
+		asin: `A${position}`,
+		title: `t${position}`,
+		categorySlug,
+		source,
+		confidence: null,
+		reason
+	});
+
+	it('fills only empty pickers and keeps a slug the user chose', () => {
+		const r = applyProposals(
+			['', 'personal', ''],
+			[p(0, 'personal', 'RULE'), p(1, 'household_items_supplies', 'LLM'), p(2, 'personal', 'LLM')],
+			known
+		);
+		expect(r.itemCategories).toEqual(['personal', 'personal', 'personal']);
+		expect(Object.keys(r.filled)).toEqual(['0', '2']);
+		expect(r.notFilled[1].categorySlug).toBe('household_items_supplies');
+	});
+
+	it('leaves a NONE item empty and records why', () => {
+		const r = applyProposals([''], [p(0, null, 'NONE', 'no_category')], known);
+		expect(r.itemCategories).toEqual(['']);
+		expect(r.notFilled[0].reason).toBe('no_category');
+	});
+
+	it('ignores an unknown slug and an out-of-range position', () => {
+		const r = applyProposals([''], [p(0, 'gone', 'LLM'), p(5, 'personal', 'LLM')], known);
+		expect(r.itemCategories).toEqual(['']);
+		expect(r.filled).toEqual({});
+	});
+
+	it('words each source and tells a guess from a rule', () => {
+		expect(proposalSourceLabel('RULE').text).toMatch(/rule/);
+		expect(proposalSourceLabel('LLM').variant).toBe('warning');
+		expect(proposalSourceLabel('NONE').text).toBe('No suggestion');
+	});
+
+	it('words reason codes, with the budget as a limit not a failure', () => {
+		expect(proposalReasonText('llm_budget_exhausted')).toMatch(/limit/i);
+		expect(proposalReasonText('llm_budget_exhausted')).not.toMatch(/fail/i);
+		expect(proposalReasonText('provider_error')).toMatch(/failed/);
+		expect(proposalReasonText('provider_unavailable')).toMatch(/configured/);
+		expect(proposalReasonText('no_category')).toMatch(/matched/);
+		expect(proposalReasonText('weird')).toBe('No suggestion available.');
+		expect(proposalReasonText(null)).toBe('No suggestion available.');
+	});
+});
+
+describe('mockProposePurchaseOrderCategories', () => {
+	it('covers rule, AI and no-suggestion paths and suggests nothing for an unknown order', () => {
+		const sources = ['307-5555555-6666666', '308-7777777-8888888'].flatMap((orderId) => {
+			const r = mockProposePurchaseOrderCategories({ orderId });
+			return 'data' in r ? r.data.proposePurchaseOrderCategories : [];
+		});
+		expect(new Set(sources.map((s) => s.source))).toEqual(new Set(['RULE', 'LLM', 'NONE']));
+		expect(sources.find((s) => s.source === 'NONE')?.categorySlug).toBeNull();
+		expect('errors' in mockProposePurchaseOrderCategories({ orderId: 'x' })).toBe(true);
 	});
 });

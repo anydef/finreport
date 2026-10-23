@@ -33,6 +33,7 @@ import {
 } from '$lib/graphql/savingsMock';
 import {
 	mockApplyPurchaseOrderSplit,
+	mockProposePurchaseOrderCategories,
 	mockPurchaseOrderMatches,
 	mockUndoPurchaseOrderSplit,
 	mockUploadPurchaseOrders
@@ -898,6 +899,12 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return { status: 200, body: { data: mockPurchaseOrderMatches() }, setCookies: [] };
 		case 'ApplyPurchaseOrderSplit':
 			return { status: 200, body: mockApplyPurchaseOrderSplit(body.variables), setCookies: [] };
+		case 'ProposePurchaseOrderCategories':
+			return {
+				status: 200,
+				body: mockProposePurchaseOrderCategories(body.variables),
+				setCookies: []
+			};
 		case 'UndoPurchaseOrderSplit':
 			return {
 				status: 200,

@@ -23,6 +23,7 @@ import type {
 	PurchaseOrderApplyResult,
 	PurchaseOrderCharge,
 	PurchaseOrderMatch,
+	PurchaseOrderItemProposal,
 	PurchaseOrderMatchReport,
 	PurchaseOrderUploadResult
 } from './types';
@@ -283,4 +284,51 @@ export function mockUploadPurchaseOrders(variables: Record<string, unknown> | un
 		result.newOrders += ids.size;
 	});
 	return { uploadPurchaseOrders: result };
+}
+
+/**
+ * Mirrors `proposePurchaseOrderCategories`: one suggestion per item, writes
+ * nothing. The two-item orders show every path: the first item comes from a
+ * rule, the second from the AI (`TWO`) or has no suggestion because the AI
+ * limit was hit (`BLOCKED`). Single-item orders get an AI guess. Slugs are
+ * from the mock taxonomy.
+ */
+export function mockProposePurchaseOrderCategories(
+	variables: Record<string, unknown> | undefined
+): MockResult<{ proposePurchaseOrderCategories: PurchaseOrderItemProposal[] }> {
+	const match = report.matches.find((m) => m.order.orderId === variables?.orderId);
+	if (!match) return { errors: [{ message: 'no such order' }] };
+	const proposals = match.order.items.map((item, position): PurchaseOrderItemProposal => {
+		const base = { position, asin: item.asin, title: item.title };
+		if (match.order.orderId === TWO.orderId) {
+			return position === 0
+				? { ...base, categorySlug: 'personal', source: 'RULE', confidence: 1, reason: null }
+				: {
+						...base,
+						categorySlug: 'household_items_supplies',
+						source: 'LLM',
+						confidence: 0.72,
+						reason: null
+					};
+		}
+		if (match.order.orderId === BLOCKED.orderId) {
+			return position === 0
+				? {
+						...base,
+						categorySlug: 'household_items_supplies',
+						source: 'LLM',
+						confidence: 0.64,
+						reason: null
+					}
+				: {
+						...base,
+						categorySlug: null,
+						source: 'NONE',
+						confidence: null,
+						reason: 'llm_budget_exhausted'
+					};
+		}
+		return { ...base, categorySlug: 'personal', source: 'LLM', confidence: 0.55, reason: null };
+	});
+	return { data: { proposePurchaseOrderCategories: proposals } };
 }
