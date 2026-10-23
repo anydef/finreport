@@ -1,7 +1,7 @@
 //! CSV -> [`Order`]s.
 //!
-//! The recipient columns (name, street, city, state, zip, country) are
-//! validated as part of the header and then never read: no struct, log line
+//! Columns are resolved by header name, not position. The recipient columns
+//! (name, street, city, zip, country) are never looked up: no struct, log line
 //! or error message in this crate can carry them.
 
 use std::collections::HashMap;
@@ -17,39 +17,34 @@ use crate::error::ParseError;
 use crate::model::{Item, Order, PriceBasis};
 use crate::status::looks_returned;
 
-/// The known header, in order. Compared case-insensitively after trimming.
-const HEADER: [&str; 19] = [
+/// Columns that must be present, by name (compared trimmed and
+/// case-insensitively). Order is irrelevant; unknown extra columns, including
+/// every recipient column, are never looked up.
+const REQUIRED: [&str; 8] = [
     "Order ID",
     "Order Date",
     "Total Amount",
-    "Total Savings",
     "Status",
     "Item ASIN",
     "Item Quantity",
     "Item Price",
-    "Item Discount",
-    "Promotions",
     "Item Title",
-    "Item URL",
-    "Details URL",
-    "Recipient Name",
-    "Recipient Street",
-    "Recipient City",
-    "Recipient State",
-    "Recipient Zip",
-    "Recipient Country",
 ];
 
-const C_ORDER_ID: usize = 0;
-const C_DATE: usize = 1;
-const C_TOTAL: usize = 2;
-const C_STATUS: usize = 4;
-const C_ASIN: usize = 5;
-const C_QTY: usize = 6;
-const C_PRICE: usize = 7;
-const C_DISCOUNT: usize = 8;
-const C_PROMO: usize = 9;
-const C_TITLE: usize = 10;
+/// Column positions resolved from the header row.
+struct Columns {
+    order_id: usize,
+    date: usize,
+    total: usize,
+    status: usize,
+    asin: usize,
+    qty: usize,
+    price: usize,
+    title: usize,
+    currency: Option<usize>,
+    discount: Option<usize>,
+    promo: Option<usize>,
+}
 
 /// Parse one export file. Rows are grouped by `Order ID`; orders come back in
 /// first-seen order.
@@ -60,7 +55,7 @@ pub fn parse_orders<R: Read>(reader: R) -> Result<Vec<Order>, ParseError> {
         .trim(csv::Trim::None)
         .from_reader(reader);
 
-    validate_header(rdr.headers()?)?;
+    let cols = resolve_columns(rdr.headers()?)?;
 
     let mut order_index: HashMap<String, usize> = HashMap::new();
     let mut raw: Vec<RawOrder> = Vec::new();
@@ -71,7 +66,7 @@ pub fn parse_orders<R: Read>(reader: R) -> Result<Vec<Order>, ParseError> {
         if record.iter().all(|c| c.trim().is_empty()) {
             continue;
         }
-        let row = parse_row(&record, line)?;
+        let row = parse_row(&record, line, &cols)?;
         match order_index.get(&row.order_id) {
             Some(&i) => {
                 let o = &mut raw[i];
@@ -125,28 +120,33 @@ pub fn merge_orders<I: IntoIterator<Item = Vec<Order>>>(files: I) -> Vec<Order> 
     out
 }
 
-fn validate_header(header: &csv::StringRecord) -> Result<(), ParseError> {
-    for (i, expected) in HEADER.iter().enumerate() {
-        let found = header.get(i).map(|h| h.trim_start_matches('\u{feff}').trim());
-        match found {
-            Some(h) if h.eq_ignore_ascii_case(expected) => {}
-            other => {
-                return Err(ParseError::UnrecognisedHeader {
-                    position: i,
-                    expected,
-                    present: other.is_some(),
-                });
-            }
-        }
+fn resolve_columns(header: &csv::StringRecord) -> Result<Columns, ParseError> {
+    let mut by_name: HashMap<String, usize> = HashMap::new();
+    for (i, h) in header.iter().enumerate() {
+        let key = h.trim_start_matches('\u{feff}').trim().to_lowercase();
+        by_name.entry(key).or_insert(i);
     }
-    if header.len() > HEADER.len() {
-        return Err(ParseError::UnrecognisedHeader {
-            position: HEADER.len(),
-            expected: "<end of header>",
-            present: true,
-        });
+    let find = |name: &str| by_name.get(&name.to_lowercase()).copied();
+
+    let missing: Vec<&'static str> =
+        REQUIRED.iter().copied().filter(|n| find(n).is_none()).collect();
+    if !missing.is_empty() {
+        return Err(ParseError::UnrecognisedHeader { missing, columns: header.len() });
     }
-    Ok(())
+    let req = |name: &str| find(name).expect("checked above");
+    Ok(Columns {
+        order_id: req("Order ID"),
+        date: req("Order Date"),
+        total: req("Total Amount"),
+        status: req("Status"),
+        asin: req("Item ASIN"),
+        qty: req("Item Quantity"),
+        price: req("Item Price"),
+        title: req("Item Title"),
+        currency: find("Currency"),
+        discount: find("Item Discount"),
+        promo: find("Promotions"),
+    })
 }
 
 struct RawOrder {
@@ -165,29 +165,39 @@ struct Row {
     item: Item,
 }
 
-fn parse_row(r: &csv::StringRecord, line: u64) -> Result<Row, ParseError> {
+fn parse_row(r: &csv::StringRecord, line: u64, c: &Columns) -> Result<Row, ParseError> {
     let cell = |i: usize| r.get(i).unwrap_or("").trim();
+    // An absent optional column reads like an empty cell.
+    let opt_cell = |i: Option<usize>| i.map_or("", cell);
     let bad = |column: &'static str, reason: &'static str| ParseError::BadCell {
         line,
         column,
         reason,
     };
 
-    let order_id = cell(C_ORDER_ID);
+    let order_id = cell(c.order_id);
     if order_id.is_empty() {
         return Err(bad("Order ID", "empty"));
     }
-    let date = NaiveDate::parse_from_str(cell(C_DATE), "%Y-%m-%d")
+    let date = NaiveDate::parse_from_str(cell(c.date), "%Y-%m-%d")
         .map_err(|_| bad("Order Date", "not an ISO date (YYYY-MM-DD)"))?;
-    let (total, currency) = parse_amount_with_currency(cell(C_TOTAL))
-        .ok_or_else(|| bad("Total Amount", "not of the form \"<amount> <currency>\""))?;
-    let quantity: u32 = cell(C_QTY)
+    let (total, currency) = match opt_cell(c.currency).to_uppercase() {
+        cur if !cur.is_empty() => {
+            let total = parse_decimal(cell(c.total))
+                .ok_or_else(|| bad("Total Amount", "not an amount"))?;
+            (total, cur)
+        }
+        _ => parse_amount_with_currency(cell(c.total)).ok_or_else(|| {
+            bad("Total Amount", "not of the form \"<amount> <currency>\" and no Currency column value")
+        })?,
+    };
+    let quantity: u32 = cell(c.qty)
         .parse()
         .map_err(|_| bad("Item Quantity", "not a whole number"))?;
     let price =
-        parse_decimal(cell(C_PRICE)).ok_or_else(|| bad("Item Price", "not an amount"))?;
+        parse_decimal(cell(c.price)).ok_or_else(|| bad("Item Price", "not an amount"))?;
 
-    let discount = match cell(C_DISCOUNT) {
+    let discount = match opt_cell(c.discount) {
         "" => None,
         s => {
             let parsed = parse_decimal(s);
@@ -197,18 +207,18 @@ fn parse_row(r: &csv::StringRecord, line: u64) -> Result<Row, ParseError> {
             parsed
         }
     };
-    let promotion = Some(cell(C_PROMO)).filter(|s| !s.is_empty()).map(String::from);
+    let promotion = Some(opt_cell(c.promo)).filter(|s| !s.is_empty()).map(String::from);
     let promotion_amount = promotion.as_deref().and_then(first_number);
-    let status = cell(C_STATUS).to_string();
+    let status = cell(c.status).to_string();
 
     let item = Item {
-        asin: cell(C_ASIN).to_string(),
+        asin: cell(c.asin).to_string(),
         quantity,
         price,
         discount,
         promotion,
         promotion_amount,
-        title: cell(C_TITLE).to_string(),
+        title: cell(c.title).to_string(),
         returned: looks_returned(&status),
         status,
         line_total: price,
