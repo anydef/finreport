@@ -250,6 +250,23 @@ the semantics, which the user decided and which should not be re-litigated.
   reimbursement-side money and will count savings flows too. Not covered by
   any test.
 
+## Requested 2026-10-23
+
+- **Navigate from a transaction to the rule that categorised it** — S, good
+  value. When a label came from a rule, the user wants to jump from the
+  transaction to that rule. The data is already there: `transaction_label`
+  stores `rule_id` (nullable, set when `label_source` is the rule path), so
+  this needs no migration and no new event. What is missing is exposure and a
+  link - `ruleId` appears in neither `webapp/schema.graphql` nor
+  `finreport-fe/src/lib/graphql/queries.ts` today.
+  Shape: expose the rule on the label (prefer the rule object over a bare id,
+  so the UI can show its name without a second round trip, and prefetch it per
+  page rather than per row - see `graphql::links::prefetch_page`), then link
+  from the transaction's editor/detail view to `/admin/rules` scoped to that
+  rule. Worth deciding whether a deleted rule should still resolve: `rule_id`
+  can point at a rule that no longer exists, and the link should degrade to
+  naming it rather than 404.
+
 ## Housekeeping
 
 - **Delete `prompts/categories.json`** — XS. Dead since May 2026: nothing in
