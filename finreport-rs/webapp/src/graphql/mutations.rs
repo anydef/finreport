@@ -264,7 +264,8 @@ impl MutationRoot {
     ) -> GqlResult<crate::graphql::purchase_orders::PurchaseOrderUploadResult> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        crate::graphql::purchase_orders::upload_purchase_orders(db, publisher(ctx), user, files).await
+        let settings = ctx.data::<Arc<Settings>>()?;
+        crate::graphql::purchase_orders::upload_purchase_orders(db, publisher(ctx), settings, user, files).await
     }
 
     /// `applyPurchaseOrderSplit`: **changes transactions.** Splits each bank

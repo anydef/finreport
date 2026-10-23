@@ -43,6 +43,7 @@ use uuid::Uuid;
 
 use crate::graphql::current_user::AuthenticatedUser;
 use crate::graphql::events::{kafka_unavailable_error, publish_event};
+use crate::graphql::purchase_order_proposals::{self as proposals, ProposalSource};
 use crate::graphql::scalars::{Date as GqlDate, Decimal as GqlDecimal, Uuid as GqlUuid};
 use crate::kafka::producer::EventPublisher;
 use crate::kafka::purchase_orders::{
@@ -71,6 +72,12 @@ pub struct PurchaseOrderItem {
     /// The export's status text. Free text and localised.
     pub status: String,
     pub returned: bool,
+    /// A stored suggestion for this item's category, from a rule or the LLM
+    /// cache only (this query never calls a provider). `null` when neither
+    /// has an answer, or the cached answer was a decline.
+    pub suggested_category_slug: Option<String>,
+    /// Where the suggestion came from: `RULE` or `CACHE`, else `NONE`.
+    pub suggestion_source: ProposalSource,
 }
 
 #[derive(SimpleObject, Clone, Debug, PartialEq)]
@@ -243,6 +250,8 @@ fn to_gql_order(o: &Order) -> PurchaseOrder {
                 line_total: GqlDecimal(i.line_total),
                 status: i.status.clone(),
                 returned: i.returned,
+                suggested_category_slug: None,
+                suggestion_source: ProposalSource::None,
             })
             .collect(),
     }
@@ -432,6 +441,7 @@ pub(crate) async fn stored_orders(
 pub async fn upload_purchase_orders(
     db: &DatabaseConnection,
     publisher: Option<&Arc<EventPublisher>>,
+    settings: &utils::settings::Settings,
     user: &AuthenticatedUser,
     files: Vec<String>,
 ) -> async_graphql::Result<PurchaseOrderUploadResult> {
@@ -483,18 +493,23 @@ pub async fn upload_purchase_orders(
 
     // Project whatever reached the broker, even when a later publish failed,
     // so the read model never lags our own acknowledged writes.
+    let mut warm: Vec<Order> = Vec::new();
     if !published.is_empty() {
         let txn = db.begin().await?;
         for record in published {
             let order_id = record.order.order_id.clone();
+            warm.push(record.order.clone());
             project_purchase_order(&txn, user.user_id, SOURCE_AMAZON, &order_id, Some(record)).await?;
         }
         txn.commit().await?;
     }
-    match failure {
-        Some(e) => Err(e),
-        None => Ok(result),
+    if let Some(e) = failure {
+        return Err(e);
     }
+    // Only the orders just published: a re-upload of unchanged orders stays
+    // free. Infallible by design - the suggestions are a convenience.
+    proposals::warm_suggestions(db, Some(publisher), settings, &warm).await;
+    Ok(result)
 }
 
 // ---------------------------------------------------------------------------
@@ -544,6 +559,7 @@ pub async fn load_match_inputs(
 /// lines of their own accounts, plus the splits already applied from them.
 pub async fn fetch_match_report(
     db: &DatabaseConnection,
+    settings: &utils::settings::Settings,
     user: &AuthenticatedUser,
 ) -> async_graphql::Result<PurchaseOrderMatchReport> {
     let inputs = load_match_inputs(db, user).await?;
@@ -552,7 +568,31 @@ pub async fn fetch_match_report(
     }
     let mut out = assemble_report(&inputs.orders, &inputs.report, &inputs.transactions);
     attach_applications(db, user, &mut out).await?;
+    // Suggestions are a convenience: a failed lookup leaves the page without
+    // them rather than failing the report.
+    match proposals::stored_suggestions(db, settings, &inputs.orders).await {
+        Ok(suggestions) => attach_suggestions(&mut out, &suggestions),
+        Err(e) => tracing::warn!(error = %e, "purchase-order matches: could not load stored suggestions; serving none"),
+    }
     Ok(out)
+}
+
+/// Fills each item's suggestion from `suggestions` (keyed by order id and
+/// item position, as `to_gql_order` lays items out).
+fn attach_suggestions(report: &mut PurchaseOrderMatchReport, suggestions: &proposals::StoredSuggestions) {
+    let orders = report
+        .matches
+        .iter_mut()
+        .map(|m| &mut m.order)
+        .chain(report.unmatched_orders.iter_mut());
+    for order in orders {
+        for (position, item) in order.items.iter_mut().enumerate() {
+            if let Some(d) = suggestions.get(&(order.order_id.clone(), position)) {
+                item.suggested_category_slug = d.category_slug.clone();
+                item.suggestion_source = d.source;
+            }
+        }
+    }
 }
 
 /// Fills each match's `applications` from the application records, flagging
