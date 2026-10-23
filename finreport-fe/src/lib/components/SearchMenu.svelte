@@ -8,9 +8,19 @@
 		label: string;
 		placeholder?: string;
 		id?: string;
+		/** Blocks opening the menu while an action is in flight. */
+		disabled?: boolean;
 	}
 
-	let { groups, value, onchange, label, placeholder = 'Select…', id }: Props = $props();
+	let {
+		groups,
+		value,
+		onchange,
+		label,
+		placeholder = 'Select…',
+		id,
+		disabled = false
+	}: Props = $props();
 
 	const uid = $props.id();
 	const listId = `${uid}-listbox`;
@@ -97,12 +107,13 @@
 	<button
 		{id}
 		type="button"
+		{disabled}
 		onclick={toggle}
 		aria-haspopup="listbox"
 		aria-expanded={open}
 		aria-controls={listId}
 		aria-label={label}
-		class="focus-visible:outline-brand flex min-w-56 items-center justify-between gap-2 rounded-md border border-slate-300 bg-white px-2 py-1 text-left text-xs focus-visible:outline focus-visible:outline-2"
+		class="focus-visible:outline-brand flex min-w-56 items-center justify-between gap-2 rounded-md border border-slate-300 bg-white px-2 py-1 text-left text-xs focus-visible:outline focus-visible:outline-2 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
 	>
 		<span class={selectedLabel ? 'text-slate-900' : 'text-slate-500'}>
 			{selectedLabel ?? placeholder}
