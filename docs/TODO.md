@@ -558,6 +558,42 @@ Consequences, accepted deliberately:
   is now intended behaviour, not a gap. Do not "fix" it by making unmatched
   orders applicable.
 
+## Amazon item categories are suggested automatically (2026-10-24)
+
+Built, in four merged slices, after the user said plainly what they were
+after: *"I want my amazon purchases to be associated with the real
+transactions and have displayed in the actual report and appear in the proper
+categories."*
+
+- `uploadPurchaseOrders` runs the proposal engine over new or changed orders
+  only, so a re-upload is free; answers land in the LLM cache.
+- `purchaseOrderMatches` returns `suggestedCategorySlug` / `suggestionSource`
+  per item, resolved from the **rule engine and the cache only**. A query
+  resolver never calls a provider: opening a page must not spend money or
+  block on the network. 3 extra queries per page, whatever the order count.
+- A failed suggestion never fails an import: it is a `warn`, and the orders
+  still import.
+- The page prefills only empty pickers, and a user's own choice is never
+  overwritten — not by a re-render, a refetch, or a forced "Suggest again".
+
+Open, deliberately not fixed in those slices:
+
+- **Three independent LLM budgets** now: the labeler, the per-order mutation
+  and the upload. `APP_llm_max_requests_per_run` bounds none of them in
+  total. One worse in count than the 2026-10-23 finding, not in kind.
+- **The `fake` provider answers.** `APP_llm_provider` defaults to `fake`, so a
+  local upload writes fake suggestions into `finreport.llm-cache` against real
+  data. The per-order button already had this exposure; automation makes it
+  certain. Decide whether the upload path should skip a `fake` provider
+  entirely.
+- **`ProposalSource::LLM` cannot occur on the read path** (it resolves from
+  rule and cache only), so the "Suggested by AI, check it" badge is reachable
+  only through the mutation. The frontend mock fakes one so the badge can be
+  reviewed; that is mock-only.
+- **No integration test covers warm-on-upload or the new fields.** The
+  existing upload and matches tests pass but never exercise a provider or a
+  populated cache.
+
 ## Labeling-engine findings from the proposal slice (2026-10-23)
 
 - **The labeler never publishes the LLM cache to Kafka** — M, real
