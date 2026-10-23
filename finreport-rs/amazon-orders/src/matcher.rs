@@ -267,12 +267,22 @@ fn match_by_id(order: &Order, txs: &[&Candidate]) -> Option<OrderMatch> {
             charged,
             total: order.total,
         });
+    } else if charges.len() == 1 {
+        let plan = plan_single(order, &charges[0]);
+        // An unreconciled order is planned with its leftover as the explicit
+        // remainder (shipping, gift card, promotion). The parts still sum to
+        // the charge. Items exceeding the charge is not shipping: refuse.
+        if order.price_basis == PriceBasis::Unreconciled && plan.remainder.is_sign_negative() {
+            reasons.push(ReviewReason::OrderItemsDoNotReconcile {
+                remainder: order.remainder,
+            });
+        } else {
+            split = Some(vec![plan]);
+        }
     } else if order.price_basis == PriceBasis::Unreconciled {
         reasons.push(ReviewReason::OrderItemsDoNotReconcile {
             remainder: order.remainder,
         });
-    } else if charges.len() == 1 {
-        split = Some(vec![plan_single(order, &charges[0])]);
     } else {
         match assign_items(order, &charges) {
             Assignment::Unique(plans) => split = Some(plans),
