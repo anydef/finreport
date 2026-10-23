@@ -525,11 +525,24 @@ must never imply otherwise.
 
 Consequences, accepted deliberately:
 
-- An order whose items do not sum exactly to the order total (shipping, a gift
-  card, a promotion) can never be applied. `amazon-orders`'s matcher returns
-  `OrderItemsDoNotReconcile` and `graphql/purchase_order_apply.rs`'s
-  `build_parts` remainder path stays unreachable. Most real orders are in this
-  state, so the apply feature covers a narrow slice by design, not by accident.
+- ~~An order whose items do not sum exactly to the order total can never be
+  applied.~~ **Revised 2026-10-24, with the user**, and this consequence no
+  longer holds. Most real orders were in this state (shipping, a gift card, a
+  promotion, rounding), so Amazon purchases never reached the report under any
+  category — which is the opposite of what the user wants.
+  A single-charge unreconciled order is now planned: the items get their parts
+  and the leftover becomes `ChargePlan::remainder`, which `build_parts` turns
+  into the "Shipping & adjustments" part (that path is now reachable). The user
+  picks its category per order — their choice between a fixed category, a
+  pro-rata spread and a per-order pick.
+  **This is not the double counting the user rejected.** The parts still sum
+  exactly to the bank transaction, so total spending is unchanged; only its
+  division between categories changes. The rejected case was an order with *no*
+  bank line, which would invent an expense. That case is untouched: an
+  unmatched order is still never planned.
+  Still `NeedsReview`: a multi-charge unreconciled order, and a **negative**
+  remainder (items exceed the charge), which is a parse or data error rather
+  than shipping.
 - ~~A single-item order cannot be split at all~~ — done 2026-10-24. Such an
   order needs a category, not a split, and now gets one: a charge whose only
   non-zero part is a single item is applied by pinning that item's category
