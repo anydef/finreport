@@ -21,6 +21,7 @@ mod mutations;
 mod queries;
 mod review_queue;
 mod rules;
+pub mod savings;
 pub mod scalars;
 pub mod transactions;
 pub mod types;

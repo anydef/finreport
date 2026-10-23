@@ -7,6 +7,7 @@
 //! `StreamConsumer` and feeds it batches.
 
 pub mod comdirect;
+pub mod account_savings;
 pub mod display_alias;
 pub mod goals;
 pub mod insights;
@@ -74,7 +75,7 @@ const INGEST_PARTITION: i32 = 0;
 /// ever advanced. `transaction-insight` (iteration 3 §2.3/§3) is the
 /// detector's own output, consumed the same way, and `goal` (iteration 4
 /// §2.1) is the user's goal decisions, projected by `projection::goals`.
-pub const LABELING_PROJECTION_TOPICS: [&str; 10] = [
+pub const LABELING_PROJECTION_TOPICS: [&str; 11] = [
     crate::kafka::labeling::TOPIC_CATEGORY,
     crate::kafka::labeling::TOPIC_TRANSACTION_LABEL,
     crate::kafka::labeling::TOPIC_LLM_CACHE,
@@ -85,6 +86,7 @@ pub const LABELING_PROJECTION_TOPICS: [&str; 10] = [
     crate::kafka::labeling::TOPIC_LEARNING_EXEMPTION,
     crate::kafka::labeling::TOPIC_DISPLAY_ALIAS,
     crate::kafka::links::TOPIC_TRANSACTION_LINK,
+    crate::kafka::savings::TOPIC_ACCOUNT_SAVINGS,
 ];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +132,7 @@ pub enum LabelingTopic {
     LearningExemption,
     DisplayAlias,
     TransactionLink,
+    AccountSavings,
 }
 
 /// Maps a §2.2 topic name to the [`LabelingTopic`] WP3's projector dispatches
@@ -153,6 +156,7 @@ pub fn labeling_topic_for(topic: &str) -> Option<LabelingTopic> {
         crate::kafka::labeling::TOPIC_LEARNING_EXEMPTION => Some(LabelingTopic::LearningExemption),
         crate::kafka::labeling::TOPIC_DISPLAY_ALIAS => Some(LabelingTopic::DisplayAlias),
         crate::kafka::links::TOPIC_TRANSACTION_LINK => Some(LabelingTopic::TransactionLink),
+        crate::kafka::savings::TOPIC_ACCOUNT_SAVINGS => Some(LabelingTopic::AccountSavings),
         _ => None,
     }
 }
@@ -552,6 +556,27 @@ async fn apply_labeling_record(
                 Ok(parsed) => display_alias::project_display_alias(txn, user_id, kind, &key, Some(parsed)).await,
                 Err(e) => {
                     error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison display-alias record, skipped");
+                    Ok(())
+                }
+            }
+        }
+        LabelingTopic::AccountSavings => {
+            // Keyed `<user_id>:<account_id>` (see `account_savings_topic_key`).
+            let Some((user_id, account_id)) = record
+                .key
+                .as_deref()
+                .and_then(crate::kafka::savings::parse_account_savings_topic_key)
+            else {
+                warn!(topic = %record.topic, offset = record.offset, "projector: account-savings record with no/invalid key, skipped");
+                return Ok(());
+            };
+            if record.payload.is_empty() {
+                return account_savings::project_account_savings(txn, user_id, account_id, None).await;
+            }
+            match serde_json::from_slice::<crate::kafka::savings::AccountSavingsRecord>(&record.payload) {
+                Ok(parsed) => account_savings::project_account_savings(txn, user_id, account_id, Some(parsed)).await,
+                Err(e) => {
+                    error!(topic = %record.topic, offset = record.offset, error = %e, "projector: poison account-savings record, skipped");
                     Ok(())
                 }
             }
@@ -1012,6 +1037,18 @@ mod transaction_link_dispatch_tests {
     fn transaction_link_topic_is_projected_and_consumed() {
         let topic = crate::kafka::links::TOPIC_TRANSACTION_LINK;
         assert_eq!(labeling_topic_for(topic), Some(LabelingTopic::TransactionLink));
+        assert!(LABELING_PROJECTION_TOPICS.contains(&topic));
+    }
+}
+
+#[cfg(test)]
+mod account_savings_dispatch_tests {
+    use super::*;
+
+    #[test]
+    fn account_savings_topic_is_projected_and_consumed() {
+        let topic = crate::kafka::savings::TOPIC_ACCOUNT_SAVINGS;
+        assert_eq!(labeling_topic_for(topic), Some(LabelingTopic::AccountSavings));
         assert!(LABELING_PROJECTION_TOPICS.contains(&topic));
     }
 }

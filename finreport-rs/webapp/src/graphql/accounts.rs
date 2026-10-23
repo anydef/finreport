@@ -12,6 +12,7 @@ use crate::graphql::types::Account;
 
 pub async fn fetch_accounts(
     db: &DatabaseConnection,
+    user_id: Uuid,
     scoped_ids: &[Uuid],
 ) -> async_graphql::Result<Vec<Account>> {
     if scoped_ids.is_empty() {
@@ -24,11 +25,13 @@ pub async fn fetch_accounts(
         .await?;
 
     let mut balances = loaders::latest_balances(db, scoped_ids).await?;
+    let savings = crate::graphql::savings::flagged_accounts(db, user_id, scoped_ids).await?;
 
     let accounts = rows
         .into_iter()
         .map(|row| Account {
             latest_balance: balances.remove(&row.id),
+            is_savings: savings.contains(&row.id),
             id: GqlUuid(row.id),
             source: row.source,
             external_id: row.external_id,

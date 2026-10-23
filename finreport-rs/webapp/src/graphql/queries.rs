@@ -50,7 +50,7 @@ impl QueryRoot {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let scoped_ids = scoped_account_ids(user, None)?;
-        accounts::fetch_accounts(db, &scoped_ids).await
+        accounts::fetch_accounts(db, user.user_id, &scoped_ids).await
     }
 
     async fn transactions(
