@@ -148,6 +148,33 @@ by agreeing where it goes.
   topic and a projection, like every other decision. Worth doing together
   rather than twice.
 
+- **Spending trend for one category over time** — S frontend, no backend
+  work expected. The user, 2026-10-24: "I want to be able to see the spending
+  dynamic across individual category." Today `/compare` answers "which
+  categories moved between these two months"; this asks the other question,
+  "how has *this* category moved over the whole window", which nothing renders
+  as a series.
+  The data is already served: `categoryComparison` returns
+  `periods` plus, per category, an amount per period — a time series per
+  category, already fetched by `/compare`. So the first cut is a chart over a
+  response the page already has (a sparkline in each table row, or a line
+  chart for a clicked category), not a new resolver.
+  Three things to settle before building, each a real limit of that query
+  rather than a detail:
+  - It defaults to `kind: EXPENSE`, so savings categories are absent — the
+    same gap as the "/compare excludes savings" item below. A "spending"
+    trend arguably should exclude savings, so this may be correct here; decide
+    explicitly rather than inherit it.
+  - `level: 1` means top-level categories. A trend for a *subcategory* needs
+    `level: 2` or a scoped filter, and the user said "individual category",
+    which more likely means a leaf than a top-level one.
+  - A category with no transactions in a period must read as a zero, not as a
+    gap — `/compare`'s table already distinguishes `new`/`gone`, and a line
+    chart that interpolates across a missing month would invent spending.
+  Worth more than its cost: it reuses a query that is already built, and it
+  answers the question the breakdown and the comparison table both dance
+  around. Depends on nothing else here.
+
 - **Spending-by-category drill-down** — S, frontend-only. The `uncategorized`
   and `needs-review` rows are rendered as buttons but do nothing; category rows
   already work. Cheapest item here and fixes something that currently looks
