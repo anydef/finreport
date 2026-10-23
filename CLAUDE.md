@@ -300,6 +300,7 @@ between two savings accounts counts as neither, since it changes no total.
   error or a null summary renders nothing, so the dashboard never fails on it.
 - `queries.test.ts` validates every operation in `queries.ts` against the frozen
   `schema.graphql`, so an operation cannot be added before the schema serves it.
+
 ## Backend database profiles
 
 The backend can run locally against either Postgres:
