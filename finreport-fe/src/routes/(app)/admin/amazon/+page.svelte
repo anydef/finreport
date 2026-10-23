@@ -16,12 +16,13 @@
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
+	import SearchMenu from '$lib/components/SearchMenu.svelte';
 	import {
 		applyBlocker,
 		applyWarning,
 		buildApplyInput,
 		buildReview,
-		categoryOptions,
+		categoryPickerGroups,
 		chargeLabel,
 		describeOutcomes,
 		emptyChoices,
@@ -42,7 +43,7 @@
 	let { data }: { data: PageData } = $props();
 
 	const review = $derived(buildReview(data.report));
-	const options = $derived(categoryOptions(data.categories));
+	const optionGroups = $derived(categoryPickerGroups(data.categories));
 
 	// -- Applying and undoing: the only actions here that change transactions.
 	let choices = $state<Record<string, ApplyChoices>>({});
@@ -300,18 +301,14 @@
 											>{formatAmount(item.lineTotal, row.currency)}</span
 										>
 									</span>
-									<select
-										class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
-										aria-label="Category for {item.title}"
-										value={rowChoices.itemCategories[i]}
-										onchange={(e) => setChoice(row, i, e.currentTarget.value)}
-										disabled={acting !== null}
-									>
-										<option value="">Choose a category…</option>
-										{#each options as o (o.slug)}
-											<option value={o.slug}>{o.label}</option>
-										{/each}
-									</select>
+									<SearchMenu
+										groups={optionGroups}
+										value={rowChoices.itemCategories[i] || null}
+										onchange={(slug) => setChoice(row, i, slug)}
+										label="Category for {item.title}"
+										placeholder="Choose a category…"
+										id="amazon-{row.orderId}-{i}"
+									/>
 								</li>
 							{/each}
 						</ul>
