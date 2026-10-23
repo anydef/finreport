@@ -12,7 +12,7 @@ import {
 	applyWarning,
 	buildApplyInput,
 	buildReview,
-	categoryOptions,
+	categoryPickerGroups,
 	chargedTotal,
 	chargeLabel,
 	describeOutcomes,
@@ -232,26 +232,32 @@ describe('applying a match', () => {
 		expect(warning).toContain('already split or categorised yourself');
 	});
 
-	it('lists only live spending categories, children indented under parents', () => {
-		const cat = (slug: string, kind: Category['kind'], depth = 0, archived = false): Category => ({
+	it('groups only live spending categories, keeping the parent path in labels', () => {
+		const cat = (
+			slug: string,
+			kind: Category['kind'],
+			parentId: string | null = null,
+			archived = false
+		): Category => ({
 			id: slug,
 			slug,
 			name: slug,
 			kind,
-			parentId: null,
-			depth,
+			parentId,
+			depth: parentId ? 1 : 0,
 			archived,
 			origin: 'seed'
 		});
-		const options = categoryOptions([
-			cat('food.groceries', 'EXPENSE', 1),
+		const groups = categoryPickerGroups([
+			cat('food.groceries', 'EXPENSE', 'food'),
 			cat('food', 'EXPENSE'),
 			cat('income', 'INCOME'),
-			cat('old', 'EXPENSE', 0, true),
+			cat('old', 'EXPENSE', null, true),
 			cat('savings', 'SAVING')
 		]);
-		expect(options.map((o) => o.slug)).toEqual(['food', 'food.groceries', 'savings']);
-		expect(options[1].label.startsWith('\u2003')).toBe(true);
+		expect(groups.map((g) => g.groupLabel)).toEqual(['food', 'savings']);
+		expect(groups[0].options.map((o) => o.slug)).toEqual(['food', 'food.groceries']);
+		expect(groups[0].options[1].label).toBe('food / food.groceries');
 	});
 });
 

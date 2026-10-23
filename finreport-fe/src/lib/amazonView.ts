@@ -11,6 +11,7 @@
  */
 
 import { decimalToNumber } from './chartShaping';
+import { categoryOptionGroups, type CategoryOptionGroup } from './categoryTree';
 import type {
 	ApplyPurchaseOrderInput,
 	Category,
@@ -292,17 +293,19 @@ export function applyWarning(row: MatchRow): string {
 	);
 }
 
-export interface CategoryOption {
-	slug: string;
-	label: string;
-}
-
-/** Spending categories to choose from: live, expense or saving, parents before children. */
-export function categoryOptions(categories: Category[]): CategoryOption[] {
-	return categories
-		.filter((c) => !c.archived && (c.kind === 'EXPENSE' || c.kind === 'SAVING'))
-		.sort((a, b) => a.slug.localeCompare(b.slug))
-		.map((c) => ({ slug: c.slug, label: `${'\u2003'.repeat(c.depth)}${c.name}` }));
+/**
+ * Spending categories to choose from, grouped for `SearchMenu`: live, expense or saving.
+ * Paths are built from the full list so a kept child still reads `Parent / Child`.
+ */
+export function categoryPickerGroups(categories: Category[]): CategoryOptionGroup[] {
+	const allowed = new Set(
+		categories
+			.filter((c) => !c.archived && (c.kind === 'EXPENSE' || c.kind === 'SAVING'))
+			.map((c) => c.slug)
+	);
+	return categoryOptionGroups(categories)
+		.map((g) => ({ ...g, options: g.options.filter((o) => allowed.has(o.slug)) }))
+		.filter((g) => g.options.length > 0);
 }
 
 export interface ActionOutcome {
