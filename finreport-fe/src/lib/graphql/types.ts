@@ -684,11 +684,19 @@ export interface AppliedPart {
 	label: string;
 }
 
+/**
+ * How an application is written to the transaction. Decided by the part count
+ * alone: two or more parts are a split, exactly one is a pinned category.
+ */
+export type AppliedAs = 'SPLIT' | 'CATEGORY';
+
 export interface PurchaseOrderApplication {
 	transactionId: string;
 	appliedAt: string;
 	parts: AppliedPart[];
-	/** The live split still equals what was applied, so undo will remove it. */
+	/** Whether this was written as a split or as a pinned category. */
+	appliedAs: AppliedAs;
+	/** The transaction still carries what was applied (split or category), so undo will remove it. */
 	intact: boolean;
 }
 
@@ -704,6 +712,8 @@ export interface ChargeOutcome {
 	status: ChargeOutcomeStatus;
 	reason: string | null;
 	parts: AppliedPart[];
+	/** How the charge was written; null when nothing was (SKIPPED, LEFT_ALONE). */
+	appliedAs: AppliedAs | null;
 }
 
 export interface PurchaseOrderApplyResult {
