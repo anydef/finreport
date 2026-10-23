@@ -568,8 +568,12 @@ pub async fn fetch_match_report(
     }
     let mut out = assemble_report(&inputs.orders, &inputs.report, &inputs.transactions);
     attach_applications(db, user, &mut out).await?;
-    let suggestions = proposals::stored_suggestions(db, settings, &inputs.orders).await?;
-    attach_suggestions(&mut out, &suggestions);
+    // Suggestions are a convenience: a failed lookup leaves the page without
+    // them rather than failing the report.
+    match proposals::stored_suggestions(db, settings, &inputs.orders).await {
+        Ok(suggestions) => attach_suggestions(&mut out, &suggestions),
+        Err(e) => tracing::warn!(error = %e, "purchase-order matches: could not load stored suggestions; serving none"),
+    }
     Ok(out)
 }
 

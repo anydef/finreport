@@ -939,6 +939,16 @@ type PurchaseOrderItem {
 	"""
 	status: String!
 	returned: Boolean!
+	"""
+	A stored suggestion for this item's category, from a rule or the LLM
+	cache only (this query never calls a provider). `null` when neither
+	has an answer, or the cached answer was a decline.
+	"""
+	suggestedCategorySlug: String
+	"""
+	Where the suggestion came from: `RULE` or `CACHE`, else `NONE`.
+	"""
+	suggestionSource: ProposalSource!
 }
 
 type PurchaseOrderItemProposal {

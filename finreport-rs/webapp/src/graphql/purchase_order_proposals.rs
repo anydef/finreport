@@ -400,7 +400,7 @@ pub async fn stored_suggestions(
     let mut wanted: Vec<String> = orders
         .iter()
         .flat_map(|o| o.items.iter())
-        .filter_map(|i| fingerprint_of(i))
+        .filter_map(&fingerprint_of)
         .collect();
     wanted.sort();
     wanted.dedup();
@@ -595,7 +595,7 @@ mod tests {
             fingerprint: "fp".into(),
             category_id: slug.map(category_uuid),
             proposed_path: None,
-            confidence: Decimal::new(80, 2).try_into().unwrap(),
+            confidence: Decimal::new(80, 2),
             provider: "fake".into(),
             model: "fake".into(),
             prompt_version: "2".into(),
