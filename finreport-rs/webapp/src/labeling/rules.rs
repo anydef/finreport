@@ -56,8 +56,9 @@ pub fn conditions_match(conditions: &RuleConditions, input: &RuleMatchInput<'_>)
 /// does, so the number cannot drift from what the labeler would do; the
 /// regex is compiled once rather than per transaction.
 ///
-/// A rule with no conditions at all matches every input (an absent
-/// condition imposes no constraint, as in the labeler).
+/// A rule with no conditions at all matches **nothing** (see
+/// [`conditions_match_precompiled`]): an empty set would otherwise label
+/// every transaction.
 pub fn count_matching<'a>(
     conditions: &RuleConditions,
     inputs: impl IntoIterator<Item = &'a RuleMatchInput<'a>>,
@@ -79,6 +80,12 @@ fn conditions_match_precompiled(
     regex: Option<&Option<regex::Regex>>,
     input: &RuleMatchInput<'_>,
 ) -> bool {
+    // Defence in depth: an empty condition set would match every
+    // transaction. The projection and mutations refuse such rules; this
+    // keeps one that slips through from labelling everything.
+    if conditions.is_empty() {
+        return false;
+    }
     if let Some(key) = &conditions.counterparty_key
         && input.counterparty_key != Some(key.as_str())
     {
@@ -444,9 +451,22 @@ mod tests {
     }
 
     #[test]
-    fn no_conditions_present_matches_everything_active() {
+    fn no_conditions_present_matches_nothing() {
         let rules = vec![rule(1, 0, RuleConditions::default(), RuleState::Active)];
-        assert!(most_specific_match(&rules, &input(None)).is_some());
+        assert!(most_specific_match(&rules, &input(None)).is_none());
+    }
+
+    #[test]
+    fn regression_all_none_conditions_do_not_match_a_transaction() {
+        // The "Learned: bundesagentur fur arbeit - familienkasse" rule had
+        // every condition None and so labelled all 1261 transactions.
+        let all_none: RuleConditions =
+            serde_json::from_str(&serde_json::to_string(&RuleConditions::default()).unwrap())
+                .unwrap();
+        assert!(all_none.is_empty());
+        assert!(!conditions_match(&all_none, &input(Some("lidl"))));
+        let rules = vec![rule(1, 0, all_none, RuleState::Active)];
+        assert!(most_specific_match(&rules, &input(Some("lidl"))).is_none());
     }
 
     fn corpus() -> Vec<RuleMatchInput<'static>> {
@@ -497,7 +517,7 @@ mod tests {
         let account_a = Uuid::from_bytes([0xaa; 16]);
         let cases = vec![
             // (conditions, expected reach over `corpus()`)
-            (RuleConditions::default(), 4),
+            (RuleConditions::default(), 0),
             (
                 RuleConditions {
                     counterparty_key: Some("lidl".into()),

@@ -260,6 +260,25 @@ pub struct RuleConditions {
     pub account_ids: Option<Vec<Uuid>>,
 }
 
+impl RuleConditions {
+    /// True when no field constrains anything: every field `None`, or
+    /// `account_ids` present but an empty list (the matcher treats an empty
+    /// list as "no account qualifies", and it contributes nothing to
+    /// specificity, so it is not a real condition either). Such a set must
+    /// never become a rule: all-`None` matches every transaction, and
+    /// `RuleConditions::default()` round-trips through JSON as exactly this.
+    pub fn is_empty(&self) -> bool {
+        self.counterparty_key.is_none()
+            && self.counterparty_iban.is_none()
+            && self.description_regex.is_none()
+            && self.description_contains.is_none()
+            && self.direction.is_none()
+            && self.amount_min.is_none()
+            && self.amount_max.is_none()
+            && self.account_ids.as_ref().is_none_or(|ids| ids.is_empty())
+    }
+}
+
 /// Published on [`TOPIC_RULE`] (§2.2, §2.7). Keyed by the rule's UUID. Mirrors
 /// the `rule` columns (§3) by `category_slug`, not id, plus `schema_version`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -443,6 +462,17 @@ pub struct LabelRequestRecord {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rule_conditions_is_empty() {
+        assert!(RuleConditions::default().is_empty());
+        let one = RuleConditions { direction: Some("INCOME".into()), ..Default::default() };
+        assert!(!one.is_empty());
+        let empty_ids = RuleConditions { account_ids: Some(vec![]), ..Default::default() };
+        assert!(empty_ids.is_empty());
+        let ids = RuleConditions { account_ids: Some(vec![Uuid::nil()]), ..Default::default() };
+        assert!(!ids.is_empty());
+    }
+
     use super::*;
 
     #[test]
