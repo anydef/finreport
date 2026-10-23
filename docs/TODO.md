@@ -368,6 +368,54 @@ nothing about it was found wrong.
   `/admin/amazon`, and the actual file-input upload has never been exercised.
   Review with `just dev-fe-mocks`.
 
+## Amazon apply: findings after slice 3 (2026-10-23)
+
+The feature is built, merged and tested (554 unit / 751 integration). The
+problem is not correctness — it is how rarely it will fire.
+
+- **Most real orders can never be applied** — L, and the single thing that
+  decides whether this feature earns its keep. `match_orders` returns `Apply`
+  only when the items sum **exactly** to the order total; otherwise it is
+  `OrderItemsDoNotReconcile` and `NeedsReview`
+  (`amazon-orders/src/matcher.rs`). Shipping, gift cards and promotions all
+  create a remainder, so an order carrying any of them is permanently
+  unappliable. `build_parts` can emit an explicit remainder part — spec §2.4 —
+  but nothing can reach that code, because the matcher refuses the order first.
+  Either the matcher must learn to treat a remainder as a legitimate part
+  (shipping is a real cost worth its own split), or the apply path has to accept
+  a reviewed `NeedsReview` case. Decide this before building more on top.
+- **A single-item order cannot be split at all** — M. `labels.rs:624` requires
+  at least two parts, which is correct for splitting in general, but it means a
+  one-item order shows as blocked rather than applied. Most Amazon orders are
+  one item. The honest answer may be that a single-item order needs no split -
+  only a category - in which case the page should offer that instead of a
+  blocked row.
+- **`purchase_order_split` is not a Kafka projection** — M, architectural. Every
+  other piece of state in this repo is projected from a topic; this table is
+  written directly, so it cannot be rebuilt by a replay and `just dev-reset`
+  does not truncate it. Stale rows are detected and distrusted, which is a
+  mitigation rather than a fix. Decide deliberately whether to keep the
+  exception or move it onto a topic.
+- **The entity was hand-written** — S. `CLAUDE.md` says entities are generated
+  with `sea-orm-cli` and not hand-edited; this one was written in the generated
+  style instead. Regenerate it so the next `make generate-entities` does not
+  produce a surprising diff.
+- **`splitTransaction` silently overwrites a user's split and pinned category**
+  — M, pre-existing and not introduced here. Slice 3 found it while guarding
+  against it, and put the check in the apply layer. The underlying mutation is
+  still happy to discard a manual split if called directly, which is a sharp
+  edge for any future caller.
+- **No integration test covers a multi-charge `Apply` order** — S. The
+  per-charge code path is shared, so it is covered by construction rather than
+  directly.
+- **A stale third SDL copy** exists at `webapp/graphql/schema.graphql` — XS. Two
+  copies are kept in step by `sdl_drift`; this one is not and was left alone.
+  Delete it or bring it under the drift test.
+- **Spec §2.4's "route item titles through the labeling chain" is unbuilt** — M.
+  A split part today carries an amount and a user-chosen category. Item titles
+  are kept in `purchase_order_split` for display only, and nothing categorises
+  them, so the user picks a category per item by hand on every apply.
+
 ## Housekeeping
 
 - **Delete `prompts/categories.json`** — XS. Dead since May 2026: nothing in
