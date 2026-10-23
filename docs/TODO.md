@@ -229,15 +229,22 @@ the semantics, which the user decided and which should not be re-litigated.
   `Account.isSavings` required.
   Split it into three briefs, not one (storage / read side / UI wiring) - the
   single end-to-end brief is what ran long.
-- **Four open questions on the card's shape** — S, needs the user not an agent.
-  Unanswered when the work paused, so the preview was built on my own choices:
-  (1) is "Put aside / net / 900.00 in, 250.00 out" the right headline, or
-  should in and out be separate figures; (2) keep the overlap disclosure
-  (`50.00 EUR of this was spent straight from a savings account, so it also
-  appears under spending`); (3) keep the excluded-internal-movement note;
-  (4) is `/admin/accounts` the right home for the savings toggle. Also whether
-  the per-account In/Out/Net table is the right level of detail. Review with
-  `just dev-fe-mocks` at `/savings-preview`.
+- **Card shape: decided 2026-10-23.** All four questions answered by the user,
+  so slice 3 builds these rather than re-asking:
+  1. **Headline stays as previewed** - net figure with both sides under it
+     ("Put aside / 650.00 EUR / 900.00 in, 250.00 out").
+  2. **Keep the overlap disclosure, reworded.** The previewed wording talked
+     about cards rather than money; drop the second sentence and use one:
+     `Includes 50.00 EUR spent directly from savings, which also counts as
+     spending.` "Includes" is the load-bearing word - it says the headline
+     figure already has that amount in it, which is the thing a reader
+     otherwise gets wrong. Update `savingsOverlapNote` in
+     `finreport-fe/src/lib/savingsView.ts` and its test.
+  3. **Keep the excluded-internal-movement note** as previewed.
+  4. **The savings toggle goes in the admin area** - a new `/admin/accounts`
+     page, added to the `admin/+layout.svelte` sub-tabs next to "Nicknames".
+  Still unasked: whether the per-account In/Out/Net table is the right level
+  of detail. Built as previewed unless the user says otherwise.
 - **`/compare` still excludes savings** — S. `CATEGORY_COMPARISON_QUERY` in
   `finreport-fe/src/lib/graphql/queries.ts` defaults to
   `$kind: CategoryKind! = EXPENSE`, the same default that hid savings on the
