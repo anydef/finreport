@@ -25,6 +25,12 @@ import {
 	type LinkableMock
 } from '$lib/graphql/linksMock';
 
+import {
+	MOCK_SAVINGS_ACCOUNTS,
+	isSavingsAccount,
+	mockSavingsSummary,
+	setSavingsAccount
+} from '$lib/graphql/savingsMock';
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
 import cashflowGraphNetDeficitMock from '$lib/graphql/mocks/cashflow-graph-net-deficit.json';
@@ -651,6 +657,30 @@ function mockDisplayAliases(): unknown {
 		: { displayAliases: [...mockAliases] };
 }
 
+/** The frozen accounts plus the two savings accounts, with the session's savings flags. */
+function mockAccountsWithSavings() {
+	return [...accountsMock.data.accounts, ...MOCK_SAVINGS_ACCOUNTS].map((a) => ({
+		...a,
+		isSavings: isSavingsAccount(a.id)
+	}));
+}
+
+/** `savingsSummary` is null when the panel's account selection holds no marked account. */
+function mockSavingsSummaryFor(filter: Record<string, unknown> | undefined): unknown {
+	const selected = filter?.accountIds;
+	if (Array.isArray(selected) && selected.length > 0) {
+		if (!selected.some((id) => isSavingsAccount(String(id)))) return { savingsSummary: null };
+	}
+	return mockSavingsSummary();
+}
+
+function mockSetAccountSavings(variables: Record<string, unknown> | undefined) {
+	const id = String(variables?.accountId ?? '');
+	if (!mockAccountsWithSavings().some((a) => a.id === id)) return null;
+	setSavingsAccount(id, Boolean(variables?.isSavings));
+	return { id, isSavings: isSavingsAccount(id) };
+}
+
 function mockSetDisplayAlias(variables: Record<string, unknown> | undefined): MockDisplayAlias {
 	const kind = String(variables?.kind ?? 'COUNTERPARTY');
 	const rawKey = String(variables?.key ?? '').trim();
@@ -852,7 +882,32 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'Logout':
 			return mockLogout();
 		case 'Accounts':
-			return { status: 200, body: { data: accountsMock.data }, setCookies: [] };
+			return {
+				status: 200,
+				body: { data: { accounts: mockAccountsWithSavings() } },
+				setCookies: []
+			};
+		case 'SavingsSummary':
+			return {
+				status: 200,
+				body: {
+					data: mockSavingsSummaryFor(body.variables?.filter as Record<string, unknown> | undefined)
+				},
+				setCookies: []
+			};
+		case 'SetAccountSavings': {
+			const account = mockSetAccountSavings(body.variables);
+			return account
+				? { status: 200, body: { data: { setAccountSavings: account } }, setCookies: [] }
+				: {
+						status: 200,
+						body: {
+							data: null,
+							errors: [{ message: 'account not found', extensions: { code: 'NOT_FOUND' } }]
+						},
+						setCookies: []
+					};
+		}
 		case 'Transactions':
 			return { status: 200, body: { data: mockTransactions(body.variables) }, setCookies: [] };
 		case 'CashflowSummary':

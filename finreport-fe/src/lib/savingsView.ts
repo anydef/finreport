@@ -43,14 +43,14 @@ function fmt(n: number): string {
  * The note that keeps the two cards honest.
  *
  * Net-balance-change semantics mean a payment made straight from a savings
- * account counts here *and* in the spending card. The figures are correct but
- * they are not a partition, so anyone adding them up would double-count. The
- * card says so, and only when there is actually such a payment.
+ * account counts here *and* in the spending card. "Includes" says the headline
+ * already contains that amount, so nobody adds the two cards up. Shown only
+ * when there is actually such a payment.
  */
 export function savingsOverlapNote(summary: SavingsSummary): string | null {
 	const spent = decimalToNumber(summary.spentDirectly);
 	if (spent <= 0) return null;
-	return `${fmt(spent)} ${summary.currency} of this was spent straight from a savings account, so it also appears under spending. The two cards overlap by that much.`;
+	return `Includes ${fmt(spent)} ${summary.currency} spent directly from savings, which also counts as spending.`;
 }
 
 /**
@@ -64,4 +64,31 @@ export function savingsInternalNote(summary: SavingsSummary): string | null {
 	return n === 1
 		? 'One movement between two savings accounts is not counted: it changes no total.'
 		: `${n} movements between savings accounts are not counted: they change no total.`;
+}
+
+/** What the dashboard's savings card shows. */
+export type SavingsCardState =
+	| { kind: 'hidden' }
+	| { kind: 'summary'; summary: SavingsSummary }
+	| { kind: 'mixed-currency'; message: string };
+
+export const MIXED_CURRENCY_MESSAGE =
+	'Your savings accounts are in more than one currency, so they cannot be added into one figure. Narrow the account filter to accounts of a single currency to see it.';
+
+/**
+ * Decide what to render from a `savingsSummary` result. Never throws and never
+ * asks the dashboard to fail: no summary (nothing marked, or the account
+ * filter excludes every marked account) and any unexpected error both hide the
+ * card; only the mixed-currency `VALIDATION` error gets an explanation, because
+ * the user can act on it.
+ */
+export function savingsCardState(
+	summary: SavingsSummary | null | undefined,
+	error: { code?: string | null; message?: string } | null | undefined
+): SavingsCardState {
+	if (error) {
+		const mixed = error.code === 'VALIDATION' && /currenc/i.test(error.message ?? '');
+		return mixed ? { kind: 'mixed-currency', message: MIXED_CURRENCY_MESSAGE } : { kind: 'hidden' };
+	}
+	return summary ? { kind: 'summary', summary } : { kind: 'hidden' };
 }

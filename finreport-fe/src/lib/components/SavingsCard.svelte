@@ -12,14 +12,20 @@
 -->
 <script lang="ts">
 	import Card from './Card.svelte';
-	import { savingsHeadline, savingsInternalNote, savingsOverlapNote } from '$lib/savingsView';
+	import {
+		savingsHeadline,
+		savingsInternalNote,
+		savingsOverlapNote,
+		type SavingsCardState
+	} from '$lib/savingsView';
 	import { decimalToNumber } from '$lib/chartShaping';
-	import type { SavingsSummary } from '$lib/graphql/types';
-
+	
 	interface Props {
-		summary: SavingsSummary | null;
+		state: SavingsCardState;
 	}
-	let { summary }: Props = $props();
+	let { state }: Props = $props();
+
+	const summary = $derived(state.kind === 'summary' ? state.summary : null);
 
 	const headline = $derived(summary ? savingsHeadline(summary) : null);
 	const overlap = $derived(summary ? savingsOverlapNote(summary) : null);
@@ -38,12 +44,12 @@
 	};
 </script>
 
-<Card title="Savings">
-	{#if !summary}
-		<p class="text-sm text-slate-500">
-			No accounts are marked as savings yet. Mark one below and this figure appears.
-		</p>
-	{:else if headline}
+{#if state.kind === 'mixed-currency'}
+	<Card title="Savings">
+		<p class="text-sm text-slate-600" data-testid="savings-mixed-currency">{state.message}</p>
+	</Card>
+{:else if summary && headline}
+	<Card title="Savings">
 		<div class="mb-4">
 			<p class="text-sm text-slate-500">{headline.label}</p>
 			<p class={`text-3xl font-semibold tabular-nums ${toneClass[headline.tone]}`}>
@@ -91,5 +97,5 @@
 				{/if}
 			</div>
 		{/if}
-	{/if}
-</Card>
+	</Card>
+{/if}

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { savingsHeadline, savingsInternalNote, savingsOverlapNote } from './savingsView';
+import {
+	MIXED_CURRENCY_MESSAGE,
+	savingsCardState,
+	savingsHeadline,
+	savingsInternalNote,
+	savingsOverlapNote
+} from './savingsView';
 import type { SavingsSummary } from './graphql/types';
 
 const summary = (over: Partial<SavingsSummary> = {}): SavingsSummary =>
@@ -54,8 +60,9 @@ describe('savingsOverlapNote', () => {
 	// The two cards are each correct but are not a partition; adding them
 	// double-counts whatever was spent straight from savings.
 	it('discloses the overlap with the spending card', () => {
-		expect(savingsOverlapNote(summary())).toContain('50.00 EUR');
-		expect(savingsOverlapNote(summary())).toContain('also appears under spending');
+		expect(savingsOverlapNote(summary())).toBe(
+			'Includes 50.00 EUR spent directly from savings, which also counts as spending.'
+		);
 	});
 
 	it('says nothing when no money was spent straight from savings', () => {
@@ -73,5 +80,36 @@ describe('savingsInternalNote', () => {
 	it('pluralises and stays silent at zero', () => {
 		expect(savingsInternalNote(summary({ internalTransferCount: 3 }))).toContain('3 movements');
 		expect(savingsInternalNote(summary({ internalTransferCount: 0 }))).toBeNull();
+	});
+});
+
+describe('savingsCardState', () => {
+	it('shows the summary when there is one', () => {
+		const s = summary();
+		expect(savingsCardState(s, null)).toEqual({ kind: 'summary', summary: s });
+	});
+
+	it('renders nothing for a null summary (nothing marked, or filtered out)', () => {
+		expect(savingsCardState(null, null)).toEqual({ kind: 'hidden' });
+		expect(savingsCardState(undefined, undefined)).toEqual({ kind: 'hidden' });
+	});
+
+	it('degrades the mixed-currency VALIDATION error to an explanation', () => {
+		const state = savingsCardState(null, {
+			code: 'VALIDATION',
+			message: 'savings accounts span several currencies (EUR, USD); select accounts of one currency'
+		});
+		expect(state).toEqual({ kind: 'mixed-currency', message: MIXED_CURRENCY_MESSAGE });
+		expect(MIXED_CURRENCY_MESSAGE).toContain('Narrow the account filter');
+	});
+
+	it('hides the card on any other error instead of failing the dashboard', () => {
+		expect(savingsCardState(null, { code: 'INTERNAL', message: 'boom' })).toEqual({
+			kind: 'hidden'
+		});
+		expect(savingsCardState(null, { code: 'VALIDATION', message: 'bad filter' })).toEqual({
+			kind: 'hidden'
+		});
+		expect(savingsCardState(null, { message: 'network down' })).toEqual({ kind: 'hidden' });
 	});
 });
