@@ -581,11 +581,12 @@ Open, deliberately not fixed in those slices:
 - **Three independent LLM budgets** now: the labeler, the per-order mutation
   and the upload. `APP_llm_max_requests_per_run` bounds none of them in
   total. One worse in count than the 2026-10-23 finding, not in kind.
-- **The `fake` provider answers.** `APP_llm_provider` defaults to `fake`, so a
-  local upload writes fake suggestions into `finreport.llm-cache` against real
-  data. The per-order button already had this exposure; automation makes it
-  certain. Decide whether the upload path should skip a `fake` provider
-  entirely.
+- ~~The `fake` provider answers.~~ Closed 2026-10-24: `warm_inner` returns
+  early when `APP_llm_provider` is `fake`, so an import never stores invented
+  categories against real orders. Rules still answer on the read path, and the
+  per-order mutation is still available for a deliberate run — it is unchanged,
+  so pressing the button with a `fake` provider still caches fake answers. That
+  is a decision the user makes per order, not one an import makes for them.
 - **`ProposalSource::LLM` cannot occur on the read path** (it resolves from
   rule and cache only), so the "Suggested by AI, check it" badge is reachable
   only through the mutation. The frontend mock fakes one so the badge can be

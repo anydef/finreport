@@ -313,6 +313,13 @@ async fn decide_item(
 
 /// The configured provider, or `None` (logged) when it cannot be built. Building
 /// only constructs a client; it makes no network call.
+/// The default provider invents answers (`APP_llm_provider`, §2.9). True when
+/// nothing paid is configured, so no answer from it is worth storing. Takes
+/// the name rather than the whole `Settings` so it is unit-testable.
+pub fn is_fake_provider(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case("fake")
+}
+
 fn build_provider_or_warn(settings: &utils::settings::Settings) -> Option<Box<dyn LabelProvider>> {
     match categorizer::factory::build_provider(settings) {
         Ok(p) => Some(p),
@@ -465,6 +472,15 @@ async fn warm_inner(
 ) -> Result<(), sea_orm::DbErr> {
     let rules = proj::active_rules(db).await?;
     let catalog = proj::build_catalog(db).await?;
+    // The `fake` provider answers, so warming with it would write invented
+    // categories into the LLM cache against the user's real orders - silently,
+    // on every import, since `fake` is the default. Rules still answer on the
+    // read path, and the per-order mutation stays available for a deliberate
+    // run. Only an explicitly configured provider may be warmed against.
+    if is_fake_provider(&settings.llm_provider) {
+        debug!("purchase-order proposals: provider is 'fake'; not warming suggestions after upload");
+        return Ok(());
+    }
     let Some(provider) = build_provider_or_warn(settings) else {
         return Ok(()); // Rules answer on the read path; nothing to warm.
     };
@@ -495,6 +511,17 @@ async fn warm_inner(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn only_a_configured_provider_is_warmed_against() {
+        // `fake` is the default, so an import must not store its invented
+        // answers against the user's real orders.
+        assert!(super::is_fake_provider("fake"));
+        assert!(super::is_fake_provider("  FAKE  "));
+        assert!(!super::is_fake_provider("anthropic"));
+        assert!(!super::is_fake_provider("ollama"));
+        assert!(!super::is_fake_provider("openai"));
+    }
+
     use super::*;
     use crate::kafka::labeling::{RuleConditions, RuleOrigin, RuleState};
     use rust_decimal::Decimal;
