@@ -264,6 +264,36 @@ the excess of an over-reimbursement reported as `surplus`.
   projection, so a replay cannot fail on it).
 - The list resolvers prefetch `Transaction.link` per page (`graphql::links::prefetch_page`).
 
+## Amazon purchase orders
+
+The `amazon-orders` crate holds the CSV parser and the order-to-charge matcher
+as pure functions (no database, Kafka or GraphQL), so the risky logic is
+testable in isolation. Orders are **evidence about** transactions, never
+transactions themselves - publishing one as a transaction would double-count
+the purchase, since the bank line already exists.
+
+Stored on the compacted topic `finreport.purchase-order`, keyed
+`<user_id>:<source>:<order_id>` (`prevent_destroy`, mirrored in
+`terraform/kafka/main.tf` and `docker-compose.local.yml`), projected to
+`purchase_order` / `purchase_order_item` by `projection::purchase_orders`.
+Revision-guarded last-writer-wins; a tombstone deletes the order and its items.
+
+- **`amazon_orders::Order` is now a wire contract.** The record wraps it
+  unchanged to avoid a translation layer, so its serde shape *is* the payload:
+  renaming a field or a `PriceBasis` variant in the crate silently breaks
+  every stored record. Any such change needs a `schema_version` bump and a
+  migration path, not just a passing test suite.
+- **The export's six recipient-address columns are never stored or logged.**
+  The parser validates them in the header and then never reads them, `Order`
+  and `Item` have no recipient fields, and an integration test smuggles
+  `recipient_*` values in at record, order and item level then asserts no
+  column name and no stored value matches. Keep that property.
+- Poison-record logs carry the serde error's class, line and column only -
+  never its text, which can quote payload values.
+- The matcher applies a split only when exactly one assignment reconciles;
+  otherwise it returns `NeedsReview` with a user-facing reason. The upload
+  flow therefore needs a review surface, not just a success path.
+
 ## Savings
 
 Two separate things, both easy to get wrong:
