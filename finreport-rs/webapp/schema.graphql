@@ -802,6 +802,13 @@ type Query {
 	"""
 	reimbursementSummary(filter: TransactionFilter): ReimbursementSummary!
 	"""
+	Net change across the accounts the caller marked as savings, over the
+	filter's period and panel; `null` when none is marked (or none is in
+	the panel's account selection). Savings-to-savings movements net to
+	nothing; see `SavingsSummary`.
+	"""
+	savingsSummary(filter: TransactionFilter!): SavingsSummary
+	"""
 	What is waiting for the user: uncategorised and held-for-review
 	transactions with their worth. All-time, across the caller's accounts.
 	"""
@@ -997,6 +1004,53 @@ enum RuleState {
 	IN_REVIEW
 	REVOKED
 	REJECTED
+}
+
+"""
+One savings account's flows over the period.
+"""
+type SavingsAccountFlow {
+	account: Account!
+	"""
+	Money that arrived in the account.
+	"""
+	paidIn: Decimal!
+	"""
+	Money that left it, as a positive magnitude.
+	"""
+	withdrawn: Decimal!
+	"""
+	`paidIn - withdrawn`; negative when the period drew the account down.
+	"""
+	net: Decimal!
+}
+
+"""
+Net change across the accounts the caller marked as savings, over the same
+period and panel filter as the rest of the dashboard.
+
+Movements between two savings accounts are excluded (they change no
+total); `internalTransferCount` says how many.
+"""
+type SavingsSummary {
+	currency: String!
+	"""
+	`paidIn - withdrawn` across every savings account.
+	"""
+	netPutAside: Decimal!
+	paidIn: Decimal!
+	withdrawn: Decimal!
+	accounts: [SavingsAccountFlow!]!
+	"""
+	Savings-to-savings movements excluded as self-cancelling, counted as
+	movements (two rows are one movement).
+	"""
+	internalTransferCount: Int!
+	"""
+	Of `withdrawn`, the part that went to an outside payee rather than to
+	another of the caller's accounts - so it is also in the spending card.
+	"""
+	spentDirectly: Decimal!
 }
 
 enum ScopeCombine {

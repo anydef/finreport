@@ -1044,7 +1044,7 @@ mod display_aliases {
 }
 
 // ---------------------------------------------------------------------------
-// Savings accounts: the per-user flag (storage + write path)
+// Savings accounts: the per-user flag (storage + write path) and savingsSummary
 // ---------------------------------------------------------------------------
 
 mod savings {
@@ -1199,6 +1199,242 @@ mod savings {
             .unwrap()
             .unwrap();
         assert_eq!(row.revision.timestamp_micros(), newer.timestamp_micros());
+    }
+
+    // -- savingsSummary ------------------------------------------------------
+
+    use rust_decimal::Decimal;
+    use sea_orm::{ActiveModelTrait, Set};
+    use std::str::FromStr;
+
+    fn dec(s: &str) -> Decimal {
+        Decimal::from_str(s).unwrap()
+    }
+
+    /// Marks two transactions as the two legs of one detected transfer.
+    async fn pair_as_transfer(db: &DatabaseConnection, a: Uuid, b: Uuid) {
+        for (id, other) in [(a, b), (b, a)] {
+            entity::entities::transaction_insight::ActiveModel {
+                transaction_id: Set(id),
+                is_transfer: Set(true),
+                transfer_counterpart_id: Set(Some(other)),
+                transfer_match: Set(Some("amount_date".to_string())),
+                is_recurring: Set(false),
+                recurring_series_id: Set(None),
+                recurring_cadence: Set(None),
+                recurring_median_amount: Set(None),
+                detected_at: Set(Utc::now().into()),
+                revision: Set(Utc::now().into()),
+            }
+            .insert(db)
+            .await
+            .unwrap();
+        }
+    }
+
+    /// An extra, ordinary (never flagged) account of the same user.
+    async fn checking(db: &DatabaseConnection, t: &mut Tenant) -> Uuid {
+        let id = common::seed_account(db, "EUR", "Giro").await;
+        common::link(db, t.user.user_id, id).await;
+        t.user.account_ids.push(id);
+        id
+    }
+
+    /// `savingsSummary(filter: {<filter>})`, as JSON (`null` when absent).
+    async fn summary(
+        schema: &webapp::graphql::AppSchema,
+        user: &AuthenticatedUser,
+        filter: &str,
+    ) -> serde_json::Value {
+        let query = format!(
+            "{{ savingsSummary(filter: {{ {filter} }}) {{ currency netPutAside paidIn withdrawn \
+             internalTransferCount spentDirectly accounts {{ account {{ id }} paidIn withdrawn net }} }} }}"
+        );
+        let response = schema.execute(authed(Request::new(query), Some(user.clone()))).await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        response.data.into_json().unwrap()["savingsSummary"].clone()
+    }
+
+    fn money(v: &serde_json::Value, key: &str) -> Decimal {
+        dec(v[key].as_str().unwrap_or_else(|| panic!("{key} missing in {v}")))
+    }
+
+    const YEAR: &str = r#"startDate: "2024-01-01", endDate: "2024-12-31""#;
+
+    #[tokio::test]
+    async fn savings_summary_is_null_until_an_account_is_marked_then_reflects_it() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let t = tenant(&db, &format!("sv-sum-{}", Uuid::new_v4().simple())).await;
+        common::seed_transaction(&db, t.s1, "2024-03-01", "100", Some("Employer")).await;
+        common::seed_transaction(&db, t.s1, "2024-03-05", "-30", Some("Shop")).await;
+
+        assert!(summary(&schema, &t.user, YEAR).await.is_null(), "no account marked");
+
+        flag(&db, t.user.user_id, t.s1, true).await;
+        let s = summary(&schema, &t.user, YEAR).await;
+        assert_eq!(s["currency"], "EUR");
+        assert_eq!(
+            (money(&s, "paidIn"), money(&s, "withdrawn"), money(&s, "netPutAside")),
+            (dec("100"), dec("30"), dec("70"))
+        );
+        assert_eq!(money(&s, "spentDirectly"), dec("30"), "a payment to a shop is also spending");
+        assert_eq!(s["internalTransferCount"], 0);
+        assert_eq!(s["accounts"].as_array().unwrap().len(), 1);
+
+        flag(&db, t.user.user_id, t.s1, false).await;
+        assert!(summary(&schema, &t.user, YEAR).await.is_null(), "unmarking returns to null");
+    }
+
+    #[tokio::test]
+    async fn a_savings_to_savings_transfer_nets_to_zero_and_is_counted_once() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let mut t = tenant(&db, &format!("sv-int-{}", Uuid::new_v4().simple())).await;
+        let giro = checking(&db, &mut t).await;
+        flag(&db, t.user.user_id, t.s1, true).await;
+        flag(&db, t.user.user_id, t.s2, true).await;
+
+        // 50 moves s1 -> s2 (both legs are rows, both flagged by the detector).
+        let out = common::seed_transaction(&db, t.s1, "2024-03-02", "-50", Some("Own account")).await;
+        let into = common::seed_transaction(&db, t.s2, "2024-03-02", "50", Some("Own account")).await;
+        pair_as_transfer(&db, out, into).await;
+        // 200 comes in from the checking account: a real deposit, counted once.
+        let from_giro = common::seed_transaction(&db, giro, "2024-03-03", "-200", Some("Own account")).await;
+        let to_s1 = common::seed_transaction(&db, t.s1, "2024-03-03", "200", Some("Own account")).await;
+        pair_as_transfer(&db, from_giro, to_s1).await;
+        // 20 goes back to checking: a withdrawal, but not spending.
+        let from_s2 = common::seed_transaction(&db, t.s2, "2024-03-04", "-20", Some("Own account")).await;
+        let to_giro = common::seed_transaction(&db, giro, "2024-03-04", "20", Some("Own account")).await;
+        pair_as_transfer(&db, from_s2, to_giro).await;
+
+        let s = summary(&schema, &t.user, YEAR).await;
+        assert_eq!(
+            (money(&s, "paidIn"), money(&s, "withdrawn"), money(&s, "netPutAside")),
+            (dec("200"), dec("20"), dec("180"))
+        );
+        assert_eq!(s["internalTransferCount"], 1, "two rows, one movement");
+        assert_eq!(money(&s, "spentDirectly"), dec("0"), "transfers to own accounts are not spending");
+        let per_account: Vec<Decimal> = s["accounts"].as_array().unwrap().iter().map(|a| money(a, "net")).collect();
+        assert_eq!(per_account.iter().sum::<Decimal>(), dec("180"));
+    }
+
+    #[tokio::test]
+    async fn savings_summary_honours_the_period_and_the_panel_filter() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let t = tenant(&db, &format!("sv-flt-{}", Uuid::new_v4().simple())).await;
+        flag(&db, t.user.user_id, t.s1, true).await;
+        flag(&db, t.user.user_id, t.s2, true).await;
+        common::seed_transaction(&db, t.s1, "2024-01-10", "100", Some("Employer")).await;
+        common::seed_transaction(&db, t.s1, "2024-06-10", "300", Some("Employer")).await;
+        common::seed_transaction(&db, t.s2, "2024-06-11", "7", Some("Bank interest")).await;
+        // A leg of an s1 -> s2 movement lands in June; its counterpart is on s2 in July.
+        let out = common::seed_transaction(&db, t.s1, "2024-06-30", "-40", Some("Own account")).await;
+        let into = common::seed_transaction(&db, t.s2, "2024-07-01", "40", Some("Own account")).await;
+        pair_as_transfer(&db, out, into).await;
+
+        let jan = summary(&schema, &t.user, r#"startDate: "2024-01-01", endDate: "2024-01-31""#).await;
+        assert_eq!(money(&jan, "paidIn"), dec("100"));
+        let june = summary(&schema, &t.user, r#"startDate: "2024-06-01", endDate: "2024-06-30""#).await;
+        assert_eq!((money(&june, "paidIn"), money(&june, "withdrawn")), (dec("307"), dec("0")));
+        assert_eq!(june["internalTransferCount"], 1, "the in-period leg still counts as one movement");
+
+        // Panel: narrowed to s1 only, s2's interest drops out and the s2 leg stays internal.
+        let only_s1 = summary(
+            &schema,
+            &t.user,
+            &format!(r#"startDate: "2024-06-01", endDate: "2024-06-30", accountIds: ["{}"]"#, t.s1),
+        )
+        .await;
+        assert_eq!(only_s1["accounts"].as_array().unwrap().len(), 1);
+        assert_eq!((money(&only_s1, "paidIn"), money(&only_s1, "withdrawn")), (dec("300"), dec("0")));
+
+        // Panel: a search that matches only the interest.
+        let search = summary(&schema, &t.user, &format!(r#"{YEAR}, search: "interest""#)).await;
+        assert_eq!((money(&search, "paidIn"), money(&search, "withdrawn")), (dec("7"), dec("0")));
+
+        // Panel: an account selection holding no savings account has nothing to show.
+        let giro = {
+            let mut t2 = Tenant { user: t.user.clone(), s1: t.s1, s2: t.s2 };
+            let id = checking(&db, &mut t2).await;
+            (id, t2.user)
+        };
+        let none = summary(&schema, &giro.1, &format!(r#"{YEAR}, accountIds: ["{}"]"#, giro.0)).await;
+        assert!(none.is_null());
+    }
+
+    #[tokio::test]
+    async fn another_users_accounts_and_flags_never_leak_into_the_summary() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let alice = tenant(&db, &format!("sv-leak-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("sv-leak-b-{}", Uuid::new_v4().simple())).await;
+        flag(&db, alice.user.user_id, alice.s1, true).await;
+        common::seed_transaction(&db, alice.s1, "2024-03-01", "1000", Some("Employer")).await;
+        common::seed_transaction(&db, bob.s1, "2024-03-01", "5", Some("Employer")).await;
+
+        // Bob has marked nothing: Alice's flag is not his.
+        assert!(summary(&schema, &bob.user, YEAR).await.is_null());
+
+        // Bob can see Alice's account (shared) but flags only his own: Alice's flows stay out.
+        common::link(&db, bob.user.user_id, alice.s1).await;
+        let bob_user = AuthenticatedUser {
+            account_ids: [bob.user.account_ids.clone(), vec![alice.s1]].concat(),
+            ..bob.user.clone()
+        };
+        flag(&db, bob.user.user_id, bob.s1, true).await;
+        let bobs = summary(&schema, &bob_user, YEAR).await;
+        assert_eq!(money(&bobs, "paidIn"), dec("5"));
+        assert_eq!(bobs["accounts"].as_array().unwrap().len(), 1);
+
+        // Alice sees only hers, and asking for an account that is not hers is refused.
+        let alices = summary(&schema, &alice.user, YEAR).await;
+        assert_eq!(money(&alices, "paidIn"), dec("1000"));
+        let query = format!(
+            r#"{{ savingsSummary(filter: {{ accountIds: ["{}"] }}) {{ paidIn }} }}"#,
+            bob.s1
+        );
+        let refused = schema.execute(authed(Request::new(query), Some(alice.user.clone()))).await;
+        assert!(refused.errors[0].message.contains("not accessible"), "{:?}", refused.errors);
+    }
+
+    #[tokio::test]
+    async fn a_counterpart_on_someone_elses_savings_flag_is_not_internal() {
+        // Alice's s1 pairs with Bob's account; only Alice's own flags decide "internal".
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let alice = tenant(&db, &format!("sv-cp-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("sv-cp-b-{}", Uuid::new_v4().simple())).await;
+        flag(&db, alice.user.user_id, alice.s1, true).await;
+        flag(&db, bob.user.user_id, bob.s1, true).await;
+        let out = common::seed_transaction(&db, alice.s1, "2024-03-02", "-25", Some("Bob")).await;
+        let into = common::seed_transaction(&db, bob.s1, "2024-03-02", "25", Some("Alice")).await;
+        pair_as_transfer(&db, out, into).await;
+
+        let s = summary(&schema, &alice.user, YEAR).await;
+        assert_eq!(money(&s, "withdrawn"), dec("25"));
+        assert_eq!(s["internalTransferCount"], 0);
+    }
+
+    #[tokio::test]
+    async fn savings_accounts_in_different_currencies_are_refused_not_summed() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let mut t = tenant(&db, &format!("sv-ccy-{}", Uuid::new_v4().simple())).await;
+        let usd = common::seed_account(&db, "USD", "Dollar savings").await;
+        common::link(&db, t.user.user_id, usd).await;
+        t.user.account_ids.push(usd);
+        flag(&db, t.user.user_id, t.s1, true).await;
+        flag(&db, t.user.user_id, usd, true).await;
+
+        let query = format!("{{ savingsSummary(filter: {{ {YEAR} }}) {{ paidIn }} }}");
+        let response = schema.execute(authed(Request::new(query), Some(t.user.clone()))).await;
+        assert!(response.errors[0].message.contains("several currencies"), "{:?}", response.errors);
+
+        // Narrowing to one currency is the way out.
+        let eur = summary(&schema, &t.user, &format!(r#"{YEAR}, accountIds: ["{}"]"#, t.s1)).await;
+        assert_eq!(eur["currency"], "EUR");
     }
 
     async fn table_exists(conn: &DatabaseConnection) -> bool {

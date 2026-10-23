@@ -285,6 +285,27 @@ impl QueryRoot {
         crate::graphql::links::fetch_reimbursement_summary(db, &scoped_ids, &filter).await
     }
 
+    /// Net change across the accounts the caller marked as savings, over the
+    /// filter's period and panel; `null` when none is marked (or none is in
+    /// the panel's account selection). Savings-to-savings movements net to
+    /// nothing; see `SavingsSummary`.
+    async fn savings_summary(
+        &self,
+        ctx: &Context<'_>,
+        filter: TransactionFilter,
+    ) -> GqlResult<Option<crate::graphql::savings::SavingsSummary>> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let mut filter = filter;
+        filter.viewer = Some(user.user_id);
+        let requested_ids: Option<Vec<uuid::Uuid>> = filter
+            .account_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0).collect());
+        let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
+        crate::graphql::savings::fetch_savings_summary(db, user, &scoped_ids, &filter).await
+    }
+
     /// What is waiting for the user: uncategorised and held-for-review
     /// transactions with their worth. All-time, across the caller's accounts.
     async fn attention_summary(&self, ctx: &Context<'_>) -> GqlResult<attention::AttentionSummary> {
