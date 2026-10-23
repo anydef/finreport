@@ -304,6 +304,40 @@ the semantics, which the user decided and which should not be re-litigated.
   locally that topic was created **without compaction**, diverging from
   Terraform. Fixed in slice 1; worth a sweep for others like it.
 
+## PayPal: paused 2026-10-23
+
+Paused by the user in favour of finishing the Amazon ingest, where the data is
+real and already in hand. The spec `docs/specs/iteration-5-paypal.md` stands;
+nothing about it was found wrong.
+
+- **Why it stopped, not just that it did.** §4 of the spec asks for a recorded
+  sandbox payload, on the reasoning that "the mapper is where a provider's
+  surprises surface". The user has no PayPal sandbox account, so any fixture we
+  write is hand-made from the documented response shape: it proves our logic
+  self-consistent, not that PayPal behaves as documented. Building the mapper
+  against synthetic payloads means every field PayPal returns differently
+  surfaces on the first live run instead of in tests.
+- **Where the work is.** Commit `7ad6e7e` on branch
+  `worktree-agent-a079872cd80f0ce44`: 571 lines of crate skeleton
+  (`window.rs`, `watermark.rs`, `token.rs`, `error.rs`, `lib.rs`) plus the
+  workspace member entry. **Never compiled or tested** — the agent was stopped
+  partway. No mapper, no projector wiring, no binary, no credential store.
+- **Three ways to resume**, in rough order of cost:
+  1. A **free developer app** at developer.paypal.com gives sandbox
+     credentials in minutes and satisfies the spec's own testing requirement.
+     This is the cheapest unblock.
+  2. **CSV export** from PayPal's web UI instead of the API: real data the user
+     can produce today, no OAuth, no windowing, no watermark, no deployed
+     service, and it reuses the Amazon upload path. A different design from the
+     spec, and manual per import rather than automatic.
+  3. **Build the API path untested** and accept that the first real run is the
+     first real test.
+- Also still open from the spec: which `transaction_status` values to import
+  and how a status change is represented without creating two rows; whether
+  refunds need special handling (verify, do not assume); whether to publish one
+  `account-balance` per currency; and that the 3-year limit makes a first
+  import incomplete by nature, which belongs in the runbook.
+
 ## Housekeeping
 
 - **Delete `prompts/categories.json`** — XS. Dead since May 2026: nothing in
