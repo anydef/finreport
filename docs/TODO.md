@@ -485,3 +485,51 @@ problem is not correctness — it is how rarely it will fire.
   family members' names and ~6 months of real transactions. Pre-existing and
   committed long ago, so the history carries it too; scrubbing the file only
   helps future readers. Worth deciding on deliberately.
+
+## Decided: an unreconciled Amazon order stays unapplied (2026-10-23)
+
+The user's call, when asked whether to make a `NeedsReview` order applicable
+by treating the leftover as its own part: **leave it hanging.** Their reasoning,
+verbatim: *"no transaction -> no expense. Counting transaction and amazon
+unmacthed order is a double expense."*
+
+This affirms the invariant already in CLAUDE.md — orders are evidence about
+transactions, never transactions themselves. An order that cannot be tied to a
+bank line must therefore contribute nothing to spending, and the review surface
+must never imply otherwise.
+
+Consequences, accepted deliberately:
+
+- An order whose items do not sum exactly to the order total (shipping, a gift
+  card, a promotion) can never be applied. `amazon-orders`'s matcher returns
+  `OrderItemsDoNotReconcile` and `graphql/purchase_order_apply.rs`'s
+  `build_parts` remainder path stays unreachable. Most real orders are in this
+  state, so the apply feature covers a narrow slice by design, not by accident.
+- A single-item order still cannot be split at all (`graphql/labels.rs:624`,
+  `if parts.len() < 2`). Such an order needs a category, not a split; the page
+  should offer that rather than a dead row. Still open — XS/S, and the only
+  part of the dead end worth revisiting.
+- The review list is informational: reason, totals, charges, no control. That
+  is now intended behaviour, not a gap. Do not "fix" it by making unmatched
+  orders applicable.
+
+## Labeling-engine findings from the proposal slice (2026-10-23)
+
+- **The labeler never publishes the LLM cache to Kafka** — M, real
+  inconsistency. `resolve_transaction` calls only `project_llm_cache`
+  (Postgres); `TOPIC_LLM_CACHE` is used solely for the labeler's lag check. So
+  the cache is not a projection like everything else, and a replay or
+  `just dev-reset` discards every answer the labeler paid an LLM for.
+  `proposePurchaseOrderCategories` publishes *and* projects, so the new path is
+  more durable than the old one. Close the gap on the labeler's side.
+- **Two independent LLM cost guards** — S. The labeler's guard is per process;
+  the proposal mutation builds a fresh `CostGuard` per call, so the two spend
+  against separate budgets and `APP_llm_max_requests_per_run` no longer bounds
+  total spend. Budget exhaustion is at least visible: the item returns `NONE`
+  with `reason: "llm_budget_exhausted"` plus one `warn`.
+- **The item fingerprint is not item-specific** — nil, noted. A bank line whose
+  normalised counterparty equals an item's normalised title (with an empty
+  description) shares the cache row. Acceptable, but it is an overlap.
+- **A rule with only a `direction` condition would match every item.** Harmless
+  now that empty-condition rules are refused everywhere, but the same shape as
+  the bug fixed in `41b4ad3`.
