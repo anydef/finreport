@@ -274,6 +274,36 @@ the semantics, which the user decided and which should not be re-litigated.
   can point at a rule that no longer exists, and the link should degrade to
   naming it rather than 404.
 
+## Savings: open items after slices 1-2 (2026-10-23)
+
+- **Mixed-currency savings accounts hard-error** — M, latent. If the in-scope
+  savings accounts span more than one currency, `savingsSummary` returns a
+  `VALIDATION` error ("savings accounts span several currencies (EUR, USD);
+  select accounts of one currency"), so the savings card shows an error rather
+  than a figure on an otherwise working dashboard. The resolver never sums
+  across currencies, which is right; the harsh part is the failure mode, since
+  holding a foreign-currency account is not a user error.
+  **Confirmed not an issue today: the user holds EUR only** (2026-10-23), so
+  this is parked rather than fixed. Options when it matters: per-currency rows
+  in the card, or a `currencies` field so the card can say "showing EUR only".
+  The choice was deliberate - the schema has no field to disclose a silently
+  dropped account, so erroring beat lying. Slice 3 must still fail gracefully
+  rather than blanking the dashboard.
+- **`setAccountSavings` success path is untested** — S. Only the rejection path
+  has a test; the publish-then-project path has no broker in that suite. Same
+  shape as `setDisplayAlias`, but untested is untested.
+- **The summary has no filter tests of its own** — S. `transfer`, `direction`
+  and `categorySlugs` reach it through the shared list predicate
+  (`build_condition_with_category_filters`), so they are covered by
+  construction, not directly. A filter regression would surface on the list
+  before the card.
+- **Terraform and compose for `finreport.account-savings` unvalidated** — S.
+  No `terraform validate` and no compose run against the new topic. Note the
+  related find: on `main`, `docker-compose.local.yml` had been creating
+  `finreport.display-alias` with no `--partitions`/`--topic-config`, so
+  locally that topic was created **without compaction**, diverging from
+  Terraform. Fixed in slice 1; worth a sweep for others like it.
+
 ## Housekeeping
 
 - **Delete `prompts/categories.json`** — XS. Dead since May 2026: nothing in
