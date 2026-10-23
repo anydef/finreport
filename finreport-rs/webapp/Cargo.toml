@@ -46,15 +46,15 @@ rust_decimal = "1"
 # addition by WP2, already present transitively in Cargo.lock at 1.11.1 so
 # this adds no new resolved version.
 regex = "1"
+# `CacheSink` (purchase-order proposals) and the labeler unit tests' fake
+# `LabelProvider` use `#[async_trait]`.
+async-trait = "0.1.89"
 
 [dev-dependencies]
 # Projector/backfill/GraphQL integration tests (§8), gated behind the
 # `integration` feature so `just test` stays fast and offline.
 testcontainers = "0.23"
 testcontainers-modules = { version = "0.11", features = ["postgres", "kafka"] }
-# WP3 labeler unit tests implement a panicking `LabelProvider` fake to assert
-# cache/rule hits never call the provider; the trait is `#[async_trait]`.
-async-trait = "0.1.89"
 
 [features]
 # Gates the testcontainers-based integration tests (projector replay

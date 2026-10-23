@@ -738,6 +738,13 @@ type Mutation {
 	"""
 	applyPurchaseOrderSplit(input: ApplyPurchaseOrderInput!): PurchaseOrderApplyResult!
 	"""
+	`proposePurchaseOrderCategories`: a suggested category per item of one
+	order, from a rule, the LLM cache or the configured LLM, in that order.
+	**Changes nothing the user owns**: no split, label or transaction;
+	the only write is a fresh LLM answer into the shared cache.
+	"""
+	proposePurchaseOrderCategories(orderId: String!): [PurchaseOrderItemProposal!]!
+	"""
 	`undoPurchaseOrderSplit`: removes the splits that applying this order
 	wrote, but only those still exactly as written; a split the user has
 	since changed is left alone.
@@ -814,6 +821,25 @@ input PageInput {
 	offset: Int! = 0
 }
 
+enum ProposalSource {
+	"""
+	An active rule matched the item title.
+	"""
+	RULE
+	"""
+	A stored LLM answer for this product, no call made.
+	"""
+	CACHE
+	"""
+	The configured provider answered just now.
+	"""
+	LLM
+	"""
+	No proposal; `reason` says why.
+	"""
+	NONE
+}
+
 type PurchaseOrder {
 	orderId: String!
 	orderDate: Date!
@@ -887,6 +913,29 @@ type PurchaseOrderItem {
 	"""
 	status: String!
 	returned: Boolean!
+}
+
+type PurchaseOrderItemProposal {
+	"""
+	Position of the item within the order (0-based). Unique, unlike `asin`.
+	"""
+	position: Int!
+	asin: String!
+	title: String!
+	"""
+	The suggested category, a slug the catalog contains. `null` for `NONE`.
+	"""
+	categorySlug: String
+	source: ProposalSource!
+	"""
+	The model's confidence; `null` for a rule hit and for `NONE`.
+	"""
+	confidence: Float
+	"""
+	Why there is no proposal (`NONE` only): `no_category`,
+	`llm_budget_exhausted`, `provider_error` or `provider_unavailable`.
+	"""
+	reason: String
 }
 
 type PurchaseOrderMatch {
