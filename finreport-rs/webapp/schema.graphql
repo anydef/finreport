@@ -20,6 +20,11 @@ type Account {
 	currency: String!
 	latestBalance: Balance
 	"""
+	Whether the caller counts this account as savings (their own flag,
+	not a fact from the bank).
+	"""
+	isSavings: Boolean!
+	"""
 	The caller's alias for this account if they set one, else the login
 	label, IBAN or display id. `label` itself stays the login label.
 	"""
@@ -653,6 +658,12 @@ type Mutation {
 	again. True when an exemption existed.
 	"""
 	removeLearningExemption(counterpartyKey: String!): Boolean!
+	"""
+	`setAccountSavings`: mark (or unmark) one of the caller's accounts as
+	savings. A reporting choice per user; rejects an account that is not
+	the caller's.
+	"""
+	setAccountSavings(accountId: UUID!, isSavings: Boolean!): Account!
 	"""
 	`setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or
 	normalised key; covers every spelling) or one of the caller's accounts

@@ -1042,3 +1042,208 @@ mod display_aliases {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Savings accounts: the per-user flag (storage + write path)
+// ---------------------------------------------------------------------------
+
+mod savings {
+    use super::*;
+    use chrono::Utc;
+    use sea_orm::{ConnectionTrait, DatabaseConnection, EntityTrait, Statement};
+    use uuid::Uuid;
+    use webapp::kafka::savings::{AccountSavingsRecord, CURRENT_SCHEMA_VERSION};
+    use webapp::projection::account_savings::project_account_savings;
+
+    /// A user with two accounts they may flag.
+    struct Tenant {
+        user: AuthenticatedUser,
+        s1: Uuid,
+        s2: Uuid,
+    }
+
+    async fn tenant(db: &DatabaseConnection, name: &str) -> Tenant {
+        let (user_id, username) = common::seed_user(db, name, "pw").await;
+        let mut ids = Vec::new();
+        for label in ["Tagesgeld", "Depot"] {
+            let id = common::seed_account(db, "EUR", label).await;
+            common::link(db, user_id, id).await;
+            ids.push(id);
+        }
+        Tenant {
+            user: AuthenticatedUser { user_id, username, account_ids: ids.clone() },
+            s1: ids[0],
+            s2: ids[1],
+        }
+    }
+
+    fn record(user: Uuid, account: Uuid, revision: chrono::DateTime<Utc>) -> AccountSavingsRecord {
+        AccountSavingsRecord {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            user_id: user,
+            account_id: account,
+            revision,
+        }
+    }
+
+    async fn flag(db: &DatabaseConnection, user: Uuid, account: Uuid, on: bool) {
+        let rec = on.then(|| record(user, account, Utc::now()));
+        project_account_savings(db, user, account, rec).await.unwrap();
+    }
+
+    /// `isSavings` for every account of `user`, keyed by account id.
+    async fn flags(
+        schema: &webapp::graphql::AppSchema,
+        user: &AuthenticatedUser,
+    ) -> std::collections::HashMap<String, bool> {
+        let response = schema
+            .execute(authed(Request::new("{ accounts { id isSavings } }"), Some(user.clone())))
+            .await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let data = response.data.into_json().unwrap();
+        data["accounts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| (a["id"].as_str().unwrap().to_string(), a["isSavings"].as_bool().unwrap()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn the_flag_is_off_until_set_follows_the_projection_and_a_tombstone_clears_it() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let t = tenant(&db, &format!("sv-flag-{}", Uuid::new_v4().simple())).await;
+        let (s1, s2) = (t.s1.to_string(), t.s2.to_string());
+
+        let before = flags(&schema, &t.user).await;
+        assert_eq!((before[&s1], before[&s2]), (false, false));
+
+        flag(&db, t.user.user_id, t.s1, true).await;
+        let on = flags(&schema, &t.user).await;
+        assert_eq!((on[&s1], on[&s2]), (true, false));
+
+        flag(&db, t.user.user_id, t.s1, false).await;
+        let off = flags(&schema, &t.user).await;
+        assert_eq!((off[&s1], off[&s2]), (false, false), "a tombstone clears the flag");
+    }
+
+    #[tokio::test]
+    async fn replaying_the_records_leaves_the_same_flags() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let t = tenant(&db, &format!("sv-replay-{}", Uuid::new_v4().simple())).await;
+        let u = t.user.user_id;
+        let now = Utc::now();
+        // Log order: s1 on, s2 on, s1 off (tombstone).
+        let replay = || async {
+            project_account_savings(db.as_ref(), u, t.s1, Some(record(u, t.s1, now))).await.unwrap();
+            project_account_savings(db.as_ref(), u, t.s2, Some(record(u, t.s2, now))).await.unwrap();
+            project_account_savings(db.as_ref(), u, t.s1, None).await.unwrap();
+        };
+        replay().await;
+        let first = flags(&schema, &t.user).await;
+        replay().await;
+        let second = flags(&schema, &t.user).await;
+        assert_eq!(first, second);
+        assert!(!second[&t.s1.to_string()]);
+        assert!(second[&t.s2.to_string()]);
+    }
+
+    #[tokio::test]
+    async fn one_users_flag_never_shows_on_anothers_accounts() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let alice = tenant(&db, &format!("sv-iso-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("sv-iso-b-{}", Uuid::new_v4().simple())).await;
+        // Both see the same shared account; only Alice flags it.
+        common::link(&db, bob.user.user_id, alice.s1).await;
+        let bob_user = AuthenticatedUser {
+            account_ids: [bob.user.account_ids.clone(), vec![alice.s1]].concat(),
+            ..bob.user.clone()
+        };
+        flag(&db, alice.user.user_id, alice.s1, true).await;
+
+        assert!(flags(&schema, &alice.user).await[&alice.s1.to_string()]);
+        let bobs = flags(&schema, &bob_user).await;
+        assert!(bobs.values().all(|on| !on), "Bob flagged nothing: {bobs:?}");
+    }
+
+    #[tokio::test]
+    async fn set_account_savings_rejects_someone_elses_account() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let alice = tenant(&db, &format!("sv-rej-a-{}", Uuid::new_v4().simple())).await;
+        let bob = tenant(&db, &format!("sv-rej-b-{}", Uuid::new_v4().simple())).await;
+        let mutation = format!(
+            r#"mutation {{ setAccountSavings(accountId: "{}", isSavings: true) {{ id }} }}"#,
+            alice.s1
+        );
+        let response = schema.execute(authed(Request::new(mutation), Some(bob.user.clone()))).await;
+        assert!(response.errors[0].message.contains("not accessible"), "{:?}", response.errors);
+        assert!(flags(&schema, &alice.user).await.values().all(|on| !on));
+    }
+
+    #[tokio::test]
+    async fn a_stale_flag_record_does_not_undo_a_newer_one() {
+        let db = common::db().await;
+        let t = tenant(&db, &format!("sv-stale-{}", Uuid::new_v4().simple())).await;
+        let u = t.user.user_id;
+        let newer = Utc::now();
+        let older = newer - chrono::Duration::seconds(60);
+        project_account_savings(db.as_ref(), u, t.s1, Some(record(u, t.s1, newer))).await.unwrap();
+        project_account_savings(db.as_ref(), u, t.s1, Some(record(u, t.s1, older))).await.unwrap();
+        let row = entity::entities::account_savings::Entity::find_by_id((u, t.s1))
+            .one(db.as_ref())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.revision.timestamp_micros(), newer.timestamp_micros());
+    }
+
+    async fn table_exists(conn: &DatabaseConnection) -> bool {
+        let stmt = Statement::from_string(
+            conn.get_database_backend(),
+            "SELECT 1 AS one FROM information_schema.tables WHERE table_name = 'account_savings'",
+        );
+        conn.query_one(stmt).await.unwrap().is_some()
+    }
+
+    #[tokio::test]
+    async fn the_migration_applies_reverses_and_reapplies() {
+        use migration::{Migrator, MigratorTrait};
+        let base = std::env::var("FINREPORT_TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:55435/finreport_wp4".to_string());
+        let admin_url = base.rsplit_once('/').unwrap().0.to_string();
+        let name = format!("finreport_mig_{}", Uuid::new_v4().simple());
+        let admin = sea_orm::Database::connect(format!("{admin_url}/postgres")).await.unwrap();
+        admin
+            .execute(Statement::from_string(admin.get_database_backend(), format!("CREATE DATABASE {name}")))
+            .await
+            .unwrap();
+
+        let conn = sea_orm::Database::connect(format!("{admin_url}/{name}")).await.unwrap();
+        let applied = Migrator::up(&conn, None).await;
+        let table_after_up = table_exists(&conn).await;
+        let reversed = Migrator::down(&conn, None).await;
+        let table_after_down = table_exists(&conn).await;
+        let reapplied = Migrator::up(&conn, None).await;
+        let table_after_reapply = table_exists(&conn).await;
+        conn.close().await.unwrap();
+
+        admin
+            .execute(Statement::from_string(
+                admin.get_database_backend(),
+                format!("DROP DATABASE {name} WITH (FORCE)"),
+            ))
+            .await
+            .unwrap();
+
+        applied.unwrap();
+        reversed.unwrap();
+        reapplied.unwrap();
+        assert!(table_after_up, "up creates the table");
+        assert!(!table_after_down, "down drops it");
+        assert!(table_after_reapply, "up again re-creates it");
+    }
+}

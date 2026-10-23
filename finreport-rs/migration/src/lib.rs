@@ -19,6 +19,7 @@ mod m20270101_000001_goals;
 mod m20270201_000001_learning_exemption;
 mod m20270301_000001_display_alias;
 mod m20270301_000001_transaction_links;
+mod m20270401_000001_account_savings;
 
 pub struct Migrator;
 
@@ -64,6 +65,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20270301_000001_display_alias::Migration),
             // User-declared links between offsetting transactions (reimbursements).
             Box::new(m20270301_000001_transaction_links::Migration),
+            // Per-user flag marking an account as savings (savings reporting).
+            Box::new(m20270401_000001_account_savings::Migration),
         ]
     }
 }

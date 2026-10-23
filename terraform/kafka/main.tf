@@ -265,11 +265,7 @@ resource "kafka_topic" "learning_exemption" {
 # tombstone removes the alias. Mirrored in docker-compose.local.yml's
 # finreport-redpanda-init.
 resource "kafka_topic" "display_alias" {
-  name = "finreport.display-alias"
-  # Transaction links: a user-declared tie between transactions that offset one
-  # another (a reimbursement and the expense it repays), keyed by the link's own
-  # UUID. Compacted; a tombstone deletes the link. Mirrored in
-  # docker-compose.local.yml's finreport-redpanda-init.
+  name               = "finreport.display-alias"
   partitions         = 1
   replication_factor = 1
 
@@ -280,8 +276,30 @@ resource "kafka_topic" "display_alias" {
   lifecycle {
     prevent_destroy = true
   }
-
 }
+
+# Account savings flag: which of a user's accounts they treat as savings, a
+# per-user reporting choice. Keyed `<user_id>:<account_id>`; compacted, a
+# tombstone clears the flag. Mirrored in docker-compose.local.yml's
+# finreport-redpanda-init.
+resource "kafka_topic" "account_savings" {
+  name               = "finreport.account-savings"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Transaction links: a user-declared tie between transactions that offset one
+# another (a reimbursement and the expense it repays), keyed by the link's own
+# UUID. Compacted; a tombstone deletes the link. Mirrored in
+# docker-compose.local.yml's finreport-redpanda-init.
 resource "kafka_topic" "transaction_link" {
   name               = "finreport.transaction-link"
   partitions         = 1

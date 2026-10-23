@@ -75,6 +75,9 @@ pub struct Account {
     pub label: Option<String>,
     pub currency: String,
     pub latest_balance: Option<Balance>,
+    /// Whether the caller counts this account as savings (their own flag,
+    /// not a fact from the bank).
+    pub is_savings: bool,
 }
 
 #[derive(SimpleObject)]

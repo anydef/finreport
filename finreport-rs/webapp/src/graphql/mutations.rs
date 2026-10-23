@@ -240,6 +240,18 @@ impl MutationRoot {
         crate::graphql::learning_exemptions::remove_learning_exemption(db, publisher, &counterparty_key).await
     }
 
+    /// `setAccountSavings`: mark (or unmark) one of the caller's accounts as
+    /// savings. A reporting choice per user; rejects an account that is not
+    /// the caller's.
+    async fn set_account_savings(
+        &self,
+        ctx: &Context<'_>,
+        account_id: crate::graphql::scalars::Uuid,
+        is_savings: bool,
+    ) -> GqlResult<crate::graphql::types::Account> {
+        crate::graphql::savings::set_account_savings(ctx, account_id.0, is_savings).await
+    }
+
     /// `setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or
     /// normalised key; covers every spelling) or one of the caller's accounts
     /// (`ACCOUNT`, by id). Display only.

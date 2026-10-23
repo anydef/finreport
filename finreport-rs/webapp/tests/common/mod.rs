@@ -21,7 +21,13 @@ use webapp::auth;
 #[path = "../support/migrate.rs"]
 mod migrate;
 
-const TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/finreport_wp4";
+const DEFAULT_TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/finreport_wp4";
+
+/// `FINREPORT_TEST_DATABASE_URL` points the suite at another database on the
+/// same container, so a run that needs a clean schema does not disturb others.
+fn test_database_url() -> String {
+    std::env::var("FINREPORT_TEST_DATABASE_URL").unwrap_or_else(|_| DEFAULT_TEST_DATABASE_URL.to_string())
+}
 
 /// Connects fresh per test (rather than sharing one pool via a `static`):
 /// `sqlx`'s pool ties its background tasks to the Tokio runtime it was
@@ -37,10 +43,10 @@ const TEST_DATABASE_URL: &str = "postgres://postgres:postgres@127.0.0.1:55435/fi
 /// means only the first caller actually migrates; everyone else awaits that
 /// result.
 pub async fn db() -> Arc<DatabaseConnection> {
-    let connection = Database::connect(TEST_DATABASE_URL)
+    let connection = Database::connect(test_database_url())
         .await
         .expect("connect to finreport-wp4-pg on 127.0.0.1:55435 — is the container up?");
-    migrate::run_migrations_once(TEST_DATABASE_URL, &connection)
+    migrate::run_migrations_once(&test_database_url(), &connection)
         .await
         .expect("run migrations against finreport-wp4-pg");
     Arc::new(connection)
@@ -51,7 +57,7 @@ pub fn dummy_settings() -> Arc<utils::settings::Settings> {
         oauth_url: None,
         url: None,
         save_file_path: None,
-        database_url: Some(SecretString::from(TEST_DATABASE_URL.to_string())),
+        database_url: Some(SecretString::from(test_database_url())),
         kafka_brokers: None,
         cookie_secure: false,
         allowed_origins: "http://localhost:5173".to_string(),
