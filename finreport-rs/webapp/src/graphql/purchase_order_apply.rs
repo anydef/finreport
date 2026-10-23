@@ -847,12 +847,31 @@ mod tests {
     }
 
     #[test]
-    fn a_single_item_with_no_remainder_is_not_a_split() {
+    fn a_single_item_with_no_remainder_yields_one_part_applied_as_a_category() {
         let o = order(vec![item("only", "9.99", 1)], "9.99");
         let p = plan(&[(0, "9.99")], "9.99");
+        let parts = build_parts(&o, &p, d("-9.99"), "EUR", &cats(&["x"]), None).unwrap();
+        assert_eq!(parts.len(), 1);
+        assert_eq!(parts[0].amount, d("-9.99"));
+        let stored = [StoredPart {
+            index: 0,
+            amount: parts[0].amount,
+            category_id: Uuid::from_u128(1),
+            category_slug: parts[0].category_slug.clone(),
+            label: parts[0].label.clone(),
+        }];
+        assert_eq!(applied_as(&stored), AppliedAs::Category);
+    }
+
+    #[test]
+    fn a_charge_with_no_non_zero_part_is_refused() {
+        // Only reachable with a plan that is inconsistent with its own charge
+        // (no parts, no remainder, yet a charge): the matcher never emits one.
+        let o = order(vec![item("free", "0.00", 1)], "5.00");
+        let p = ChargePlan { transaction_id: "t".into(), charge: d("5.00"), parts: vec![], remainder: Decimal::ZERO };
         assert_eq!(
-            build_parts(&o, &p, d("-9.99"), "EUR", &cats(&["x"]), None),
-            Err(Refusal::NothingToSplit)
+            build_parts(&o, &p, d("-5.00"), "EUR", &cats(&[""]), None),
+            Err(Refusal::NothingToApply)
         );
     }
 
@@ -921,24 +940,24 @@ mod tests {
     #[test]
     fn a_users_split_is_never_overwritten() {
         let wanted = [sp(0, "-5.00", 1), sp(1, "-5.00", 2)];
-        let manual = CurrentState { splits: live(&[sp(0, "-3.00", 9), sp(1, "-7.00", 9)]), category_override: false };
+        let manual = CurrentState { splits: live(&[sp(0, "-3.00", 9), sp(1, "-7.00", 9)]), category_override: None };
         assert_eq!(decide(&manual, None, &wanted), Decision::Skip(SkipReason::UserSplit));
         // Even one with identical amounts and categories, if we did not record it.
-        let lookalike = CurrentState { splits: live(&wanted), category_override: false };
+        let lookalike = CurrentState { splits: live(&wanted), category_override: None };
         assert_eq!(decide(&lookalike, None, &wanted), Decision::Skip(SkipReason::UserSplit));
     }
 
     #[test]
     fn a_users_category_is_never_overwritten() {
         let wanted = [sp(0, "-5.00", 1), sp(1, "-5.00", 2)];
-        let pinned = CurrentState { splits: vec![], category_override: true };
+        let pinned = CurrentState { splits: vec![], category_override: Some(Uuid::from_u128(9)) };
         assert_eq!(decide(&pinned, None, &wanted), Decision::Skip(SkipReason::UserCategory));
     }
 
     #[test]
     fn applying_twice_is_a_no_op_and_a_different_second_apply_is_refused() {
         let wanted = [sp(0, "-5.00", 1), sp(1, "-5.00", 2)];
-        let applied = CurrentState { splits: live(&wanted), category_override: false };
+        let applied = CurrentState { splits: live(&wanted), category_override: None };
         assert_eq!(decide(&applied, Some(&wanted), &wanted), Decision::AlreadyApplied);
         let other = [sp(0, "-5.00", 1), sp(1, "-5.00", 3)];
         assert_eq!(decide(&applied, Some(&wanted), &other), Decision::Skip(SkipReason::AppliedDifferently));
@@ -953,7 +972,7 @@ mod tests {
     #[test]
     fn a_split_the_user_replaced_after_we_applied_is_theirs() {
         let ours = [sp(0, "-5.00", 1), sp(1, "-5.00", 2)];
-        let theirs = CurrentState { splits: live(&[sp(0, "-4.00", 1), sp(1, "-6.00", 2)]), category_override: false };
+        let theirs = CurrentState { splits: live(&[sp(0, "-4.00", 1), sp(1, "-6.00", 2)]), category_override: None };
         assert_eq!(decide(&theirs, Some(&ours), &ours), Decision::Skip(SkipReason::UserSplit));
         assert_eq!(undo_decision(&theirs, &ours), UndoDecision::LeaveAlone);
     }
@@ -961,8 +980,53 @@ mod tests {
     #[test]
     fn undo_removes_only_a_split_that_is_still_ours() {
         let ours = [sp(0, "-5.00", 1), sp(1, "-5.00", 2)];
-        let intact = CurrentState { splits: live(&[ours[1].clone(), ours[0].clone()]), category_override: false };
+        let intact = CurrentState { splits: live(&[ours[1].clone(), ours[0].clone()]), category_override: None };
         assert_eq!(undo_decision(&intact, &ours), UndoDecision::Undo, "row order is irrelevant");
         assert_eq!(undo_decision(&CurrentState::default(), &ours), UndoDecision::LeaveAlone);
+    }
+
+    fn pinned(cat: u128) -> CurrentState {
+        CurrentState { splits: vec![], category_override: Some(Uuid::from_u128(cat)) }
+    }
+
+    #[test]
+    fn a_one_part_record_is_applied_already_applied_or_refused_by_what_is_pinned() {
+        let one = [sp(0, "-9.99", 1)];
+        assert_eq!(decide(&CurrentState::default(), None, &one), Decision::Apply);
+        assert_eq!(decide(&pinned(1), Some(&one), &one), Decision::AlreadyApplied);
+        let other = [sp(0, "-9.99", 2)];
+        assert_eq!(decide(&pinned(1), Some(&one), &other), Decision::Skip(SkipReason::AppliedDifferently));
+    }
+
+    #[test]
+    fn a_category_we_did_not_pin_is_the_users_and_is_never_replaced() {
+        let one = [sp(0, "-9.99", 1)];
+        // No record at all, even though the category equals the wanted one.
+        assert_eq!(decide(&pinned(1), None, &one), Decision::Skip(SkipReason::UserCategory));
+        // A record that names a different category: the user changed it since.
+        let ours_before = [sp(0, "-9.99", 2)];
+        assert_eq!(decide(&pinned(1), Some(&ours_before), &one), Decision::Skip(SkipReason::UserCategory));
+        // A multi-part record never vouches for a pinned category.
+        let split_record = [sp(0, "-5.00", 1), sp(1, "-5.00", 2)];
+        assert_eq!(decide(&pinned(1), Some(&split_record), &one), Decision::Skip(SkipReason::UserCategory));
+    }
+
+    #[test]
+    fn undo_clears_a_pinned_category_only_while_it_is_still_ours() {
+        let one = [sp(0, "-9.99", 1)];
+        assert_eq!(undo_decision(&pinned(1), &one), UndoDecision::Undo);
+        assert_eq!(undo_decision(&pinned(2), &one), UndoDecision::LeaveAlone, "user re-pinned");
+        assert_eq!(undo_decision(&CurrentState::default(), &one), UndoDecision::LeaveAlone, "cleared");
+    }
+
+    #[test]
+    fn application_intact_needs_the_right_shape_for_the_record() {
+        let one = [sp(0, "-9.99", 1)];
+        let with_splits =
+            CurrentState { splits: live(&[sp(0, "-5.00", 1), sp(1, "-4.99", 2)]), category_override: Some(Uuid::from_u128(1)) };
+        assert!(!application_intact(&one, &with_splits), "a one-part record is not a split");
+        assert!(application_intact(&one, &pinned(1)));
+        assert!(!application_intact(&[], &pinned(1)), "an empty record describes nothing");
+        assert!(!application_intact(&[], &CurrentState::default()));
     }
 }
