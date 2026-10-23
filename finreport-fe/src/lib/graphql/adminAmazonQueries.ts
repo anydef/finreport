@@ -1,7 +1,8 @@
 /**
  * GraphQL documents for `/admin/amazon`: uploading Amazon order-history CSVs
  * and reviewing how the orders line up with bank charges. Uploading records
- * evidence only; it creates and changes no transaction.
+ * evidence only; it creates and changes no transaction. Applying a match and
+ * undoing it are the only operations here that change transactions.
  */
 
 const ORDER_FIELDS = `
@@ -44,6 +45,16 @@ query PurchaseOrderMatches {
 			}
 			refunds {${CHARGE_FIELDS}
 			}
+			applications {
+				transactionId
+				appliedAt
+				intact
+				parts {
+					amount
+					categorySlug
+					label
+				}
+			}
 		}
 		unmatchedOrders {${ORDER_FIELDS}
 		}
@@ -65,5 +76,32 @@ mutation UploadPurchaseOrders($files: [String!]!) {
 			orderCount
 			error
 		}
+	}
+}`;
+
+const OUTCOME_FIELDS = `
+	orderId
+	outcomes {
+		transactionId
+		status
+		reason
+		parts {
+			amount
+			categorySlug
+			label
+		}
+	}`;
+
+/** Changes transactions: splits each charge of the order into its items. */
+export const APPLY_PURCHASE_ORDER_SPLIT_MUTATION = `
+mutation ApplyPurchaseOrderSplit($input: ApplyPurchaseOrderInput!) {
+	applyPurchaseOrderSplit(input: $input) {${OUTCOME_FIELDS}
+	}
+}`;
+
+/** Removes the splits this order's application wrote, if still untouched. */
+export const UNDO_PURCHASE_ORDER_SPLIT_MUTATION = `
+mutation UndoPurchaseOrderSplit($orderId: String!) {
+	undoPurchaseOrderSplit(orderId: $orderId) {${OUTCOME_FIELDS}
 	}
 }`;

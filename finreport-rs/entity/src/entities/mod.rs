@@ -17,6 +17,7 @@ pub mod llm_label_cache;
 pub mod projection_offset;
 pub mod purchase_order;
 pub mod purchase_order_item;
+pub mod purchase_order_split;
 pub mod rule;
 pub mod transaction;
 pub mod transaction_insight;

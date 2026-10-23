@@ -1,20 +1,38 @@
 import { describe, expect, it } from 'vitest';
-import { mockPurchaseOrderMatches, mockUploadPurchaseOrders } from './graphql/amazonMock';
+import {
+	mockApplyPurchaseOrderSplit,
+	mockPurchaseOrderMatches,
+	mockUndoPurchaseOrderSplit,
+	mockUploadPurchaseOrders,
+	resetAmazonMock
+} from './graphql/amazonMock';
 import type { PurchaseOrderMatch, PurchaseOrderUploadResult } from './graphql/types';
 import {
+	applyBlocker,
+	applyWarning,
+	buildApplyInput,
 	buildReview,
+	categoryOptions,
 	chargedTotal,
 	chargeLabel,
+	describeOutcomes,
+	emptyChoices,
+	matchRow,
 	reviewHeadline,
 	uploadOutcome
 } from './amazonView';
+import type { Category } from './graphql/types';
 
 const report = () => mockPurchaseOrderMatches().purchaseOrderMatches;
 
 describe('buildReview', () => {
 	it('puts clean matches, review cases, no-charge orders and subscriptions in their own sections', () => {
 		const review = buildReview(report());
-		expect(review.ready.map((r) => r.orderId)).toEqual(['303-9169011-8123555']);
+		expect(review.ready.map((r) => r.orderId)).toEqual([
+			'303-9169011-8123555',
+			'307-5555555-6666666',
+			'308-7777777-8888888'
+		]);
 		expect(review.reviewCount).toBe(2);
 		expect(review.noCharge.map((o) => o.orderId)).toEqual(['306-3333333-4444444']);
 		expect(review.unclaimed).toHaveLength(1);
@@ -91,7 +109,7 @@ describe('chargedTotal', () => {
 describe('reviewHeadline', () => {
 	it('counts the sections', () => {
 		expect(reviewHeadline(buildReview(report()))).toBe(
-			'1 order match cleanly, 2 need review, 1 with no bank charge.'
+			'3 orders match cleanly, 2 need review, 1 with no bank charge.'
 		);
 	});
 });
@@ -156,5 +174,178 @@ describe('mockUploadPurchaseOrders', () => {
 			files: ['Order ID,Order Date\nA,x\nA,x\nB,x\n']
 		});
 		expect(uploadPurchaseOrders.files[0]).toEqual({ index: 0, orderCount: 2, error: null });
+	});
+});
+
+describe('applying a match', () => {
+	const rowFor = (orderId: string) =>
+		matchRow(report().matches.find((m) => m.order.orderId === orderId)!);
+	const two = () => rowFor('307-5555555-6666666');
+
+	it('is blocked until every item has a category', () => {
+		const row = two();
+		const choices = emptyChoices(row.order);
+		expect(applyBlocker(row, choices)).toBe('Choose a category for every item.');
+		choices.itemCategories = ['a', ''];
+		expect(applyBlocker(row, choices)).not.toBeNull();
+		choices.itemCategories = ['a', 'b'];
+		expect(applyBlocker(row, choices)).toBeNull();
+	});
+
+	it('is blocked for a single-item order, whatever is chosen', () => {
+		const row = rowFor('303-9169011-8123555');
+		const blocker = applyBlocker(row, { itemCategories: ['a'], remainderCategory: '' });
+		expect(blocker).toContain('Nothing to split');
+	});
+
+	it('is blocked for an order the matcher sent to review', () => {
+		const row = rowFor('305-1111111-2222222');
+		expect(applyBlocker(row, { itemCategories: ['a', 'b'], remainderCategory: '' })).toContain(
+			'no longer reports'
+		);
+	});
+
+	it('sends only slugs: no amount ever comes from the client', () => {
+		const row = two();
+		const input = buildApplyInput(row, { itemCategories: ['a', 'b'], remainderCategory: '' });
+		expect(input).toEqual({
+			orderId: '307-5555555-6666666',
+			itemCategories: ['a', 'b'],
+			remainderCategory: null
+		});
+	});
+
+	it('demands a category for a non-zero remainder and sends it', () => {
+		const row = two();
+		row.order = { ...row.order, remainder: '1.5000' };
+		const choices = { itemCategories: ['a', 'b'], remainderCategory: '' };
+		expect(applyBlocker(row, choices)).toContain('shipping');
+		choices.remainderCategory = 'fees';
+		expect(applyBlocker(row, choices)).toBeNull();
+		expect(buildApplyInput(row, choices).remainderCategory).toBe('fees');
+	});
+
+	it('says plainly that it changes transactions and can be undone', () => {
+		const warning = applyWarning(two());
+		expect(warning).toContain('This changes your transactions');
+		expect(warning).toContain('undo');
+		expect(warning).toContain('already split or categorised yourself');
+	});
+
+	it('lists only live spending categories, children indented under parents', () => {
+		const cat = (slug: string, kind: Category['kind'], depth = 0, archived = false): Category => ({
+			id: slug,
+			slug,
+			name: slug,
+			kind,
+			parentId: null,
+			depth,
+			archived,
+			origin: 'seed'
+		});
+		const options = categoryOptions([
+			cat('food.groceries', 'EXPENSE', 1),
+			cat('food', 'EXPENSE'),
+			cat('income', 'INCOME'),
+			cat('old', 'EXPENSE', 0, true),
+			cat('savings', 'SAVING')
+		]);
+		expect(options.map((o) => o.slug)).toEqual(['food', 'food.groceries', 'savings']);
+		expect(options[1].label.startsWith('\u2003')).toBe(true);
+	});
+});
+
+describe('the apply and undo mock', () => {
+	const apply = (orderId: string) =>
+		mockApplyPurchaseOrderSplit({
+			input: { orderId, itemCategories: ['a', 'b'], remainderCategory: null }
+		});
+
+	it('applies, shows the order as applied, and undoes it back to clean', () => {
+		resetAmazonMock();
+		const out = apply('307-5555555-6666666');
+		expect('data' in out && out.data.applyPurchaseOrderSplit.outcomes[0].status).toBe('APPLIED');
+
+		const review = buildReview(report());
+		expect(review.applied.map((r) => r.orderId)).toEqual(['307-5555555-6666666']);
+		expect(review.ready.map((r) => r.orderId)).not.toContain('307-5555555-6666666');
+		expect(reviewHeadline(review)).toContain('1 applied');
+
+		const undone = mockUndoPurchaseOrderSplit({ orderId: '307-5555555-6666666' });
+		expect(undone.undoPurchaseOrderSplit.outcomes[0].status).toBe('UNDONE');
+		const after = buildReview(report());
+		expect(after.applied).toHaveLength(0);
+		expect(after.ready.map((r) => r.orderId)).toContain('307-5555555-6666666');
+	});
+
+	it('applying twice is a no-op', () => {
+		resetAmazonMock();
+		apply('307-5555555-6666666');
+		const again = apply('307-5555555-6666666');
+		expect('data' in again && again.data.applyPurchaseOrderSplit.outcomes[0].status).toBe(
+			'ALREADY_APPLIED'
+		);
+		expect(buildReview(report()).applied[0].applications).toHaveLength(1);
+	});
+
+	it('skips a charge the user already split, and reports why', () => {
+		resetAmazonMock();
+		const out = apply('308-7777777-8888888');
+		if (!('data' in out)) throw new Error('expected data');
+		const outcome = out.data.applyPurchaseOrderSplit.outcomes[0];
+		expect(outcome.status).toBe('SKIPPED');
+		expect(outcome.reason).toContain('left as it is');
+		expect(buildReview(report()).applied).toHaveLength(0);
+	});
+
+	it('refuses an order that needs review', () => {
+		resetAmazonMock();
+		expect('errors' in apply('305-1111111-2222222')).toBe(true);
+	});
+});
+
+describe('describeOutcomes', () => {
+	const part = { amount: '-1', categorySlug: 'a', label: 'x' };
+	const outcome = (status: string, reason: string | null = null) =>
+		({ transactionId: 't', status, reason, parts: [part, part] }) as never;
+
+	it('counts what was split and names what was left alone', () => {
+		const out = describeOutcomes(
+			{
+				orderId: 'o',
+				outcomes: [outcome('APPLIED'), outcome('SKIPPED', 'it already has a split')]
+			},
+			'apply'
+		);
+		expect(out.tone).toBe('warn');
+		expect(out.lines[0]).toBe('Split 1 transaction into 2 parts.');
+		expect(out.lines).toContain('Left unchanged: it already has a split');
+	});
+
+	it('is a failure when nothing was changed', () => {
+		const out = describeOutcomes({ orderId: 'o', outcomes: [outcome('SKIPPED', 'why')] }, 'apply');
+		expect(out.tone).toBe('bad');
+		expect(out.lines).toContain('No transaction was changed.');
+	});
+
+	it('reports a repeat as nothing changed', () => {
+		const out = describeOutcomes({ orderId: 'o', outcomes: [outcome('ALREADY_APPLIED')] }, 'apply');
+		expect(out.tone).toBe('good');
+		expect(out.lines[0]).toContain('already split; nothing changed');
+	});
+
+	it('says a changed split was left alone on undo', () => {
+		const out = describeOutcomes(
+			{ orderId: 'o', outcomes: [outcome('LEFT_ALONE', 'changed since')] },
+			'undo'
+		);
+		expect(out.tone).toBe('bad');
+		expect(out.lines[0]).toBe('Left unchanged: changed since');
+	});
+
+	it('handles an undo with nothing to undo', () => {
+		expect(describeOutcomes({ orderId: 'o', outcomes: [] }, 'undo').lines[0]).toBe(
+			'Nothing to undo for this order.'
+		);
 	});
 });

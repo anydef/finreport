@@ -1,6 +1,7 @@
 import { createGraphqlClient } from '$lib/graphqlClient';
 import { PURCHASE_ORDER_MATCHES_QUERY } from '$lib/graphql/adminAmazonQueries';
-import type { PurchaseOrderMatchReport } from '$lib/graphql/types';
+import { CATEGORIES_QUERY } from '$lib/graphql/queries';
+import type { Category, PurchaseOrderMatchReport } from '$lib/graphql/types';
 import type { PageLoad } from './$types';
 
 const EMPTY: PurchaseOrderMatchReport = {
@@ -12,11 +13,14 @@ const EMPTY: PurchaseOrderMatchReport = {
 };
 
 export const load: PageLoad = async ({ fetch }) => {
-	const result = await createGraphqlClient(fetch)
-		.query(PURCHASE_ORDER_MATCHES_QUERY, {})
-		.toPromise();
+	const client = createGraphqlClient(fetch);
+	const [matches, categories] = await Promise.all([
+		client.query(PURCHASE_ORDER_MATCHES_QUERY, {}).toPromise(),
+		client.query(CATEGORIES_QUERY, {}).toPromise()
+	]);
 	return {
-		error: Boolean(result.error),
-		report: (result.data?.purchaseOrderMatches ?? EMPTY) as PurchaseOrderMatchReport
+		error: Boolean(matches.error),
+		report: (matches.data?.purchaseOrderMatches ?? EMPTY) as PurchaseOrderMatchReport,
+		categories: (categories.data?.categories ?? []) as Category[]
 	};
 };

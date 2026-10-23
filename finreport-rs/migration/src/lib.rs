@@ -21,6 +21,7 @@ mod m20270301_000001_display_alias;
 mod m20270301_000001_transaction_links;
 mod m20270401_000001_account_savings;
 mod m20270501_000001_purchase_order;
+mod m20270601_000001_purchase_order_split;
 
 pub struct Migrator;
 
@@ -70,6 +71,8 @@ impl MigratorTrait for Migrator {
             Box::new(m20270401_000001_account_savings::Migration),
             // Retailer orders (Amazon CSV) kept as evidence about transactions.
             Box::new(m20270501_000001_purchase_order::Migration),
+            // Which splits came from applying an Amazon order (undo only touches those).
+            Box::new(m20270601_000001_purchase_order_split::Migration),
         ]
     }
 }

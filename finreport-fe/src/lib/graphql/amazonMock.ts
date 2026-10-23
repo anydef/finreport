@@ -6,10 +6,21 @@
  * page has: a clean match, several `NEEDS_REVIEW` cases with the matcher's
  * real wording, an order with no bank line, an unclaimed bank line and a
  * Prime subscription charge. The amounts and ids are invented.
+ *
+ * Applying and undoing are exercisable too, and stateful for the life of the
+ * server process (`resetAmazonMock()` clears it). The mock follows the real
+ * rules, so the page can be reviewed against them: a single-item order has
+ * nothing to split; one clean order's charge is marked as already split by the
+ * user and is skipped and reported, never overwritten; undo removes only what
+ * applying wrote.
  */
 
 import type {
+	AppliedPart,
+	ChargeOutcome,
 	PurchaseOrder,
+	PurchaseOrderApplication,
+	PurchaseOrderApplyResult,
 	PurchaseOrderCharge,
 	PurchaseOrderMatch,
 	PurchaseOrderMatchReport,
@@ -67,6 +78,15 @@ const SUM = order('305-1111111-2222222', '2026-09-12', '40.0000', [
 	['Desk lamp', '25.0000'],
 	['Cable ties, 200 pcs', '15.0000']
 ]);
+const TWO = order('307-5555555-6666666', '2026-10-12', '20.5000', [
+	['USB-C cable, 2 m', '8.5000'],
+	['Wireless mouse', '12.0000']
+]);
+/** Its charge was split by hand, so applying must skip it. */
+const BLOCKED = order('308-7777777-8888888', '2026-10-14', '40.0000', [
+	['Office chair cushion', '30.0000'],
+	['Desk mat', '10.0000']
+]);
 const GIFT = order('306-3333333-4444444', '2026-10-01', '5.0000', [['Greeting card', '5.0000']]);
 
 const matches: PurchaseOrderMatch[] = [
@@ -76,7 +96,8 @@ const matches: PurchaseOrderMatch[] = [
 		state: 'APPLY',
 		reasons: [],
 		charges: [charge(1, '2026-10-08', '-13.4500', '01303-9169011-8123555 AMZN Mktp DE')],
-		refunds: []
+		refunds: [],
+		applications: []
 	},
 	{
 		order: SPLIT,
@@ -92,7 +113,8 @@ const matches: PurchaseOrderMatch[] = [
 			charge(2, '2026-09-23', '-8.9900', '01304-9357930-8158714 AMZN Mktp DE'),
 			charge(3, '2026-09-24', '-13.6000', '01304-9357930-8158714 AMZN Mktp DE')
 		],
-		refunds: []
+		refunds: [],
+		applications: []
 	},
 	{
 		order: SUM,
@@ -106,12 +128,31 @@ const matches: PurchaseOrderMatch[] = [
 			}
 		],
 		charges: [charge(4, '2026-09-13', '-25.0000', '01305-1111111-2222222 AMZN Mktp DE')],
-		refunds: []
+		refunds: [],
+		applications: []
+	},
+	{
+		order: TWO,
+		kind: 'ORDER_ID',
+		state: 'APPLY',
+		reasons: [],
+		charges: [charge(7, '2026-10-12', '-20.5000', '01307-5555555-6666666 AMZN Mktp DE')],
+		refunds: [],
+		applications: []
+	},
+	{
+		order: BLOCKED,
+		kind: 'ORDER_ID',
+		state: 'APPLY',
+		reasons: [],
+		charges: [charge(8, '2026-10-14', '-40.0000', '01308-7777777-8888888 AMZN Mktp DE')],
+		refunds: [],
+		applications: []
 	}
 ];
 
 const report: PurchaseOrderMatchReport = {
-	orderCount: 4,
+	orderCount: 6,
 	matches,
 	unmatchedOrders: [GIFT],
 	unmatchedCharges: [charge(5, '2026-10-02', '-7.7700', '01999-9999999-9999999 AMZN Mktp DE')],
@@ -120,8 +161,96 @@ const report: PurchaseOrderMatchReport = {
 	]
 };
 
+/** Orders applied so far in this mock session, by order id. */
+const applied = new Map<string, PurchaseOrderApplication[]>();
+
+export function resetAmazonMock(): void {
+	applied.clear();
+}
+
 export function mockPurchaseOrderMatches(): { purchaseOrderMatches: PurchaseOrderMatchReport } {
-	return { purchaseOrderMatches: report };
+	return {
+		purchaseOrderMatches: {
+			...report,
+			matches: report.matches.map((m) => ({
+				...m,
+				applications: applied.get(m.order.orderId) ?? []
+			}))
+		}
+	};
+}
+
+const BLOCKED_REASON = 'it already has a split that was not made from an order; left as it is';
+
+function partsFor(m: PurchaseOrderMatch, categories: string[]): AppliedPart[] {
+	return m.order.items.map((item, i) => ({
+		amount: `-${item.lineTotal}`,
+		categorySlug: categories[i] ?? '',
+		label: item.title
+	}));
+}
+
+type MockResult<T> = { data: T } | { errors: { message: string }[] };
+
+/**
+ * Mirrors `applyPurchaseOrderSplit`: refuses an order that is not a clean
+ * match, skips a charge with fewer than two parts or one the user already
+ * split, and is a no-op the second time.
+ */
+export function mockApplyPurchaseOrderSplit(
+	variables: Record<string, unknown> | undefined
+): MockResult<{ applyPurchaseOrderSplit: PurchaseOrderApplyResult }> {
+	const input = variables?.input as
+		| { orderId: string; itemCategories: string[]; remainderCategory: string | null }
+		| undefined;
+	const match = report.matches.find((m) => m.order.orderId === input?.orderId);
+	if (!input || !match) return { errors: [{ message: 'no such order' }] };
+	if (match.state !== 'APPLY') {
+		return { errors: [{ message: 'this order needs review and cannot be applied' }] };
+	}
+	const outcomes: ChargeOutcome[] = match.charges.map((c): ChargeOutcome => {
+		const base = { transactionId: c.transactionId, parts: [] as AppliedPart[] };
+		if (match.order.items.length < 2) {
+			return {
+				...base,
+				status: 'SKIPPED',
+				reason:
+					'there is nothing to split: the charge is a single item with no shipping or adjustments'
+			};
+		}
+		if (match.order.orderId === BLOCKED.orderId) {
+			return { ...base, status: 'SKIPPED', reason: BLOCKED_REASON };
+		}
+		const parts = partsFor(match, input.itemCategories);
+		if (applied.has(match.order.orderId)) {
+			return { ...base, status: 'ALREADY_APPLIED', reason: null, parts };
+		}
+		applied.set(match.order.orderId, [
+			{ transactionId: c.transactionId, appliedAt: new Date().toISOString(), parts, intact: true }
+		]);
+		return { ...base, status: 'APPLIED', reason: null, parts };
+	});
+	return { data: { applyPurchaseOrderSplit: { orderId: match.order.orderId, outcomes } } };
+}
+
+/** Mirrors `undoPurchaseOrderSplit`: removes what applying wrote, nothing else. */
+export function mockUndoPurchaseOrderSplit(variables: Record<string, unknown> | undefined): {
+	undoPurchaseOrderSplit: PurchaseOrderApplyResult;
+} {
+	const orderId = String(variables?.orderId ?? '');
+	const apps = applied.get(orderId) ?? [];
+	applied.delete(orderId);
+	return {
+		undoPurchaseOrderSplit: {
+			orderId,
+			outcomes: apps.map((a) => ({
+				transactionId: a.transactionId,
+				status: 'UNDONE' as const,
+				reason: null,
+				parts: a.parts
+			}))
+		}
+	};
 }
 
 /**

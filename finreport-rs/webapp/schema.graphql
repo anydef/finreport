@@ -31,6 +31,32 @@ type Account {
 	displayName: String!
 }
 
+type AppliedPart {
+	"""
+	Signed like the transaction.
+	"""
+	amount: Decimal!
+	categorySlug: String!
+	"""
+	Item title, or "Shipping & adjustments".
+	"""
+	label: String!
+}
+
+input ApplyPurchaseOrderInput {
+	orderId: String!
+	"""
+	One category slug per item of the order, in the order's item order.
+	Items that contribute nothing to a charge may be left empty.
+	"""
+	itemCategories: [String!]!
+	"""
+	Category for the shipping-and-adjustments part. Required when a charge
+	has a non-zero remainder.
+	"""
+	remainderCategory: String
+}
+
 """
 A count of transactions and what they are worth.
 """
@@ -265,6 +291,36 @@ enum CategoryKind {
 	EXPENSE
 	TRANSFER
 	SAVING
+}
+
+type ChargeOutcome {
+	transactionId: UUID!
+	status: ChargeOutcomeStatus!
+	reason: String
+	parts: [AppliedPart!]!
+}
+
+enum ChargeOutcomeStatus {
+	"""
+	The split was written now.
+	"""
+	APPLIED
+	"""
+	Already applied identically; nothing changed.
+	"""
+	ALREADY_APPLIED
+	"""
+	Not applied; `reason` says why. The transaction is untouched.
+	"""
+	SKIPPED
+	"""
+	The split we made was removed.
+	"""
+	UNDONE
+	"""
+	Undo found the split changed since; it was left as the user has it.
+	"""
+	LEFT_ALONE
 }
 
 type ComparisonCategory {
@@ -668,9 +724,25 @@ type Mutation {
 	`uploadPurchaseOrders`: record Amazon order-history CSV files (the full
 	text of each) as purchase-order evidence. A file with an unrecognised
 	header or an unreadable cell is rejected whole and reported by
-	position; the others still import. It splits nothing.
+	position; the others still import. It splits nothing; applying is a
+	separate, explicit mutation.
 	"""
 	uploadPurchaseOrders(files: [String!]!): PurchaseOrderUploadResult!
+	"""
+	`applyPurchaseOrderSplit`: **changes transactions.** Splits each bank
+	charge of an order the matcher still reports as `APPLY` into one part
+	per item (plus a shipping-and-adjustments part), in the categories the
+	caller chose. A transaction that already has a split or a pinned
+	category is skipped and reported, never overwritten. Applying again is
+	a no-op. Undo with `undoPurchaseOrderSplit`.
+	"""
+	applyPurchaseOrderSplit(input: ApplyPurchaseOrderInput!): PurchaseOrderApplyResult!
+	"""
+	`undoPurchaseOrderSplit`: removes the splits that applying this order
+	wrote, but only those still exactly as written; a split the user has
+	since changed is left alone.
+	"""
+	undoPurchaseOrderSplit(orderId: String!): PurchaseOrderApplyResult!
 	"""
 	`setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or
 	normalised key; covers every spelling) or one of the caller's accounts
@@ -755,6 +827,25 @@ type PurchaseOrder {
 }
 
 """
+An application on record, for the review page.
+"""
+type PurchaseOrderApplication {
+	transactionId: UUID!
+	appliedAt: DateTime!
+	parts: [AppliedPart!]!
+	"""
+	The live split still equals what was applied, so undo will remove it.
+	`false` means it was changed or removed since; undo will not touch it.
+	"""
+	intact: Boolean!
+}
+
+type PurchaseOrderApplyResult {
+	orderId: String!
+	outcomes: [ChargeOutcome!]!
+}
+
+"""
 A bank line the matcher looked at. Light on purpose: a report row, not a
 full `Transaction`, so it carries no per-row resolvers.
 """
@@ -814,6 +905,10 @@ type PurchaseOrderMatch {
 	Credits carrying the order id. Informational; never split.
 	"""
 	refunds: [PurchaseOrderCharge!]!
+	"""
+	Splits already made from this order (`applyPurchaseOrderSplit`).
+	"""
+	applications: [PurchaseOrderApplication!]!
 }
 
 enum PurchaseOrderMatchKind {
@@ -850,7 +945,7 @@ type PurchaseOrderMatchReport {
 
 enum PurchaseOrderMatchState {
 	"""
-	Exactly one assignment reconciles; safe to apply once splitting exists.
+	Exactly one assignment reconciles; `applyPurchaseOrderSplit` accepts it.
 	"""
 	APPLY
 	"""

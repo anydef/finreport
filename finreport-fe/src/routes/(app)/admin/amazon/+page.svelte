@@ -4,26 +4,122 @@
 	 * orders line up with bank charges.
 	 *
 	 * Uploading records evidence only. It does not split, recategorise or
-	 * otherwise change any transaction; turning a clean match into split parts
-	 * is a later step. The matcher applies a match only when exactly one
-	 * assignment of items to charges reconciles, so most of this page is the
-	 * cases it declined, grouped by why and worded by the matcher itself.
+	 * otherwise change any transaction. Applying a clean match does: it splits
+	 * the order's bank charge into one part per item, in categories the user
+	 * picks, behind an explicit confirmation, and can be undone. The matcher
+	 * calls a match clean only when exactly one assignment of items to charges
+	 * reconciles, so most of this page is the cases it declined, grouped by
+	 * why and worded by the matcher itself. The server re-checks everything on
+	 * apply; the page only gathers category choices.
 	 */
 	import { invalidateAll } from '$app/navigation';
 	import Badge from '$lib/components/Badge.svelte';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
-	import { chargeLabel, buildReview, reviewHeadline, uploadOutcome } from '$lib/amazonView';
-	import type { UploadOutcome } from '$lib/amazonView';
+	import {
+		applyBlocker,
+		applyWarning,
+		buildApplyInput,
+		buildReview,
+		categoryOptions,
+		chargeLabel,
+		describeOutcomes,
+		emptyChoices,
+		reviewHeadline,
+		uploadOutcome
+	} from '$lib/amazonView';
+	import type { ActionOutcome, ApplyChoices, MatchRow, UploadOutcome } from '$lib/amazonView';
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 	import { createGraphqlClient } from '$lib/graphqlClient';
-	import { UPLOAD_PURCHASE_ORDERS_MUTATION } from '$lib/graphql/adminAmazonQueries';
-	import type { PurchaseOrderUploadResult } from '$lib/graphql/types';
+	import {
+		APPLY_PURCHASE_ORDER_SPLIT_MUTATION,
+		UNDO_PURCHASE_ORDER_SPLIT_MUTATION,
+		UPLOAD_PURCHASE_ORDERS_MUTATION
+	} from '$lib/graphql/adminAmazonQueries';
+	import type { PurchaseOrderApplyResult, PurchaseOrderUploadResult } from '$lib/graphql/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
 
 	const review = $derived(buildReview(data.report));
+	const options = $derived(categoryOptions(data.categories));
+
+	// -- Applying and undoing: the only actions here that change transactions.
+	let choices = $state<Record<string, ApplyChoices>>({});
+	let confirming = $state<string | null>(null);
+	let acting = $state<string | null>(null);
+	let actionOutcome = $state<(ActionOutcome & { orderId: string }) | null>(null);
+
+	// Read-only (safe in a template); writes happen in `setChoice`.
+	function choicesFor(row: MatchRow): ApplyChoices {
+		return choices[row.orderId] ?? emptyChoices(row.order);
+	}
+
+	function setChoice(row: MatchRow, itemIndex: number, slug: string) {
+		const current = choicesFor(row);
+		const itemCategories = [...current.itemCategories];
+		itemCategories[itemIndex] = slug;
+		choices[row.orderId] = { ...current, itemCategories };
+	}
+
+	async function applyOrder(row: MatchRow) {
+		acting = row.orderId;
+		actionOutcome = null;
+		try {
+			const result = await createGraphqlClient(fetch)
+				.mutation(APPLY_PURCHASE_ORDER_SPLIT_MUTATION, {
+					input: buildApplyInput(row, choicesFor(row))
+				})
+				.toPromise();
+			if (result.error) {
+				actionOutcome = {
+					orderId: row.orderId,
+					tone: 'bad',
+					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not apply the split.']
+				};
+			} else {
+				actionOutcome = {
+					orderId: row.orderId,
+					...describeOutcomes(
+						result.data.applyPurchaseOrderSplit as PurchaseOrderApplyResult,
+						'apply'
+					)
+				};
+				await invalidateAll();
+			}
+		} finally {
+			acting = null;
+			confirming = null;
+		}
+	}
+
+	async function undoOrder(row: MatchRow) {
+		acting = row.orderId;
+		actionOutcome = null;
+		try {
+			const result = await createGraphqlClient(fetch)
+				.mutation(UNDO_PURCHASE_ORDER_SPLIT_MUTATION, { orderId: row.orderId })
+				.toPromise();
+			if (result.error) {
+				actionOutcome = {
+					orderId: row.orderId,
+					tone: 'bad',
+					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not undo the split.']
+				};
+			} else {
+				actionOutcome = {
+					orderId: row.orderId,
+					...describeOutcomes(
+						result.data.undoPurchaseOrderSplit as PurchaseOrderApplyResult,
+						'undo'
+					)
+				};
+				await invalidateAll();
+			}
+		} finally {
+			acting = null;
+		}
+	}
 
 	let fileInput = $state<HTMLInputElement | null>(null);
 	let busy = $state(false);
@@ -70,8 +166,9 @@
 	<Card title="Upload order history">
 		<p class="mb-3 text-sm text-slate-600">
 			Choose the order-history CSV you exported from Amazon. Uploading records the orders as
-			evidence. <strong>It does not split or change any transaction yet.</strong> Your delivery address
-			columns are ignored: they are never stored or logged.
+			evidence. <strong>Uploading does not split or change any transaction;</strong> applying a match
+			below is a separate step you confirm. Your delivery address columns are ignored: they are never
+			stored or logged.
 		</p>
 		<div class="flex flex-wrap items-center gap-3">
 			<input
@@ -174,23 +271,160 @@
 
 		<Card title="Match cleanly ({review.ready.length})">
 			<p class="mb-2 text-sm text-slate-600">
-				Exactly one way of assigning the items to the charges reconciles. Nothing has been applied;
-				these are the ones a later step can split without guessing.
+				Exactly one way of assigning the items to the charges reconciles. Nothing has been applied.
+				<strong>Applying changes your transactions:</strong> the bank charge is split into one part per
+				item, in the categories you choose. It never replaces a split or category you set yourself, and
+				you can undo it.
 			</p>
-			<ul class="divide-y divide-slate-100" aria-label="Orders that match cleanly">
+			<ul class="flex flex-col gap-3" aria-label="Orders that match cleanly">
 				{#each review.ready as row (row.orderId)}
-					<li class="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-						<span class="font-mono text-slate-800">{row.orderId}</span>
-						<span class="text-xs text-slate-500">
-							{formatDisplayDate(row.orderDate)} · {row.itemCount}
-							{row.itemCount === 1 ? 'item' : 'items'} · {formatAmount(row.total, row.currency)}
-						</span>
+					{@const rowChoices = choicesFor(row)}
+					{@const blocker = applyBlocker(row, rowChoices)}
+					<li class="rounded-md border border-slate-200 px-3 py-2 text-sm">
+						<div class="flex flex-wrap items-center justify-between gap-2">
+							<span class="font-mono text-slate-800">{row.orderId}</span>
+							<span class="text-xs text-slate-500">
+								{formatDisplayDate(row.orderDate)} · {row.itemCount}
+								{row.itemCount === 1 ? 'item' : 'items'} · {formatAmount(row.total, row.currency)}
+							</span>
+						</div>
+						<ul
+							class="mt-2 flex flex-col gap-1"
+							aria-label="Choose a category for each item of {row.orderId}"
+						>
+							{#each row.order.items as item, i (item.asin + i)}
+								<li class="flex flex-wrap items-center justify-between gap-2">
+									<span class="text-slate-700">
+										{item.title}
+										<span class="text-xs text-slate-500"
+											>{formatAmount(item.lineTotal, row.currency)}</span
+										>
+									</span>
+									<select
+										class="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs"
+										aria-label="Category for {item.title}"
+										value={rowChoices.itemCategories[i]}
+										onchange={(e) => setChoice(row, i, e.currentTarget.value)}
+										disabled={acting !== null}
+									>
+										<option value="">Choose a category…</option>
+										{#each options as o (o.slug)}
+											<option value={o.slug}>{o.label}</option>
+										{/each}
+									</select>
+								</li>
+							{/each}
+						</ul>
+						{#if confirming === row.orderId}
+							<div
+								class="mt-3 rounded-md bg-amber-50 px-3 py-2 text-amber-900"
+								role="alertdialog"
+								aria-label="Confirm applying {row.orderId}"
+							>
+								<p>{applyWarning(row)}</p>
+								<div class="mt-2 flex gap-2">
+									<Button
+										variant="primary"
+										onclick={() => applyOrder(row)}
+										disabled={acting !== null}
+									>
+										{acting === row.orderId ? 'Applying…' : 'Yes, split the transaction'}
+									</Button>
+									<Button
+										variant="ghost"
+										onclick={() => (confirming = null)}
+										disabled={acting !== null}
+									>
+										Cancel
+									</Button>
+								</div>
+							</div>
+						{:else}
+							<div class="mt-3 flex flex-wrap items-center gap-3">
+								<Button
+									variant="secondary"
+									onclick={() => (confirming = row.orderId)}
+									disabled={blocker !== null || acting !== null}
+								>
+									Apply split…
+								</Button>
+								{#if blocker}
+									<span class="text-xs text-slate-500">{blocker}</span>
+								{/if}
+							</div>
+						{/if}
+						{#if actionOutcome?.orderId === row.orderId}
+							<div
+								class="mt-2 rounded-md px-3 py-2 text-sm {toneClass[actionOutcome.tone]}"
+								role="status"
+							>
+								{#each actionOutcome.lines as line (line)}
+									<p>{line}</p>
+								{/each}
+							</div>
+						{/if}
 					</li>
 				{:else}
-					<li class="py-2 text-sm text-slate-500">None yet.</li>
+					<li class="py-2 text-sm text-slate-500">None waiting.</li>
 				{/each}
 			</ul>
 		</Card>
+
+		{#if review.applied.length > 0}
+			<Card title="Applied ({review.applied.length})">
+				<p class="mb-2 text-sm text-slate-600">
+					These orders have split your transactions. <strong>Undo</strong> removes the split and the
+					transaction goes back to its automatic category, as it was before. If you have changed a split
+					yourself since, undo leaves your version alone.
+				</p>
+				<ul class="flex flex-col gap-3" aria-label="Applied orders">
+					{#each review.applied as row (row.orderId)}
+						<li class="rounded-md border border-slate-200 px-3 py-2 text-sm">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<span class="font-mono text-slate-800">{row.orderId}</span>
+								<Button
+									variant="secondary"
+									onclick={() => undoOrder(row)}
+									disabled={acting !== null}
+								>
+									{acting === row.orderId ? 'Undoing…' : 'Undo'}
+								</Button>
+							</div>
+							{#each row.applications as app (app.transactionId)}
+								<ul
+									class="mt-2 text-xs text-slate-600"
+									aria-label="Parts applied to {app.transactionId}"
+								>
+									{#each app.parts as part, i (i)}
+										<li class="flex justify-between gap-2">
+											<span
+												>{part.label} <span class="text-slate-400">{part.categorySlug}</span></span
+											>
+											<span>{formatAmount(part.amount, row.currency)}</span>
+										</li>
+									{/each}
+									{#if !app.intact}
+										<li class="mt-1 text-amber-900">
+											Changed since it was applied: undo will not touch it.
+										</li>
+									{/if}
+								</ul>
+							{/each}
+							{#if actionOutcome?.orderId === row.orderId}
+								<div
+									class="mt-2 rounded-md px-3 py-2 {toneClass[actionOutcome.tone]}"
+									role="status"
+								>
+									{#each actionOutcome.lines as line (line)}
+										<p>{line}</p>
+									{/each}
+								</div>
+							{/if}
+						</li>
+					{/each}
+				</ul>
+			</Card>
+		{/if}
 
 		{#if review.noCharge.length > 0}
 			<Card title="Orders with no bank charge ({review.noCharge.length})">
