@@ -307,6 +307,12 @@ implementation rather than assumed away:
 Each should be revisited against a larger real export before the matcher is
 allowed to apply splits unattended.
 
-**Still to build:** the `finreport.purchase-order` topic and its projection,
-the upload mutation and UI, and turning an `Apply` match into actual split
-parts through the existing labelling chain.
+**Also built:** the `finreport.purchase-order` topic and its projection
+(slice 1), and the `uploadPurchaseOrders` mutation, the `purchaseOrderMatches`
+query and the `/admin/amazon` upload-and-review page (slice 2). A file with
+any unreadable row is rejected whole, because an order is one row per item and
+a partial import would store an order with items missing; files in one upload
+are independent.
+
+**Still to build:** turning an `Apply` match into actual split parts through
+the existing labelling chain.

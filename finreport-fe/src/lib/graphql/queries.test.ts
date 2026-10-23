@@ -14,6 +14,7 @@ import {
 import * as queries from './queries';
 import * as adminReviewQueries from './adminReviewQueries';
 import * as adminRulesQueries from './adminRulesQueries';
+import * as adminAmazonQueries from './adminAmazonQueries';
 
 /**
  * Validates every operation the app sends against the frozen SDL, plus one
@@ -28,7 +29,8 @@ const schema = buildSchema(readFileSync(path.join(__dirname, 'schema.graphql'), 
 const exported: Record<string, unknown> = {
 	...queries,
 	...adminReviewQueries,
-	...adminRulesQueries
+	...adminRulesQueries,
+	...adminAmazonQueries
 };
 const documents = Object.entries(exported)
 	.filter((entry): entry is [string, string] => typeof entry[1] === 'string')

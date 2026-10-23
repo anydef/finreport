@@ -293,6 +293,20 @@ Revision-guarded last-writer-wins; a tombstone deletes the order and its items.
 - The matcher applies a split only when exactly one assignment reconciles;
   otherwise it returns `NeedsReview` with a user-facing reason. The upload
   flow therefore needs a review surface, not just a success path.
+- **Upload and review (`/admin/amazon`).** `uploadPurchaseOrders(files: [String!]!)`
+  takes each CSV's full text (no file-upload plumbing here), parses it, merges
+  files, and publishes + projects only orders that are new or changed; a
+  re-upload of an unchanged order publishes nothing. **A bad file is rejected
+  whole, never row by row** (an order spread over item rows would otherwise be
+  stored with items missing); other files in the same call still import, and
+  the result names each rejected file by position with the parser's
+  column/line message. `purchaseOrderMatches` returns the match report in three
+  queries (orders, items, Amazon-looking bank lines) with each charge's detail
+  already in hand: no per-row resolvers. Uploading **splits nothing**; turning
+  an `Apply` match into parts is a later slice.
+- Page grouping lives in `finreport-fe/src/lib/amazonView.ts`; the matcher's
+  reason `message` is shown verbatim, only the group titles are the page's own.
+  The mock is `graphql/amazonMock.ts`.
 
 ## Savings
 

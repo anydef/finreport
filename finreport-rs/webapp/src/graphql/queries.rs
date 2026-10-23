@@ -306,6 +306,18 @@ impl QueryRoot {
         crate::graphql::savings::fetch_savings_summary(db, user, &scoped_ids, &filter).await
     }
 
+    /// The caller's uploaded Amazon orders matched against their bank lines:
+    /// which would apply cleanly, which need review and why (the matcher's
+    /// own wording), and what was set aside (subscriptions, unclaimed lines).
+    async fn purchase_order_matches(
+        &self,
+        ctx: &Context<'_>,
+    ) -> GqlResult<crate::graphql::purchase_orders::PurchaseOrderMatchReport> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::purchase_orders::fetch_match_report(db, user).await
+    }
+
     /// What is waiting for the user: uncategorised and held-for-review
     /// transactions with their worth. All-time, across the caller's accounts.
     async fn attention_summary(&self, ctx: &Context<'_>) -> GqlResult<attention::AttentionSummary> {

@@ -252,6 +252,20 @@ impl MutationRoot {
         crate::graphql::savings::set_account_savings(ctx, account_id.0, is_savings).await
     }
 
+    /// `uploadPurchaseOrders`: record Amazon order-history CSV files (the full
+    /// text of each) as purchase-order evidence. A file with an unrecognised
+    /// header or an unreadable cell is rejected whole and reported by
+    /// position; the others still import. It splits nothing.
+    async fn upload_purchase_orders(
+        &self,
+        ctx: &Context<'_>,
+        files: Vec<String>,
+    ) -> GqlResult<crate::graphql::purchase_orders::PurchaseOrderUploadResult> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::purchase_orders::upload_purchase_orders(db, publisher(ctx), user, files).await
+    }
+
     /// `setDisplayAlias`: nickname a merchant (`COUNTERPARTY`, by name or
     /// normalised key; covers every spelling) or one of the caller's accounts
     /// (`ACCOUNT`, by id). Display only.

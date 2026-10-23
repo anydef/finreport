@@ -622,3 +622,76 @@ export interface SavingsSummary {
 	 */
 	spentDirectly: Decimal;
 }
+
+// -- Amazon purchase orders (/admin/amazon) --------------------------------
+
+export interface PurchaseOrderItem {
+	asin: string;
+	quantity: number;
+	title: string;
+	lineTotal: Decimal;
+	/** The export's status text: free text and localised. */
+	status: string;
+	returned: boolean;
+}
+
+export interface PurchaseOrder {
+	orderId: string;
+	orderDate: string;
+	total: Decimal;
+	currency: string;
+	/** `total` minus the items: shipping, tax, gift cards, promotions. */
+	remainder: Decimal;
+	items: PurchaseOrderItem[];
+}
+
+/** A bank line the matcher looked at. Signed, as on the statement. */
+export interface PurchaseOrderCharge {
+	transactionId: string;
+	bookingDate: string;
+	amount: Decimal;
+	currency: string;
+	counterpartyName: string | null;
+	description: string | null;
+}
+
+export type PurchaseOrderMatchState = 'APPLY' | 'NEEDS_REVIEW';
+export type PurchaseOrderMatchKind = 'ORDER_ID' | 'AMOUNT_AND_DATE';
+
+export interface PurchaseOrderReviewReason {
+	/** Stable machine name, used to group. */
+	code: string;
+	/** The matcher's own wording; shown as is, never rephrased. */
+	message: string;
+}
+
+export interface PurchaseOrderMatch {
+	order: PurchaseOrder;
+	kind: PurchaseOrderMatchKind;
+	state: PurchaseOrderMatchState;
+	reasons: PurchaseOrderReviewReason[];
+	charges: PurchaseOrderCharge[];
+	refunds: PurchaseOrderCharge[];
+}
+
+export interface PurchaseOrderMatchReport {
+	orderCount: number;
+	matches: PurchaseOrderMatch[];
+	unmatchedOrders: PurchaseOrder[];
+	unmatchedCharges: PurchaseOrderCharge[];
+	subscriptionCharges: PurchaseOrderCharge[];
+}
+
+export interface PurchaseOrderFileResult {
+	index: number;
+	orderCount: number;
+	/** Column names and line numbers only; never a cell. */
+	error: string | null;
+}
+
+export interface PurchaseOrderUploadResult {
+	files: PurchaseOrderFileResult[];
+	newOrders: number;
+	updatedOrders: number;
+	unchangedOrders: number;
+}
