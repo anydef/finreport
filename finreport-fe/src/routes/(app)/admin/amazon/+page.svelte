@@ -27,6 +27,7 @@
 		buildApplyInput,
 		buildReview,
 		categoryPickerGroups,
+		hasRemainder,
 		chargeLabel,
 		confirmActionLabel,
 		describeOutcomes,
@@ -81,6 +82,10 @@
 		const itemCategories = [...current.itemCategories];
 		itemCategories[itemIndex] = slug;
 		choices[row.orderId] = { ...current, itemCategories };
+	}
+
+	function setRemainderChoice(row: MatchRow, slug: string) {
+		choices[row.orderId] = { ...choicesFor(row), remainderCategory: slug };
 	}
 
 	// -- Proposals: suggestions only. They fill empty pickers; applying stays
@@ -381,6 +386,29 @@
 									</div>
 								</li>
 							{/each}
+							{#if hasRemainder(row.order)}
+								<li class="flex flex-wrap items-center justify-between gap-2">
+									<span class="text-slate-700">
+										Shipping &amp; adjustments
+										<span class="text-xs text-slate-500"
+											>{formatAmount(row.order.remainder, row.currency)}</span
+										>
+										<span class="block text-xs text-slate-500"
+											>The part of the charge that is not an item: shipping, tax, a gift card, a
+											promotion or rounding.</span
+										>
+									</span>
+									<SearchMenu
+										groups={optionGroups}
+										value={rowChoices.remainderCategory || null}
+										onchange={(slug) => setRemainderChoice(row, slug)}
+										label="Category for shipping and adjustments of {row.orderId}"
+										placeholder="Choose a category…"
+										id="amazon-{row.orderId}-remainder"
+										disabled={acting !== null}
+									/>
+								</li>
+							{/if}
 						</ul>
 						{#if confirming === row.orderId}
 							<div
