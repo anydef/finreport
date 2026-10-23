@@ -17,6 +17,15 @@
 //!    a split only while it still equals that record; if the user has touched
 //!    it since, it is left exactly as the user has it.
 //!
+//! **One item is a category, not a split.** A charge whose only non-zero part
+//! is a single item has nothing to divide: `splitTransaction` refuses fewer
+//! than two parts, and a one-part split would say nothing that a category does
+//! not. Such a charge is applied by pinning that item's category on the
+//! transaction instead. It is recorded in `purchase_order_split` the same way,
+//! as a one-part record, so it is just as idempotent and just as reversible -
+//! undo clears the pinned category and the transaction falls back to its
+//! rule/LLM label, exactly as undoing a split does.
+//!
 //! **What a part carries.** A split part in this system is an amount and a
 //! category - there is no description or tag column - and categorising item
 //! titles is not built. So the *caller chooses the category for each item*
@@ -69,7 +78,7 @@ pub enum Refusal {
     CurrencyMismatch { order: String, charge: String },
     AmountMismatch,
     RemainderExceedsCharge,
-    NothingToSplit,
+    NothingToApply,
     MissingCategory { item: String },
     MissingRemainderCategory,
     PartSign,
@@ -85,8 +94,8 @@ impl Refusal {
             Refusal::RemainderExceedsCharge => {
                 "the items add up to more than the charge, so the parts cannot sum to it".into()
             }
-            Refusal::NothingToSplit => {
-                "there is nothing to split: the charge is a single item with no shipping or adjustments".into()
+            Refusal::NothingToApply => {
+                "there is nothing to apply: this charge has no non-zero item amounts".into()
             }
             Refusal::MissingCategory { item } => format!("no category was chosen for \"{item}\""),
             Refusal::MissingRemainderCategory => "no category was chosen for shipping & adjustments".into(),
@@ -113,6 +122,8 @@ fn item_label(order: &Order, item_index: usize) -> String {
 ///
 /// `item_categories` is indexed by the order's item index; an empty slug counts
 /// as not chosen. Zero-amount items produce no part (and need no category).
+/// A single resulting part is not an error - [`applied_as`] turns it into a
+/// pinned category instead of a split.
 pub fn build_parts(
     order: &Order,
     plan: &ChargePlan,
@@ -163,8 +174,10 @@ pub fn build_parts(
         });
     }
 
-    if drafts.len() < 2 {
-        return Err(Refusal::NothingToSplit);
+    // One part is legitimate: it becomes a category rather than a split (see
+    // the module docs). Zero parts means the charge has nothing on it at all.
+    if drafts.is_empty() {
+        return Err(Refusal::NothingToApply);
     }
     let sum: Decimal = drafts.iter().map(|d| d.amount).sum();
     if sum != tx_amount {
@@ -195,8 +208,11 @@ pub type LiveSplit = Vec<(i32, Decimal, Uuid)>;
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct CurrentState {
     pub splits: LiveSplit,
-    /// The user pinned a category (`transaction_user_label.category_id`).
-    pub category_override: bool,
+    /// The pinned category (`transaction_user_label.category_id`), whether the
+    /// user set it or a single-item application did. Which of the two it was
+    /// is decided by comparing it with the application record, never by the
+    /// presence of an override alone.
+    pub category_override: Option<Uuid>,
 }
 
 fn normalised(mut live: LiveSplit) -> LiveSplit {
@@ -213,13 +229,45 @@ pub fn split_matches_record(stored: &[StoredPart], live: &LiveSplit) -> bool {
     !live.is_empty() && stored_as_live(stored) == normalised(live.clone())
 }
 
+/// How an application is written to the transaction. Decided by the part count
+/// alone, so the record itself says how to undo it.
+#[derive(Enum, Copy, Clone, Eq, PartialEq, Debug)]
+pub enum AppliedAs {
+    /// Two or more parts: a `transaction_split`.
+    Split,
+    /// Exactly one part: the charge is that single item, so its category is
+    /// pinned on the transaction instead (a one-part split is not a thing).
+    Category,
+}
+
+pub fn applied_as(parts: &[StoredPart]) -> AppliedAs {
+    if parts.len() == 1 {
+        AppliedAs::Category
+    } else {
+        AppliedAs::Split
+    }
+}
+
+/// True while the transaction still carries exactly what we recorded writing:
+/// the split for a multi-part record, the pinned category for a one-part one.
+/// A record of no parts is never intact - there is nothing it could describe.
+pub fn application_intact(record: &[StoredPart], state: &CurrentState) -> bool {
+    match applied_as(record) {
+        AppliedAs::Split => split_matches_record(record, &state.splits),
+        AppliedAs::Category => {
+            state.splits.is_empty() && state.category_override == Some(record[0].category_id)
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipReason {
     /// The transaction already has splits that are not ours.
     UserSplit,
     /// The user pinned a category on it.
     UserCategory,
-    /// We applied this before and the result would differ; undo first.
+    /// We applied this before - as a split or as a pinned category - and the
+    /// result would differ now; undo first.
     AppliedDifferently,
 }
 
@@ -227,7 +275,9 @@ impl SkipReason {
     pub fn message(self) -> &'static str {
         match self {
             SkipReason::UserSplit => "it already has a split that was not made from an order; left as it is",
-            SkipReason::UserCategory => "you set a category on it; left as it is (clear it first to split)",
+            SkipReason::UserCategory => {
+                "you set a category on it; left as it is (clear it first to apply this order)"
+            }
             SkipReason::AppliedDifferently => {
                 "this order is already applied with different amounts or categories; undo it first to change that"
             }
@@ -257,24 +307,36 @@ pub fn decide(state: &CurrentState, record: Option<&[StoredPart]>, wanted: &[Sto
             _ => Decision::Skip(SkipReason::UserSplit),
         };
     }
-    if state.category_override {
-        return Decision::Skip(SkipReason::UserCategory);
+    if state.category_override.is_some() {
+        // An override is only ever ours when a one-part record says we pinned
+        // that very category. Anything else is the user's own decision and is
+        // reported, never replaced.
+        return match record {
+            Some(stored) if application_intact(stored, state) => {
+                if stored_as_live(stored) == stored_as_live(wanted) {
+                    Decision::AlreadyApplied
+                } else {
+                    Decision::Skip(SkipReason::AppliedDifferently)
+                }
+            }
+            _ => Decision::Skip(SkipReason::UserCategory),
+        };
     }
     // No splits and no override: free to write. A leftover record (the split
-    // was removed by hand) is simply replaced.
+    // or category was removed by hand) is simply replaced.
     Decision::Apply
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UndoDecision {
-    /// The split is still exactly ours: remove it.
+    /// The split, or the pinned category, is still exactly ours: remove it.
     Undo,
     /// The user has changed or removed it since; touch nothing.
     LeaveAlone,
 }
 
 pub fn undo_decision(state: &CurrentState, record: &[StoredPart]) -> UndoDecision {
-    if split_matches_record(record, &state.splits) {
+    if application_intact(record, state) {
         UndoDecision::Undo
     } else {
         UndoDecision::LeaveAlone
@@ -325,6 +387,9 @@ pub struct ChargeOutcome {
     pub status: ChargeOutcomeStatus,
     pub reason: Option<String>,
     pub parts: Vec<AppliedPart>,
+    /// How the charge was written, or `null` when nothing was written
+    /// (`SKIPPED`, `LEFT_ALONE`).
+    pub applied_as: Option<AppliedAs>,
 }
 
 #[derive(SimpleObject, Clone, Debug, PartialEq)]
@@ -339,8 +404,11 @@ pub struct PurchaseOrderApplication {
     pub transaction_id: GqlUuid,
     pub applied_at: crate::graphql::scalars::DateTime,
     pub parts: Vec<AppliedPart>,
-    /// The live split still equals what was applied, so undo will remove it.
-    /// `false` means it was changed or removed since; undo will not touch it.
+    /// Whether this was written as a split or as a pinned category.
+    pub applied_as: AppliedAs,
+    /// The transaction still carries exactly what was applied - the split, or
+    /// the pinned category - so undo will remove it. `false` means it was
+    /// changed or removed since; undo will not touch it.
     pub intact: bool,
 }
 
@@ -374,7 +442,7 @@ async fn current_state(db: &DatabaseConnection, transaction_id: Uuid) -> Result<
     let category_override = transaction_user_label::Entity::find_by_id(transaction_id)
         .one(db)
         .await?
-        .is_some_and(|l| l.category_id.is_some());
+        .and_then(|l| l.category_id);
     Ok(CurrentState { splits, category_override })
 }
 
@@ -395,6 +463,25 @@ pub async fn live_splits(
         out.entry(s.transaction_id).or_default().push((s.part_index, s.amount, s.category_id));
     }
     Ok(out)
+}
+
+/// Pinned categories for many transactions at once (for the report's
+/// `intact`, where a one-part application lives in the user label rather than
+/// in `transaction_split`).
+pub async fn live_overrides(
+    db: &DatabaseConnection,
+    transaction_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Uuid>, sea_orm::DbErr> {
+    if transaction_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    Ok(transaction_user_label::Entity::find()
+        .filter(transaction_user_label::Column::TransactionId.is_in(transaction_ids.to_vec()))
+        .all(db)
+        .await?
+        .into_iter()
+        .filter_map(|l| l.category_id.map(|c| (l.transaction_id, c)))
+        .collect())
 }
 
 /// All applications on record for the user, keyed by transaction.
@@ -446,6 +533,7 @@ fn skipped(transaction_id: Uuid, reason: impl Into<String>) -> ChargeOutcome {
         status: ChargeOutcomeStatus::Skipped,
         reason: Some(reason.into()),
         parts: vec![],
+        applied_as: None,
     }
 }
 
@@ -551,6 +639,7 @@ async fn apply_one(
                 status: ChargeOutcomeStatus::AlreadyApplied,
                 reason: None,
                 parts: to_applied_parts(&wanted),
+                applied_as: Some(applied_as(&wanted)),
             })
         }
         Decision::Skip(reason) => return Ok(skipped(tx.id, reason.message())),
@@ -564,16 +653,37 @@ async fn apply_one(
     if !claim(db, user.user_id, tx.id, &order.order_id, &wanted).await? {
         return Ok(skipped(tx.id, "another apply of this charge is in progress"));
     }
-    let parts = wanted
-        .iter()
-        .map(|p| SplitPartInput { amount: GqlDecimal(p.amount), category_slug: p.category_slug.clone() })
-        .collect();
-    if let Err(e) = labels::split_transaction(db, publisher, &user.account_ids, tx.id, parts).await {
+    let kind = applied_as(&wanted);
+    let written = match kind {
+        AppliedAs::Split => {
+            let parts = wanted
+                .iter()
+                .map(|p| SplitPartInput {
+                    amount: GqlDecimal(p.amount),
+                    category_slug: p.category_slug.clone(),
+                })
+                .collect();
+            labels::split_transaction(db, publisher, &user.account_ids, tx.id, parts).await
+        }
+        // One item: pin its category. The amount needs no part - it is the
+        // whole charge, which the matcher already proved.
+        AppliedAs::Category => {
+            labels::set_transaction_category(
+                db,
+                publisher,
+                &user.account_ids,
+                tx.id,
+                wanted[0].category_slug.clone(),
+            )
+            .await
+        }
+    };
+    if let Err(e) = written {
         release(db, tx.id).await?;
         return Err(e);
     }
-    // `split_transaction` writes nothing when a newer label already won.
-    if !split_matches_record(&wanted, &current_state(db, tx.id).await?.splits) {
+    // Both writers do nothing when a newer label already won.
+    if !application_intact(&wanted, &current_state(db, tx.id).await?) {
         release(db, tx.id).await?;
         return Ok(skipped(tx.id, "a newer change to this transaction won; nothing was applied"));
     }
@@ -582,11 +692,13 @@ async fn apply_one(
         status: ChargeOutcomeStatus::Applied,
         reason: None,
         parts: to_applied_parts(&wanted),
+        applied_as: Some(kind),
     })
 }
 
-/// `undoPurchaseOrderSplit`: removes the splits this order's application wrote
-/// - and only those still exactly as written.
+/// `undoPurchaseOrderSplit`: removes what this order's application wrote - the
+/// splits, or a single item's pinned category - and only while it is still
+/// exactly as written.
 pub async fn undo_purchase_order(
     db: &DatabaseConnection,
     publisher: Option<&Arc<EventPublisher>>,
@@ -614,13 +726,30 @@ pub async fn undo_purchase_order(
         let state = current_state(db, row.transaction_id).await?;
         let outcome = match undo_decision(&state, &record) {
             UndoDecision::Undo => {
-                labels::unsplit_transaction(db, publisher, &user.account_ids, row.transaction_id).await?;
+                // Both paths end in the same place - `unsplitTransaction` *is*
+                // `clearTransactionCategory` - but say which one is meant.
+                match applied_as(&record) {
+                    AppliedAs::Split => {
+                        labels::unsplit_transaction(db, publisher, &user.account_ids, row.transaction_id)
+                            .await?
+                    }
+                    AppliedAs::Category => {
+                        labels::clear_transaction_category(
+                            db,
+                            publisher,
+                            &user.account_ids,
+                            row.transaction_id,
+                        )
+                        .await?
+                    }
+                };
                 release(db, row.transaction_id).await?;
                 ChargeOutcome {
                     transaction_id: GqlUuid(row.transaction_id),
                     status: ChargeOutcomeStatus::Undone,
                     reason: None,
                     parts: to_applied_parts(&record),
+                    applied_as: Some(applied_as(&record)),
                 }
             }
             UndoDecision::LeaveAlone => {
@@ -629,8 +758,11 @@ pub async fn undo_purchase_order(
                 ChargeOutcome {
                     transaction_id: GqlUuid(row.transaction_id),
                     status: ChargeOutcomeStatus::LeftAlone,
-                    reason: Some("the split was changed or removed since it was applied; left as it is".into()),
+                    reason: Some(
+                        "it was changed or removed since it was applied; left as it is".into(),
+                    ),
                     parts: vec![],
+                    applied_as: None,
                 }
             }
         };
