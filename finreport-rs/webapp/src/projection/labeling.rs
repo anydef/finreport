@@ -43,7 +43,7 @@ use uuid::Uuid;
 
 use crate::kafka::labeling::{
     category_uuid, split_uuid, CacheRecord, CategoryKind, CategoryOrigin, CategoryRecord,
-    LabelRecord, LabelSource, LabelStatus, LearningExemptionRecord, ReviewReason, RuleOrigin, RuleRecord, RuleState,
+    LabelRecord, LabelSource, LabelStatus, LearningExemptionRecord, ReviewReason, RuleConditions, RuleOrigin, RuleRecord, RuleState,
     UserLabelRecord, CURRENT_SCHEMA_VERSION,
 };
 
@@ -413,6 +413,24 @@ pub async fn invalidate_mismatched_splits(
 // §2.7/§2.8 rule
 // ---------------------------------------------------------------------------
 
+/// The JSON to store for a rule's conditions, or `None` (after a warning)
+/// when the rule must not be projected: empty conditions would match every
+/// transaction, and a serialisation failure must not be stored as `null`
+/// (which reads back as empty conditions).
+fn conditions_to_store(rule_id: Uuid, conditions: &RuleConditions) -> Option<serde_json::Value> {
+    if conditions.is_empty() {
+        warn!(%rule_id, "labeling: rule has empty conditions, not projected");
+        return None;
+    }
+    match serde_json::to_value(conditions) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            warn!(%rule_id, error = %e, "labeling: rule conditions do not serialise, not projected");
+            None
+        }
+    }
+}
+
 /// Upserts (or tombstone-deletes) one `rule` row.
 pub async fn project_rule(
     txn: &impl ConnectionTrait,
@@ -424,8 +442,9 @@ pub async fn project_rule(
         return Ok(());
     };
 
-    let conditions_json =
-        serde_json::to_value(&record.conditions).unwrap_or(serde_json::Value::Null);
+    let Some(conditions_json) = conditions_to_store(rule_id, &record.conditions) else {
+        return Ok(());
+    };
     let model = rule::ActiveModel {
         id: Set(rule_id),
         name: Set(record.name.clone()),
@@ -633,7 +652,17 @@ fn rule_model_to_record(row: rule::Model) -> Option<RuleRecord> {
             return None;
         }
     };
-    let conditions = serde_json::from_value(row.conditions).unwrap_or_default();
+    let conditions = match serde_json::from_value::<RuleConditions>(row.conditions) {
+        Ok(c) if !c.is_empty() => c,
+        Ok(_) => {
+            warn!(rule_id = %row.id, "labeling: rule has empty conditions, skipped");
+            return None;
+        }
+        Err(e) => {
+            warn!(rule_id = %row.id, error = %e, "labeling: unparseable rule conditions, skipped");
+            return None;
+        }
+    };
     Some(RuleRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
         id: row.id,
@@ -953,5 +982,51 @@ mod tests {
         assert_eq!(label_source_str(LabelSource::LlmCache), "llm-cache");
         assert_eq!(label_status_str(LabelStatus::NeedsReview), "needs_review");
         assert_eq!(review_reason_str(ReviewReason::SplitMismatch), "split_mismatch");
+    }
+
+    fn rule_row(conditions: serde_json::Value) -> rule::Model {
+        let now = chrono::Utc::now().fixed_offset();
+        rule::Model {
+            id: Uuid::from_bytes([1; 16]),
+            name: "r".into(),
+            category_id: Uuid::from_bytes([2; 16]),
+            conditions,
+            priority: 0,
+            state: "active".into(),
+            origin: "learned".into(),
+            auto_approved: true,
+            user_touched: false,
+            confidence: None,
+            evidence: None,
+            created_at: now,
+            revision: now,
+        }
+    }
+
+    #[test]
+    fn conditions_to_store_refuses_an_empty_set() {
+        let id = Uuid::from_bytes([1; 16]);
+        assert!(conditions_to_store(id, &RuleConditions::default()).is_none());
+        let some = RuleConditions { counterparty_key: Some("lidl".into()), ..Default::default() };
+        assert!(conditions_to_store(id, &some).is_some());
+    }
+
+    #[test]
+    fn rule_model_to_record_skips_empty_conditions() {
+        let all_null = serde_json::to_value(RuleConditions::default()).unwrap();
+        assert!(rule_model_to_record(rule_row(all_null)).is_none());
+        assert!(rule_model_to_record(rule_row(serde_json::json!({}))).is_none());
+    }
+
+    #[test]
+    fn rule_model_to_record_skips_unparseable_conditions() {
+        assert!(rule_model_to_record(rule_row(serde_json::json!({"amount_min": "x"}))).is_none());
+        assert!(rule_model_to_record(rule_row(serde_json::Value::Null)).is_none());
+    }
+
+    #[test]
+    fn rule_model_to_record_keeps_a_real_rule() {
+        let c = serde_json::json!({"counterparty_key": "lidl"});
+        assert!(rule_model_to_record(rule_row(c)).is_some());
     }
 }

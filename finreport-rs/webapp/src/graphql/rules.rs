@@ -100,6 +100,11 @@ fn validate_conditions(value: &serde_json::Value) -> async_graphql::Result<RuleC
     let conditions: RuleConditions = serde_json::from_value(value.clone())
         .map_err(|e| validation_error(format!("invalid conditions: {e}")))?;
 
+    if conditions.is_empty() {
+        return Err(validation_error(
+            "a rule must have at least one condition; a rule with none would match every transaction",
+        ));
+    }
     if let Some(pattern) = &conditions.description_regex
         && !looks_like_valid_regex(pattern)
     {
@@ -473,6 +478,24 @@ fn parse_kafka_origin(origin: &str) -> KafkaRuleOrigin {
     }
 }
 
+/// Parses a stored rule's conditions for republishing. A row whose
+/// conditions do not parse, or parse to an empty set, is refused rather than
+/// defaulted: republishing it would turn it into a match-everything rule.
+fn stored_conditions_for_republish(
+    id: Uuid,
+    stored: &serde_json::Value,
+) -> async_graphql::Result<RuleConditions> {
+    match serde_json::from_value::<RuleConditions>(stored.clone()) {
+        Ok(c) if !c.is_empty() => Ok(c),
+        Ok(_) => Err(validation_error(format!(
+            "rule {id} has no conditions; refusing to republish a rule that would match every transaction"
+        ))),
+        Err(e) => Err(validation_error(format!(
+            "rule {id} has unreadable stored conditions ({e}); refusing to republish it"
+        ))),
+    }
+}
+
 /// `setRuleState` (§5): a revoke makes the labeler re-resolve every
 /// transaction it had labelled — that is the labeler's job (§2.3), this
 /// mutation only republishes the rule's state.
@@ -489,12 +512,14 @@ pub async fn set_rule_state(
     let category = find_by_slug_for_rule(db, &existing).await?;
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
 
+    let conditions = stored_conditions_for_republish(id, &existing.conditions)?;
+
     let record = RuleRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
         id,
         name: existing.name.clone(),
         category_slug: category,
-        conditions: serde_json::from_value(existing.conditions.clone()).unwrap_or_default(),
+        conditions,
         priority: existing.priority,
         state: gql_state_to_kafka(state),
         origin: parse_kafka_origin(&existing.origin),
@@ -738,8 +763,40 @@ mod reach_tests {
     }
 
     #[test]
-    fn a_rule_without_conditions_matches_every_transaction() {
-        assert_eq!(reach(&serde_json::json!({}), &rows()), 4);
+    fn a_rule_without_conditions_matches_no_transaction() {
+        assert_eq!(reach(&serde_json::json!({}), &rows()), 0);
+    }
+
+    #[test]
+    fn validate_conditions_rejects_empty_sets() {
+        for v in [
+            serde_json::json!({}),
+            serde_json::json!({"counterparty_key": null}),
+            serde_json::json!({"account_ids": []}),
+        ] {
+            let err = validate_conditions(&v).unwrap_err();
+            assert!(err.message.contains("at least one condition"), "{v}: {}", err.message);
+        }
+        assert!(validate_conditions(&serde_json::json!({"counterparty_key": "lidl"})).is_ok());
+    }
+
+    #[test]
+    fn republish_refuses_empty_or_unparseable_stored_conditions() {
+        let id = Uuid::nil();
+        for stored in [
+            serde_json::json!({}),
+            serde_json::to_value(RuleConditions::default()).unwrap(),
+            serde_json::json!({"amount_min": "nope"}),
+            serde_json::Value::Null,
+        ] {
+            let err = stored_conditions_for_republish(id, &stored).unwrap_err();
+            assert_eq!(
+                err.extensions.as_ref().and_then(|e| e.get("code")),
+                Some(&async_graphql::Value::from("VALIDATION"))
+            );
+        }
+        let ok = stored_conditions_for_republish(id, &serde_json::json!({"direction": "INCOME"}));
+        assert!(ok.is_ok());
     }
 
     #[test]
