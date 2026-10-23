@@ -164,9 +164,45 @@ fn charges_that_do_not_sum_to_the_total_are_reported_not_split() {
 }
 
 #[test]
-fn order_whose_items_do_not_reach_the_total_needs_review() {
+fn single_charge_unreconciled_order_plans_with_an_explicit_remainder() {
     let id = "306-0000005-0000005"; // items 15.00 of 20.00
     let r = run(&[tx("c1", "2026-09-26", "-20.00", &amazon(id))]);
+    let m = find(&r, id);
+    assert_eq!(m.status, MatchStatus::Apply);
+    let plan = &m.split.as_ref().expect("planned")[0];
+    assert_eq!(plan.charge, d("20.00"));
+    assert_eq!(plan.parts.len(), 1);
+    assert_eq!(plan.parts[0].amount, d("15.00"));
+    assert_eq!(plan.remainder, d("5.00"));
+    let sum: Decimal = plan.parts.iter().map(|p| p.amount).sum::<Decimal>() + plan.remainder;
+    assert_eq!(sum, plan.charge);
+}
+
+#[test]
+fn unreconciled_order_with_items_above_the_charge_is_still_refused() {
+    let id = "306-0000005-0000005";
+    let mut o = orders().into_iter().find(|o| o.order_id == id).unwrap();
+    o.total = d("10.00"); // items 15.00 exceed the 10.00 total and charge
+    o.remainder = d("-5.00");
+    let m = match_orders(&[o], &[tx("c1", "2026-09-26", "-10.00", &amazon(id))])
+        .matches
+        .remove(0);
+    assert_eq!(m.split, None);
+    assert_eq!(
+        m.status,
+        MatchStatus::NeedsReview(vec![ReviewReason::OrderItemsDoNotReconcile {
+            remainder: d("-5.00")
+        }])
+    );
+}
+
+#[test]
+fn multi_charge_unreconciled_order_still_needs_review() {
+    let id = "306-0000005-0000005"; // total 20.00, items 15.00
+    let r = run(&[
+        tx("c1", "2026-09-26", "-12.00", &amazon(id)),
+        tx("c2", "2026-09-27", "-8.00", &amazon(id)),
+    ]);
     let m = find(&r, id);
     assert_eq!(m.split, None);
     assert_eq!(
@@ -175,6 +211,24 @@ fn order_whose_items_do_not_reach_the_total_needs_review() {
             remainder: d("5.00")
         }])
     );
+}
+
+#[test]
+fn unmatched_unreconciled_order_contributes_nothing() {
+    let r = run(&[]);
+    assert!(r.matches.is_empty());
+    assert!(r.unmatched_orders.contains(&"306-0000005-0000005".to_string()));
+}
+
+#[test]
+fn reconciled_single_charge_plan_has_no_remainder() {
+    let id = "306-0000002-0000002";
+    let r = run(&[tx("c1", "2026-09-29", "-12.00", &amazon(id))]);
+    let m = find(&r, id);
+    assert_eq!(m.status, MatchStatus::Apply);
+    let plan = &m.split.as_ref().unwrap()[0];
+    assert_eq!(plan.remainder, Decimal::ZERO);
+    assert_eq!(plan.parts.iter().map(|p| p.amount).sum::<Decimal>(), plan.charge);
 }
 
 #[test]
