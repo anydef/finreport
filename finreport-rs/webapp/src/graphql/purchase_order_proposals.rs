@@ -23,7 +23,9 @@
 //! `item_fingerprint`) are pure and unit-tested; `propose_for_items` threads
 //! them between the database, the provider and the cache sink.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_graphql::{Enum, SimpleObject};
 use categorizer::provider::{CategoryCatalog, LabelProvider, LabelRequest};
@@ -309,6 +311,18 @@ async fn decide_item(
     Ok(decided)
 }
 
+/// The configured provider, or `None` (logged) when it cannot be built. Building
+/// only constructs a client; it makes no network call.
+fn build_provider_or_warn(settings: &utils::settings::Settings) -> Option<Box<dyn LabelProvider>> {
+    match categorizer::factory::build_provider(settings) {
+        Ok(p) => Some(p),
+        Err(e) => {
+            warn!(error = %e, "purchase-order proposals: cannot build the LLM provider; only rules can answer");
+            None
+        }
+    }
+}
+
 /// The mutation body: loads the caller's order, rules and catalog, builds the
 /// configured provider, and resolves. Writes nothing but cache entries.
 pub async fn propose_purchase_order_categories(
@@ -325,13 +339,7 @@ pub async fn propose_purchase_order_categories(
         .ok_or_else(|| validation_error("no such order"))?;
     let rules = proj::active_rules(db).await?;
     let catalog = proj::build_catalog(db).await?;
-    let provider = match categorizer::factory::build_provider(settings) {
-        Ok(p) => Some(p),
-        Err(e) => {
-            warn!(error = %e, "purchase-order proposals: cannot build the LLM provider; only rules can answer");
-            None
-        }
-    };
+    let provider = build_provider_or_warn(settings);
     let guard = CostGuard::new(settings.llm_max_requests_per_run);
     let sink = KafkaCacheSink { db, publisher };
     let ctx = ProposalContext {
@@ -343,6 +351,146 @@ pub async fn propose_purchase_order_categories(
         sink: &sink,
     };
     Ok(propose_for_items(db, &ctx, &order).await?)
+}
+
+// ---------------------------------------------------------------------------
+// Read path: stored suggestions, never a provider call
+// ---------------------------------------------------------------------------
+
+/// A suggestion per item, keyed by `(order_id, item position)`. Only items
+/// that have one are present.
+pub type StoredSuggestions = HashMap<(String, usize), Decided>;
+
+/// An item's suggestion from what is already stored: a rule first, else a
+/// usable cached answer. `fingerprint` is `None` when no provider is
+/// configured (so nothing can be looked up in the cache). A cached *decline*
+/// is no suggestion. Pure: no I/O, and in particular no provider call.
+pub fn stored_suggestion(
+    rules: &[RuleRecord],
+    catalog: &CategoryCatalog,
+    fingerprint: Option<&str>,
+    cache: &HashMap<String, llm_label_cache::Model>,
+    item: &Item,
+) -> Option<Decided> {
+    if let Some(hit) = rule_hit(rules, catalog, item) {
+        return Some(hit);
+    }
+    let cached = cache.get(fingerprint?)?;
+    cache_hit(cached, catalog).filter(|d| d.category_slug.is_some())
+}
+
+/// Stored suggestions for every item of `orders`, from the rule table and the
+/// LLM cache only. Fixed cost however many orders: the active rules, the
+/// catalog and the cache rows for all items (one query per 5 000 distinct
+/// products). Never calls the provider and writes nothing.
+pub async fn stored_suggestions(
+    db: &impl ConnectionTrait,
+    settings: &utils::settings::Settings,
+    orders: &[Order],
+) -> Result<StoredSuggestions, sea_orm::DbErr> {
+    if orders.iter().all(|o| o.items.is_empty()) {
+        return Ok(StoredSuggestions::new());
+    }
+    let rules = proj::active_rules(db).await?;
+    let catalog = proj::build_catalog(db).await?;
+    let provider = build_provider_or_warn(settings);
+    let prompt_version = settings.prompt_version.as_str();
+    let fingerprint_of = |item: &Item| provider.as_deref().map(|p| item_fingerprint(p, prompt_version, item));
+
+    let mut wanted: Vec<String> = orders
+        .iter()
+        .flat_map(|o| o.items.iter())
+        .filter_map(|i| fingerprint_of(i))
+        .collect();
+    wanted.sort();
+    wanted.dedup();
+    let cache = proj::find_caches(db, &wanted).await?;
+
+    let mut out = StoredSuggestions::new();
+    for order in orders {
+        for (position, item) in order.items.iter().enumerate() {
+            let fp = fingerprint_of(item);
+            if let Some(d) = stored_suggestion(&rules, &catalog, fp.as_deref(), &cache, item) {
+                out.insert((order.order_id.clone(), position), d);
+            }
+        }
+    }
+    Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Upload path: warm the cache for new or changed orders
+// ---------------------------------------------------------------------------
+
+/// How long an upload may spend warming suggestions before it leaves the rest
+/// to the explicit "suggest" call. The orders are already saved; this only
+/// bounds how long the response waits on a provider.
+pub const WARM_TIME_BUDGET: Duration = Duration::from_secs(90);
+
+/// True when going on cannot help: the budget is gone or the provider is
+/// failing, so every further item would only be refused or fail again.
+pub fn should_stop_warming(proposals: &[PurchaseOrderItemProposal]) -> bool {
+    proposals
+        .iter()
+        .any(|p| matches!(p.reason.as_deref(), Some(REASON_BUDGET) | Some(REASON_PROVIDER_ERROR)))
+}
+
+/// Runs the proposal chain over `orders` (those just uploaded as new or
+/// changed) so their answers land in the LLM cache and on `finreport.llm-cache`.
+///
+/// **Never fails the caller**: a database error, an unavailable provider, an
+/// exhausted budget or a provider error is logged at `warn` and ends the
+/// warming. One `CostGuard` covers the whole call, so
+/// `APP_llm_max_requests_per_run` bounds the upload, not each order. Rule and
+/// cache hits cost nothing; only items with neither reach the provider.
+pub async fn warm_suggestions(
+    db: &DatabaseConnection,
+    publisher: Option<&Arc<EventPublisher>>,
+    settings: &utils::settings::Settings,
+    orders: &[Order],
+) {
+    if orders.iter().all(|o| o.items.is_empty()) {
+        return;
+    }
+    if let Err(e) = warm_inner(db, publisher, settings, orders).await {
+        warn!(error = %e, "purchase-order proposals: could not warm suggestions after upload; the upload is unaffected");
+    }
+}
+
+async fn warm_inner(
+    db: &DatabaseConnection,
+    publisher: Option<&Arc<EventPublisher>>,
+    settings: &utils::settings::Settings,
+    orders: &[Order],
+) -> Result<(), sea_orm::DbErr> {
+    let rules = proj::active_rules(db).await?;
+    let catalog = proj::build_catalog(db).await?;
+    let Some(provider) = build_provider_or_warn(settings) else {
+        return Ok(()); // Rules answer on the read path; nothing to warm.
+    };
+    let guard = CostGuard::new(settings.llm_max_requests_per_run);
+    let sink = KafkaCacheSink { db, publisher };
+    let ctx = ProposalContext {
+        rules: &rules,
+        catalog: &catalog,
+        provider: Some(provider.as_ref()),
+        prompt_version: &settings.prompt_version,
+        cost_guard: &guard,
+        sink: &sink,
+    };
+    let started = Instant::now();
+    for (done, order) in orders.iter().enumerate() {
+        if started.elapsed() > WARM_TIME_BUDGET {
+            warn!(done, total = orders.len(), "purchase-order proposals: warming time budget spent; remaining orders get suggestions on request");
+            break;
+        }
+        let proposals = propose_for_items(db, &ctx, order).await?;
+        if should_stop_warming(&proposals) {
+            warn!(done, total = orders.len(), "purchase-order proposals: LLM budget exhausted or provider failing; stopped warming suggestions");
+            break;
+        }
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -440,5 +588,77 @@ mod tests {
         let (d, rec) = llm_answer(invented, &catalog(), &p, "2", "fp");
         assert_eq!((d.source, d.reason), (ProposalSource::None, Some(REASON_NO_CATEGORY)));
         assert_eq!((rec.category_slug, rec.proposed_path.as_deref()), (None, Some("made.up")));
+    }
+
+    fn cached(slug: Option<&str>) -> llm_label_cache::Model {
+        llm_label_cache::Model {
+            fingerprint: "fp".into(),
+            category_id: slug.map(category_uuid),
+            proposed_path: None,
+            confidence: Decimal::new(80, 2).try_into().unwrap(),
+            provider: "fake".into(),
+            model: "fake".into(),
+            prompt_version: "2".into(),
+            reasoning: None,
+            created_at: Utc::now().into(),
+        }
+    }
+
+    fn cache_of(m: llm_label_cache::Model) -> HashMap<String, llm_label_cache::Model> {
+        HashMap::from([(m.fingerprint.clone(), m)])
+    }
+
+    #[test]
+    fn a_rule_hit_wins_over_a_cached_answer() {
+        let c = RuleConditions { description_contains: Some("anker".into()), ..Default::default() };
+        let cat = CategoryCatalog::new(vec![
+            CatalogEntry { slug: "shopping.tech".into(), name: "Tech".into(), kind: "EXPENSE".into() },
+            CatalogEntry { slug: "shopping.other".into(), name: "Other".into(), kind: "EXPENSE".into() },
+        ]);
+        let cache = cache_of(cached(Some("shopping.other")));
+        let d = stored_suggestion(&[rule(c, "shopping.tech")], &cat, Some("fp"), &cache, &item("Anker")).unwrap();
+        assert_eq!((d.source, d.category_slug.as_deref()), (ProposalSource::Rule, Some("shopping.tech")));
+    }
+
+    #[test]
+    fn a_cached_answer_is_used_when_no_rule_matches() {
+        let cache = cache_of(cached(Some("shopping.tech")));
+        let d = stored_suggestion(&[], &catalog(), Some("fp"), &cache, &item("Kabel")).unwrap();
+        assert_eq!((d.source, d.category_slug.as_deref()), (ProposalSource::Cache, Some("shopping.tech")));
+    }
+
+    #[test]
+    fn an_item_with_neither_rule_nor_cache_has_no_suggestion() {
+        assert!(stored_suggestion(&[], &catalog(), Some("fp"), &HashMap::new(), &item("Kabel")).is_none());
+        // No provider configured: nothing to look the cache up by.
+        assert!(stored_suggestion(&[], &catalog(), None, &cache_of(cached(Some("shopping.tech"))), &item("Kabel")).is_none());
+    }
+
+    #[test]
+    fn a_cached_decline_or_an_unknown_or_archived_category_is_no_suggestion() {
+        assert!(stored_suggestion(&[], &catalog(), Some("fp"), &cache_of(cached(None)), &item("Kabel")).is_none());
+        // The catalog is the non-archived categories; a cached id outside it
+        // (archived since, or removed) is unusable.
+        let archived = cache_of(cached(Some("shopping.archived")));
+        assert!(stored_suggestion(&[], &catalog(), Some("fp"), &archived, &item("Kabel")).is_none());
+    }
+
+    fn proposal(reason: Option<&str>) -> PurchaseOrderItemProposal {
+        PurchaseOrderItemProposal {
+            position: 0,
+            asin: "B".into(),
+            title: "t".into(),
+            category_slug: None,
+            source: ProposalSource::None,
+            confidence: None,
+            reason: reason.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn warming_stops_on_an_exhausted_budget_or_a_failing_provider_only() {
+        assert!(should_stop_warming(&[proposal(Some(REASON_BUDGET))]));
+        assert!(should_stop_warming(&[proposal(None), proposal(Some(REASON_PROVIDER_ERROR))]));
+        assert!(!should_stop_warming(&[proposal(Some(REASON_NO_CATEGORY)), proposal(None)]));
     }
 }

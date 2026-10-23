@@ -763,6 +763,23 @@ pub async fn find_cache(
         .await
 }
 
+/// The cache rows for these fingerprints, one query per 5 000 (Postgres caps
+/// bind parameters), keyed by fingerprint. Absent ones are missing from the map.
+pub async fn find_caches(
+    db: &impl ConnectionTrait,
+    fingerprints: &[String],
+) -> Result<std::collections::HashMap<String, llm_label_cache::Model>, DbErr> {
+    let mut out = std::collections::HashMap::new();
+    for chunk in fingerprints.chunks(5_000) {
+        let rows = llm_label_cache::Entity::find()
+            .filter(llm_label_cache::Column::Fingerprint.is_in(chunk.to_vec()))
+            .all(db)
+            .await?;
+        out.extend(rows.into_iter().map(|r| (r.fingerprint.clone(), r)));
+    }
+    Ok(out)
+}
+
 /// The user override/splits for one transaction, if any (§2.5 steps 1-2).
 pub async fn find_user_label(
     db: &impl ConnectionTrait,

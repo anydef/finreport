@@ -315,7 +315,8 @@ impl QueryRoot {
     ) -> GqlResult<crate::graphql::purchase_orders::PurchaseOrderMatchReport> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
-        crate::graphql::purchase_orders::fetch_match_report(db, user).await
+        let settings = ctx.data::<Arc<utils::settings::Settings>>()?;
+        crate::graphql::purchase_orders::fetch_match_report(db, settings, user).await
     }
 
     /// What is waiting for the user: uncategorised and held-for-review
