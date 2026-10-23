@@ -414,13 +414,17 @@ pub async fn invalidate_mismatched_splits(
 // ---------------------------------------------------------------------------
 
 /// The JSON to store for a rule's conditions, or `None` (after a warning)
-/// when the rule must not be projected: empty conditions would match every
-/// transaction, and a serialisation failure must not be stored as `null`
-/// (which reads back as empty conditions).
+/// when serialisation fails: that must not be stored as `null`, which reads
+/// back as empty conditions.
+///
+/// Invariant: an empty-condition rule is VISIBLE in the read model (so it
+/// shows in `/admin/rules` and can be revoked), INERT to the labeler and the
+/// matcher (`rule_model_to_record` drops it, `conditions_match_precompiled`
+/// matches nothing), and can only be moved to Revoked or Rejected. Do not
+/// skip it here: a skipped rule vanishes on replay and cannot be revoked.
 fn conditions_to_store(rule_id: Uuid, conditions: &RuleConditions) -> Option<serde_json::Value> {
     if conditions.is_empty() {
-        warn!(%rule_id, "labeling: rule has empty conditions, not projected");
-        return None;
+        warn!(%rule_id, "labeling: rule has empty conditions; projected but inert (matches nothing)");
     }
     match serde_json::to_value(conditions) {
         Ok(v) => Some(v),
@@ -1004,9 +1008,10 @@ mod tests {
     }
 
     #[test]
-    fn conditions_to_store_refuses_an_empty_set() {
+    fn conditions_to_store_keeps_an_empty_set_visible() {
         let id = Uuid::from_bytes([1; 16]);
-        assert!(conditions_to_store(id, &RuleConditions::default()).is_none());
+        let stored = conditions_to_store(id, &RuleConditions::default()).unwrap();
+        assert!(serde_json::from_value::<RuleConditions>(stored).unwrap().is_empty());
         let some = RuleConditions { counterparty_key: Some("lidl".into()), ..Default::default() };
         assert!(conditions_to_store(id, &some).is_some());
     }
@@ -1022,6 +1027,13 @@ mod tests {
     fn rule_model_to_record_skips_unparseable_conditions() {
         assert!(rule_model_to_record(rule_row(serde_json::json!({"amount_min": "x"}))).is_none());
         assert!(rule_model_to_record(rule_row(serde_json::Value::Null)).is_none());
+    }
+
+    #[test]
+    fn an_empty_condition_rule_is_stored_but_never_becomes_a_matchable_record() {
+        let stored = conditions_to_store(Uuid::from_bytes([1; 16]), &RuleConditions::default())
+            .expect("empty conditions are still stored");
+        assert!(rule_model_to_record(rule_row(stored)).is_none());
     }
 
     #[test]
