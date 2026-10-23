@@ -16,7 +16,9 @@ import type {
 	ApplyPurchaseOrderInput,
 	Category,
 	ChargeOutcome,
+	ProposalSource,
 	PurchaseOrder,
+	PurchaseOrderItemProposal,
 	PurchaseOrderApplication,
 	PurchaseOrderApplyResult,
 	PurchaseOrderCharge,
@@ -357,4 +359,87 @@ export function describeOutcomes(
 	if (done.length === 0 && already.length === 0) lines.push('No transaction was changed.');
 	const tone = problems.length === 0 ? 'good' : done.length + already.length > 0 ? 'warn' : 'bad';
 	return { tone, lines };
+}
+
+// -- Category proposals: suggestions that prefill the pickers, never apply.
+
+export type ProposalBadgeVariant = 'neutral' | 'info' | 'success' | 'warning';
+
+/** Where a suggestion came from, worded so a guess does not read as a fact. */
+export function proposalSourceLabel(source: ProposalSource): {
+	text: string;
+	variant: ProposalBadgeVariant;
+} {
+	switch (source) {
+		case 'RULE':
+			return { text: 'Suggested by a rule', variant: 'success' };
+		case 'CACHE':
+			return { text: 'Suggested from an earlier AI answer', variant: 'info' };
+		case 'LLM':
+			return { text: 'Suggested by AI, check it', variant: 'warning' };
+		default:
+			return { text: 'No suggestion', variant: 'neutral' };
+	}
+}
+
+/** Short human text for the backend's machine-readable `NONE` reason code. */
+export function proposalReasonText(reason: string | null): string {
+	switch (reason) {
+		case 'no_category':
+			return 'Nothing matched this item.';
+		case 'provider_error':
+			return 'The suggestion service failed for this item. Try again later.';
+		case 'provider_unavailable':
+			return 'No suggestion service is configured.';
+		case 'llm_budget_exhausted':
+			return 'AI suggestion limit reached for now; choose a category yourself.';
+		default:
+			return 'No suggestion available.';
+	}
+}
+
+export interface ProposalApplication {
+	/** The choices with empty pickers filled; a picker already holding a slug is untouched. */
+	itemCategories: string[];
+	/** Item index -> the proposal that filled it (only those it actually filled). */
+	filled: Record<number, ItemProposalView>;
+	/** Item index -> proposal for items left as they were: kept choice or no suggestion. */
+	notFilled: Record<number, ItemProposalView>;
+}
+
+export type ItemProposalView = Pick<
+	PurchaseOrderItemProposal,
+	'categorySlug' | 'source' | 'reason' | 'confidence'
+>;
+
+/**
+ * Merges proposals into the current choices. A choice is "made" when its slug
+ * is non-empty, so only empty pickers are filled; a slug the proposal names
+ * that is not a known category is ignored (stays empty).
+ */
+export function applyProposals(
+	current: string[],
+	proposals: PurchaseOrderItemProposal[],
+	knownSlugs: ReadonlySet<string>
+): ProposalApplication {
+	const itemCategories = [...current];
+	const filled: Record<number, ItemProposalView> = {};
+	const notFilled: Record<number, ItemProposalView> = {};
+	for (const p of proposals) {
+		if (p.position < 0 || p.position >= current.length) continue;
+		const view = {
+			categorySlug: p.categorySlug,
+			source: p.source,
+			reason: p.reason,
+			confidence: p.confidence
+		};
+		const slug = p.categorySlug;
+		if (!current[p.position] && slug && p.source !== 'NONE' && knownSlugs.has(slug)) {
+			itemCategories[p.position] = slug;
+			filled[p.position] = view;
+		} else {
+			notFilled[p.position] = view;
+		}
+	}
+	return { itemCategories, filled, notFilled };
 }

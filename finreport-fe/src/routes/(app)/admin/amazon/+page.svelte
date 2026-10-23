@@ -19,6 +19,7 @@
 	import SearchMenu from '$lib/components/SearchMenu.svelte';
 	import {
 		applyBlocker,
+		applyProposals,
 		applyWarning,
 		buildApplyInput,
 		buildReview,
@@ -26,18 +27,31 @@
 		chargeLabel,
 		describeOutcomes,
 		emptyChoices,
+		proposalReasonText,
+		proposalSourceLabel,
 		reviewHeadline,
 		uploadOutcome
 	} from '$lib/amazonView';
-	import type { ActionOutcome, ApplyChoices, MatchRow, UploadOutcome } from '$lib/amazonView';
+	import type {
+		ActionOutcome,
+		ApplyChoices,
+		MatchRow,
+		ProposalApplication,
+		UploadOutcome
+	} from '$lib/amazonView';
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 	import { createGraphqlClient } from '$lib/graphqlClient';
 	import {
 		APPLY_PURCHASE_ORDER_SPLIT_MUTATION,
+		PROPOSE_PURCHASE_ORDER_CATEGORIES_MUTATION,
 		UNDO_PURCHASE_ORDER_SPLIT_MUTATION,
 		UPLOAD_PURCHASE_ORDERS_MUTATION
 	} from '$lib/graphql/adminAmazonQueries';
-	import type { PurchaseOrderApplyResult, PurchaseOrderUploadResult } from '$lib/graphql/types';
+	import type {
+		PurchaseOrderApplyResult,
+		PurchaseOrderItemProposal,
+		PurchaseOrderUploadResult
+	} from '$lib/graphql/types';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
@@ -61,6 +75,39 @@
 		const itemCategories = [...current.itemCategories];
 		itemCategories[itemIndex] = slug;
 		choices[row.orderId] = { ...current, itemCategories };
+	}
+
+	// -- Proposals: suggestions only. They fill empty pickers; applying stays
+	// a separate, confirmed step. A picker is "chosen" when its slug is
+	// non-empty, so a user's pick is never overwritten.
+	let suggestions = $state<Record<string, ProposalApplication>>({});
+	const knownSlugs = $derived(new Set(optionGroups.flatMap((g) => g.options.map((o) => o.slug))));
+
+	async function proposeOrder(row: MatchRow) {
+		acting = row.orderId;
+		actionOutcome = null;
+		try {
+			const result = await createGraphqlClient(fetch)
+				.mutation(PROPOSE_PURCHASE_ORDER_CATEGORIES_MUTATION, { orderId: row.orderId })
+				.toPromise();
+			if (result.error) {
+				actionOutcome = {
+					orderId: row.orderId,
+					tone: 'bad',
+					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not get suggestions.']
+				};
+			} else {
+				const merged = applyProposals(
+					choicesFor(row).itemCategories,
+					result.data.proposePurchaseOrderCategories as PurchaseOrderItemProposal[],
+					knownSlugs
+				);
+				choices[row.orderId] = { ...choicesFor(row), itemCategories: merged.itemCategories };
+				suggestions[row.orderId] = merged;
+			}
+		} finally {
+			acting = null;
+		}
 	}
 
 	async function applyOrder(row: MatchRow) {
@@ -160,6 +207,22 @@
 		bad: 'bg-red-50 text-red-800'
 	};
 </script>
+
+{#snippet suggestionNote(row: MatchRow, i: number, chosen: string)}
+	{@const filled = suggestions[row.orderId]?.filled[i]}
+	{@const other = suggestions[row.orderId]?.notFilled[i]}
+	{#if filled && filled.categorySlug === chosen}
+		{@const label = proposalSourceLabel(filled.source)}
+		<Badge text={label.text} variant={label.variant} />
+	{:else if other?.source === 'NONE'}
+		<span class="flex flex-wrap items-center justify-end gap-1 text-xs text-slate-500">
+			<Badge text="No suggestion" variant="neutral" />
+			{proposalReasonText(other.reason)}
+		</span>
+	{:else if other && other.categorySlug && other.categorySlug !== chosen}
+		<span class="text-xs text-slate-500">Kept your choice (suggestion: {other.categorySlug})</span>
+	{/if}
+{/snippet}
 
 <div class="flex flex-col gap-6">
 	<h1 class="text-lg font-semibold text-slate-900">Amazon orders</h1>
@@ -301,15 +364,18 @@
 											>{formatAmount(item.lineTotal, row.currency)}</span
 										>
 									</span>
-									<SearchMenu
-										groups={optionGroups}
-										value={rowChoices.itemCategories[i] || null}
-										onchange={(slug) => setChoice(row, i, slug)}
-										label="Category for {item.title}"
-										placeholder="Choose a category…"
-										id="amazon-{row.orderId}-{i}"
-										disabled={acting !== null}
-									/>
+									<div class="flex flex-col items-end gap-1">
+										<SearchMenu
+											groups={optionGroups}
+											value={rowChoices.itemCategories[i] || null}
+											onchange={(slug) => setChoice(row, i, slug)}
+											label="Category for {item.title}"
+											placeholder="Choose a category…"
+											id="amazon-{row.orderId}-{i}"
+											disabled={acting !== null}
+										/>
+										{@render suggestionNote(row, i, rowChoices.itemCategories[i])}
+									</div>
 								</li>
 							{/each}
 						</ul>
@@ -339,6 +405,13 @@
 							</div>
 						{:else}
 							<div class="mt-3 flex flex-wrap items-center gap-3">
+								<Button
+									variant="ghost"
+									onclick={() => proposeOrder(row)}
+									disabled={acting !== null}
+								>
+									{acting === row.orderId ? 'Working…' : 'Suggest categories'}
+								</Button>
 								<Button
 									variant="secondary"
 									onclick={() => (confirming = row.orderId)}

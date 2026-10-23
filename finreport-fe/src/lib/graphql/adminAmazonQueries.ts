@@ -105,3 +105,17 @@ mutation UndoPurchaseOrderSplit($orderId: String!) {
 	undoPurchaseOrderSplit(orderId: $orderId) {${OUTCOME_FIELDS}
 	}
 }`;
+
+/** Suggests a category per item; writes nothing. */
+export const PROPOSE_PURCHASE_ORDER_CATEGORIES_MUTATION = `
+mutation ProposePurchaseOrderCategories($orderId: String!) {
+	proposePurchaseOrderCategories(orderId: $orderId) {
+		position
+		asin
+		title
+		categorySlug
+		source
+		confidence
+		reason
+	}
+}`;
