@@ -552,3 +552,47 @@ export function applyProposals(
 	}
 	return { itemCategories, filled, notFilled };
 }
+
+/**
+ * The suggestions the server already stored on an order's items, as proposals
+ * so they go through the same `applyProposals` path as a fresh run. Items with
+ * no suggestion are left out: there is nothing to show for them.
+ */
+export function storedProposals(order: PurchaseOrder): PurchaseOrderItemProposal[] {
+	return order.items.flatMap((item, position): PurchaseOrderItemProposal[] =>
+		item.suggestedCategorySlug && item.suggestionSource !== 'NONE'
+			? [
+					{
+						position,
+						asin: item.asin,
+						title: item.title,
+						categorySlug: item.suggestedCategorySlug,
+						source: item.suggestionSource,
+						confidence: null,
+						reason: null
+					}
+				]
+			: []
+	);
+}
+
+/**
+ * Prefills an order's pickers from its stored suggestions. `userChoices` is
+ * only what the user picked (or a fresh run filled); an item holding a slug
+ * there is never overwritten, however often this is recomputed.
+ */
+export function prefillFromStored(
+	order: PurchaseOrder,
+	userChoices: string[],
+	knownSlugs: ReadonlySet<string>
+): ProposalApplication {
+	return applyProposals(userChoices, storedProposals(order), knownSlugs);
+}
+
+/** True when every item already carries a stored suggestion (a fresh run is redundant). */
+export function allItemsSuggested(order: PurchaseOrder): boolean {
+	return (
+		order.items.length > 0 &&
+		order.items.every((i) => i.suggestedCategorySlug && i.suggestionSource !== 'NONE')
+	);
+}

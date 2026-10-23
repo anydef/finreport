@@ -18,6 +18,8 @@ const ORDER_FIELDS = `
 		lineTotal
 		status
 		returned
+		suggestedCategorySlug
+		suggestionSource
 	}`;
 
 const CHARGE_FIELDS = `

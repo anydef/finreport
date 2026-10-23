@@ -32,7 +32,10 @@ import {
 	matchRow,
 	reviewHeadline,
 	uploadOutcome,
+	allItemsSuggested,
 	applyProposals,
+	prefillFromStored,
+	storedProposals,
 	proposalReasonText,
 	proposalSourceLabel
 } from './amazonView';
@@ -620,5 +623,67 @@ describe('applications on record', () => {
 		expect(appliedIntro([rowOf('CATEGORY')])).not.toMatch(/split/i);
 		expect(appliedIntro([rowOf('SPLIT')])).toContain('removes the split');
 		expect(appliedIntro([rowOf('SPLIT'), rowOf('CATEGORY')])).toContain('split or category');
+	});
+});
+
+describe('stored suggestions prefill', () => {
+	const known = new Set(['personal', 'household_items_supplies']);
+	const find = (id: string) => report().matches.find((m) => m.order.orderId === id)!.order;
+	const two = () => find('307-5555555-6666666');
+
+	it('turns stored suggestions into proposals and skips items without one', () => {
+		const shipped = storedProposals(find('309-2468024-1357911'));
+		expect(shipped.map((p) => [p.position, p.source])).toEqual([[0, 'LLM']]);
+		expect(storedProposals(find('308-7777777-8888888'))).toEqual([]);
+	});
+
+	it('prefills empty pickers, one per source, and records the provenance', () => {
+		const r = prefillFromStored(two(), ['', ''], known);
+		expect(r.itemCategories).toEqual(['household_items_supplies', 'personal']);
+		expect(r.filled[0].source).toBe('CACHE');
+		expect(r.filled[1].source).toBe('RULE');
+	});
+
+	it("never overwrites the user's own choice, however often it is recomputed", () => {
+		const mine = ['', 'household_items_supplies'];
+		const first = prefillFromStored(two(), mine, known);
+		const again = prefillFromStored(
+			two(),
+			first.itemCategories.map((c, i) => (mine[i] ? c : '')),
+			known
+		);
+		expect(first.itemCategories[1]).toBe('household_items_supplies');
+		expect(again.itemCategories[1]).toBe('household_items_supplies');
+		expect(first.filled[1]).toBeUndefined();
+		expect(first.notFilled[1].categorySlug).toBe('personal');
+		// the input array is not mutated
+		expect(mine).toEqual(['', 'household_items_supplies']);
+	});
+
+	it('keeps a refetched order from clobbering a pick: same pick over new data', () => {
+		const refetched = report().matches.find(
+			(m) => m.order.orderId === '303-9169011-8123555'
+		)!.order;
+		const r = prefillFromStored(refetched, ['household_items_supplies'], known);
+		expect(r.itemCategories).toEqual(['household_items_supplies']);
+		expect(r.filled).toEqual({});
+	});
+
+	it('ignores a stored slug that is not a known category', () => {
+		const r = prefillFromStored(two(), ['', ''], new Set(['personal']));
+		expect(r.itemCategories).toEqual(['', 'personal']);
+	});
+
+	it('flags an order whose every item carries a suggestion', () => {
+		expect(allItemsSuggested(two())).toBe(true);
+		expect(allItemsSuggested(find('309-2468024-1357911'))).toBe(false);
+		expect(allItemsSuggested(find('308-7777777-8888888'))).toBe(false);
+	});
+
+	it('mocks all four sources on the read path', () => {
+		const sources = new Set(
+			report().matches.flatMap((m) => m.order.items.map((i) => i.suggestionSource))
+		);
+		expect(sources).toEqual(new Set(['RULE', 'CACHE', 'LLM', 'NONE']));
 	});
 });
