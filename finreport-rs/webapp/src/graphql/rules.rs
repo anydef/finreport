@@ -478,20 +478,30 @@ fn parse_kafka_origin(origin: &str) -> KafkaRuleOrigin {
     }
 }
 
-/// Parses a stored rule's conditions for republishing. A row whose
-/// conditions do not parse, or parse to an empty set, is refused rather than
-/// defaulted: republishing it would turn it into a match-everything rule.
+/// Parses a stored rule's conditions for republishing under `target`.
+///
+/// Invariant: an empty-condition rule is VISIBLE in the read model, INERT to
+/// the labeler and the matcher, and can only be moved to Revoked or Rejected.
+/// Those two states make it inert, so they are allowed even when the stored
+/// conditions are empty or unparseable (the latter republish as
+/// `RuleConditions::default()`; `rule_model_to_record` and the matcher keep
+/// it from ever matching). Active / InReview would let it match every
+/// transaction, so they are refused.
 fn stored_conditions_for_republish(
     id: Uuid,
     stored: &serde_json::Value,
+    target: KafkaRuleState,
 ) -> async_graphql::Result<RuleConditions> {
+    let parked = matches!(target, KafkaRuleState::Revoked | KafkaRuleState::Rejected);
     match serde_json::from_value::<RuleConditions>(stored.clone()) {
         Ok(c) if !c.is_empty() => Ok(c),
+        Ok(c) if parked => Ok(c),
         Ok(_) => Err(validation_error(format!(
-            "rule {id} has no conditions; refusing to republish a rule that would match every transaction"
+            "rule {id} has no conditions, so it would match every transaction; it can only be revoked or rejected"
         ))),
+        Err(_) if parked => Ok(RuleConditions::default()),
         Err(e) => Err(validation_error(format!(
-            "rule {id} has unreadable stored conditions ({e}); refusing to republish it"
+            "rule {id} has unreadable stored conditions ({e}); it can only be revoked or rejected"
         ))),
     }
 }
@@ -512,7 +522,7 @@ pub async fn set_rule_state(
     let category = find_by_slug_for_rule(db, &existing).await?;
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
 
-    let conditions = stored_conditions_for_republish(id, &existing.conditions)?;
+    let conditions = stored_conditions_for_republish(id, &existing.conditions, gql_state_to_kafka(state))?;
 
     let record = RuleRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -781,22 +791,50 @@ mod reach_tests {
     }
 
     #[test]
-    fn republish_refuses_empty_or_unparseable_stored_conditions() {
+    fn republish_refuses_empty_or_unparseable_for_active_and_in_review() {
         let id = Uuid::nil();
-        for stored in [
-            serde_json::json!({}),
-            serde_json::to_value(RuleConditions::default()).unwrap(),
-            serde_json::json!({"amount_min": "nope"}),
-            serde_json::Value::Null,
-        ] {
-            let err = stored_conditions_for_republish(id, &stored).unwrap_err();
-            assert_eq!(
-                err.extensions.as_ref().and_then(|e| e.get("code")),
-                Some(&async_graphql::Value::from("VALIDATION"))
-            );
+        for target in [KafkaRuleState::Active, KafkaRuleState::InReview] {
+            for stored in [
+                serde_json::json!({}),
+                serde_json::to_value(RuleConditions::default()).unwrap(),
+                serde_json::json!({"amount_min": "nope"}),
+                serde_json::Value::Null,
+            ] {
+                let err = stored_conditions_for_republish(id, &stored, target).unwrap_err();
+                assert_eq!(
+                    err.extensions.as_ref().and_then(|e| e.get("code")),
+                    Some(&async_graphql::Value::from("VALIDATION"))
+                );
+                assert!(err.message.contains("revoked or rejected"), "{}", err.message);
+            }
+            let ok = stored_conditions_for_republish(id, &serde_json::json!({"direction": "INCOME"}), target);
+            assert!(ok.is_ok());
         }
-        let ok = stored_conditions_for_republish(id, &serde_json::json!({"direction": "INCOME"}));
-        assert!(ok.is_ok());
+    }
+
+    #[test]
+    fn republish_allows_revoking_or_rejecting_empty_conditions() {
+        let id = Uuid::nil();
+        for target in [KafkaRuleState::Revoked, KafkaRuleState::Rejected] {
+            for stored in [
+                serde_json::json!({}),
+                serde_json::to_value(RuleConditions::default()).unwrap(),
+            ] {
+                let c = stored_conditions_for_republish(id, &stored, target).unwrap();
+                assert!(c.is_empty());
+            }
+        }
+    }
+
+    #[test]
+    fn republish_allows_revoking_or_rejecting_unparseable_conditions() {
+        let id = Uuid::nil();
+        for target in [KafkaRuleState::Revoked, KafkaRuleState::Rejected] {
+            for stored in [serde_json::json!({"amount_min": "nope"}), serde_json::Value::Null] {
+                let c = stored_conditions_for_republish(id, &stored, target).unwrap();
+                assert!(c.is_empty());
+            }
+        }
     }
 
     #[test]
