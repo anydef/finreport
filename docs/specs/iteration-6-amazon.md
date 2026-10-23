@@ -153,7 +153,19 @@ An Amazon order is **not** a bank transaction and must not be published to
 a transaction would double-count every purchase: the bank line already exists.
 
 New compacted topic **`finreport.purchase-order`**, keyed by
-`<source>:<order_id>`, carrying the order and its items as supplied. Projected
+`<user_id>:<source>:<order_id>`, carrying the order and its items as supplied.
+
+> **Corrected 2026-10-23, during implementation.** This section originally said
+> `<source>:<order_id>`, which is not enough. An order id is unique only per
+> retailer, so the key needs `source`; and it is not unique across users -
+> two people in a household can upload the same order, and an order is
+> per-user evidence - so it needs `user_id`. Without it, one person's upload
+> would overwrite another's. The key is the *order*, not a shipment or a
+> charge: one order spans several bank charges and the matcher's `Order`
+> already owns them. `source` and Amazon order ids contain no `:`, so the key
+> parses with `splitn(3, ':')`.
+
+Projected
 to `purchase_order` / `purchase_order_item`. `prevent_destroy`, mirrored in
 **both** `terraform/kafka/main.tf` and `docker-compose.local.yml`'s
 `finreport-redpanda-init`.
