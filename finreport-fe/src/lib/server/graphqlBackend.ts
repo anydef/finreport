@@ -31,6 +31,7 @@ import {
 	mockSavingsSummary,
 	setSavingsAccount
 } from '$lib/graphql/savingsMock';
+import { withMockRuleLabel } from '$lib/graphql/ruleLabelMock';
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
 import cashflowGraphNetDeficitMock from '$lib/graphql/mocks/cashflow-graph-net-deficit.json';
@@ -251,7 +252,7 @@ function mockFixtureItems(): MockTransaction[] {
 		...(transactionsMock.data.transactions.items as unknown as MockTransaction[]),
 		...(linkFixtureItems() as unknown as MockTransaction[])
 	];
-	return items.map((item, i) =>
+	return items.map(withMockRuleLabel).map((item, i) =>
 		i === MOCK_SPLIT_INDEX && item.splits.length === 0
 			? {
 					...item,

@@ -24,9 +24,25 @@
 		exemptKeys?: ReadonlySet<string>;
 		/** "Never learn rules for this merchant again": asks the page to confirm and exempt the key. */
 		onexempt?: (rule: Rule, counterpartyKey: string) => void;
+		/** Rule to highlight and scroll to (`/admin/rules?rule=<id>`, linked from a transaction). */
+		highlightId?: string | null;
 	}
 
-	let { rules, onedit, onrevoke, onreapply, exemptKeys = new Set(), onexempt }: Props = $props();
+	let {
+		rules,
+		onedit,
+		onrevoke,
+		onreapply,
+		exemptKeys = new Set(),
+		onexempt,
+		highlightId = null
+	}: Props = $props();
+
+	$effect(() => {
+		if (highlightId) {
+			document.getElementById(`rule-${highlightId}`)?.scrollIntoView({ block: 'center' });
+		}
+	});
 
 	const groups = $derived(groupRulesByState(rules));
 
@@ -49,7 +65,11 @@
 {/snippet}
 
 {#snippet ruleRow(rule: Rule)}
-	<tr class="border-b border-slate-100 align-top last:border-0 hover:bg-slate-50">
+	<tr
+		id={`rule-${rule.id}`}
+		class={`border-b border-slate-100 align-top last:border-0 hover:bg-slate-50 ${rule.id === highlightId ? 'bg-amber-50 outline-2 outline-amber-400' : ''}`}
+		aria-current={rule.id === highlightId ? 'true' : undefined}
+	>
 		<td class="py-2 pr-4">
 			<div class="font-medium text-slate-900">{rule.name}</div>
 			<div class="mt-1 flex flex-wrap gap-1">

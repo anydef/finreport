@@ -1483,3 +1483,89 @@ mod savings {
         assert!(table_after_reapply, "up again re-creates it");
     }
 }
+
+/// `Transaction.label.rule` names the rule that set a label, for a whole page
+/// of transactions, and degrades rather than failing when it cannot:
+/// a user-labelled row has no rule, and a `rule_id` pointing at a rule that
+/// has since been deleted (no foreign key guards it) yields `rule: null`
+/// alongside `source: RULE`, which the UI renders as "rule deleted".
+#[tokio::test]
+async fn label_rule_is_exposed_for_rule_labels_only_and_survives_a_deleted_rule() {
+    use chrono::Utc;
+    use entity::entities::{rule, transaction_label};
+    use sea_orm::{ActiveModelTrait, Set};
+
+    let db = common::db().await;
+    let (user, _) = common::seed_user(&db, "label-rule-test", "pw").await;
+    let account = common::seed_account(&db, "EUR", "Label rule account").await;
+    common::link(&db, user, account).await;
+    let (groceries, _) = common::seed_category(&db, "groceries", "Groceries", "expense").await;
+
+    let rule_id = uuid::Uuid::new_v4();
+    rule::ActiveModel {
+        id: Set(rule_id),
+        name: Set("Rewe rule".to_string()),
+        category_id: Set(groceries),
+        conditions: Set(serde_json::json!({"counterparty_key": "rewe"})),
+        priority: Set(0),
+        state: Set("active".to_string()),
+        origin: Set("user".to_string()),
+        auto_approved: Set(false),
+        user_touched: Set(true),
+        confidence: Set(None),
+        evidence: Set(None),
+        created_at: Set(Utc::now().into()),
+        revision: Set(Utc::now().into()),
+    }
+    .insert(db.as_ref())
+    .await
+    .expect("insert rule");
+
+    let by_rule = common::seed_transaction(&db, account, "2024-09-01", "-10.00", Some("By rule")).await;
+    let by_user = common::seed_transaction(&db, account, "2024-09-02", "-20.00", Some("By user")).await;
+    let orphaned = common::seed_transaction(&db, account, "2024-09-03", "-30.00", Some("Orphan")).await;
+    common::seed_transaction_label(&db, by_rule, Some(groceries), "rule", "resolved").await;
+    common::seed_transaction_label(&db, by_user, Some(groceries), "user", "resolved").await;
+    common::seed_transaction_label(&db, orphaned, Some(groceries), "rule", "resolved").await;
+    for (tx, rule) in [(by_rule, rule_id), (orphaned, uuid::Uuid::new_v4())] {
+        let mut label: transaction_label::ActiveModel =
+            <transaction_label::Entity as sea_orm::EntityTrait>::find_by_id(tx).one(db.as_ref()).await.unwrap().unwrap().into();
+        label.rule_id = Set(Some(rule));
+        label.update(db.as_ref()).await.unwrap();
+    }
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let caller = AuthenticatedUser {
+        user_id: user,
+        username: "label-rule-test".to_string(),
+        account_ids: vec![account],
+    };
+    let query = r#"{ transactions(filter: { startDate: "2024-09-01", endDate: "2024-09-03" }) {
+        items { id label { source rule { id name state } } } } }"#;
+    let response = schema.execute(authed(Request::new(query), Some(caller))).await;
+    assert!(response.errors.is_empty(), "{:?}", response.errors);
+    let data = response.data.into_json().unwrap();
+    let label_of = |id: uuid::Uuid| {
+        data["transactions"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["id"] == id.to_string())
+            .unwrap()["label"]
+            .clone()
+    };
+
+    let ruled = label_of(by_rule);
+    assert_eq!(ruled["source"], "RULE");
+    assert_eq!(ruled["rule"]["id"], rule_id.to_string());
+    assert_eq!(ruled["rule"]["name"], "Rewe rule");
+    assert_eq!(ruled["rule"]["state"], "ACTIVE");
+
+    let user_labelled = label_of(by_user);
+    assert_eq!(user_labelled["source"], "USER");
+    assert!(user_labelled["rule"].is_null());
+
+    let gone = label_of(orphaned);
+    assert_eq!(gone["source"], "RULE", "the label still says a rule set it");
+    assert!(gone["rule"].is_null(), "a deleted rule is null, not an error");
+}
