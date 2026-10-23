@@ -30,6 +30,7 @@
 		SET_TRANSACTIONS_TAGS_MUTATION
 	} from '$lib/graphql/queries';
 	import { groupFilter, needsCreating, proposedCategoryInput, reviewHref } from '$lib/heldGroups';
+	import { summarizeConditions } from '$lib/rulesView';
 	import type { BulkEditResult, HeldMerchantGroup, Rule, Transaction } from '$lib/graphql/types';
 	import BulkEditDialog from '$lib/components/BulkEditDialog.svelte';
 	import Card from '$lib/components/Card.svelte';
@@ -375,6 +376,11 @@
 						>
 							<div>
 								<p class="text-sm font-medium text-slate-900">{rule.name}</p>
+								<!-- The name is a display string; these are the conditions that actually
+								     match, so "Learned: x -> y" is not read as a substring pattern. -->
+								<p class="text-xs text-slate-600">
+									{summarizeConditions(rule.conditions).join(' and ') || 'no conditions'}
+								</p>
 								<p class="text-xs text-slate-500">
 									→ {rule.category.name} · evidence {rule.evidenceCount}{rule.confidence != null
 										? ` · confidence ${Math.round(rule.confidence * 100)}%`

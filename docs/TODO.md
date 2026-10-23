@@ -418,15 +418,12 @@ problem is not correctness — it is how rarely it will fire.
 
 ## Housekeeping
 
-- **Delete `prompts/categories.json`** — XS. Dead since May 2026: nothing in
-  the repo reads it, `category-seed` takes `prompts/taxonomy.json`, and its
-  subcategory names disagree with the live ones (`child savings` vs
-  `child_savings`). `CLAUDE.md` pointed at it until 2026-10-10. Left in place
-  only because deleting it was never asked for.
-- **Jumbled justfile comments** — XS. The comment block above `dev-fe-mocks`
-  opens with "Run the frontend locally, tower profile (talks to the deployed
-  Unraid backend)", which belongs on `dev-fe-tower`; that recipe now has no
-  comment at all.
+- ~~Delete `prompts/categories.json`~~ — done 2026-10-23. Dead since May 2026.
+  `docs/runbooks/dangling-llm-category-repair.md` still pointed at it and now
+  names `taxonomy.json`. `finreport-fe/src/lib/graphql/mocks/categories.json`
+  is a different, live file and was not touched.
+- ~~Jumbled justfile comments~~ — done 2026-10-23. The mocks comment block now
+  describes `dev-fe-mocks`, and `dev-fe-tower` has its own comment again.
 - **Two new topics are not applied** — S, blocks the deployed stack.
   `finreport.display-alias` and `finreport.transaction-link` exist in
   `terraform/kafka/main.tf` and locally, but no `terraform apply` has run
@@ -448,12 +445,14 @@ problem is not correctness — it is how rarely it will fire.
   rule with no conditions at all matches every input." Learned rules always set
   `counterparty_key`, so only a hand-created rule can trip this. Reject an
   empty condition set at write time.
-- **Learned rule names read like free-text patterns** — XS, pure wording.
-  `labeling/processor.rs:828` builds `Learned: <key> -> <slug>`, which a user
-  reasonably read as a substring match that "will match everything". The
-  condition is exact equality on the normalized `counterparty_key`. Either name
-  it `counterparty = "<key>"` or show the condition summary next to the name
-  wherever the bare name appears.
+- ~~Learned rule names read like free-text patterns~~ — done 2026-10-23 by
+  showing the condition, not by renaming: the stored name is a display string
+  and renaming it would not touch rules already published. `/admin/rules`
+  already printed `counterparty = "<key>"` per rule; `/review`'s pending-rule
+  list now prints the same summary under the name (`conditions` was already in
+  `RULE_FIELDS`, so no query change), and an empty condition set shows a
+  warning badge — "no conditions — ignored, edit to restore" — instead of grey
+  text that read like "matches anything".
 
 ## Amazon follow-ups (2026-10-23)
 
@@ -465,11 +464,10 @@ problem is not correctness — it is how rarely it will fire.
 - **`first_number` on promotion text is a guess** — XS. Checked against a real
   header but not against real promotion values; a currency symbol or a
   different format may read wrong.
-- **The upload outcome always says "No transaction was changed or split."** —
-  XS. `amazonView.ts:225` prints it unconditionally so an upload can never read
-  as an action on transactions, which is right in general but redundant when
-  the file was rejected whole and nothing was read. Drop the split sentence
-  when `read === 0`.
+- ~~The upload outcome always says "No transaction was changed or split."~~ —
+  done 2026-10-23. `uploadOutcome` now adds that line only when an order was
+  actually read, and falls back to "Nothing was imported." rather than ever
+  returning an empty message.
 - **Locale-formatted bare amounts are mostly handled** — nil. `parse_decimal`
   reads `1.234,56` and `5,98`; `1,234` is ambiguous and is read as a thousands
   separator.

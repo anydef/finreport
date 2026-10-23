@@ -88,7 +88,12 @@
 				{#each summarizeConditions(rule.conditions) as line (line)}
 					<li>{line}</li>
 				{:else}
-					<li class="list-none text-slate-400">no conditions</li>
+					<!-- An empty condition set is refused at write time and skipped by the
+					     labeler, but rules stored before that still exist: say so, rather
+					     than showing a blank that reads like "matches anything". -->
+					<li class="list-none">
+						<Badge text="no conditions — ignored, edit to restore" variant="warning" />
+					</li>
 				{/each}
 			</ul>
 		</td>

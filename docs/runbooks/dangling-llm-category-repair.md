@@ -82,5 +82,5 @@ each relabel is one LLM call, bounded per run by `APP_llm_max_requests_per_run`.
 - Relabelled transactions whose slug is still unknown will appear as
   `needs_review` / `new_category` with the model's slug in the proposed path.
   Check the warn log lines to see which slugs the model keeps inventing; a
-  frequent one is a hint the taxonomy (`prompts/categories.json`) is missing
+  frequent one is a hint the taxonomy (`prompts/taxonomy.json`) is missing
   a category.
