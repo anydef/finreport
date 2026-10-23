@@ -100,6 +100,11 @@ const TRANSACTION_ITEM_FIELDS = `			id
 					kind
 				}
 				source
+				rule {
+					id
+					name
+					state
+				}
 				confidence
 				status
 				reviewReason

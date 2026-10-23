@@ -23,6 +23,7 @@
 	import { formatAmount, formatDisplayDate } from '$lib/format';
 	import { rawCounterpartyName } from '$lib/displayNames';
 	import { labelSourceBadge, needsReviewBadge } from '$lib/labelBadge';
+	import { ruleLinkFor } from '$lib/ruleLink';
 	import { untrack } from 'svelte';
 	import {
 		categoryChangeWarning,
@@ -77,6 +78,7 @@
 	const warning = $derived(categoryChangeWarning(tx));
 	const sourceBadge = $derived(labelSourceBadge(tx.label));
 	const reviewPill = $derived(needsReviewBadge(tx.label));
+	const ruleLink = $derived(ruleLinkFor(tx.label));
 
 	async function run(action: () => Promise<void>, fallback: string) {
 		busy = true;
@@ -154,6 +156,15 @@
 						<Badge text={reviewPill.text} variant={reviewPill.variant} />
 					{/if}
 				</div>
+				{#if ruleLink}
+					<p class="text-xs text-slate-600" data-testid="rule-link">
+						{#if ruleLink.href}
+							<a class="text-brand underline" href={ruleLink.href}>{ruleLink.text}</a>
+						{:else}
+							{ruleLink.text}
+						{/if}
+					</p>
+				{/if}
 				{#if categories === null}
 					<p class="text-sm text-slate-400">Loading categories…</p>
 				{:else}

@@ -12,6 +12,8 @@
 	 * the merchant's learned rules.
 	 */
 	import { invalidateAll } from '$app/navigation';
+	import { page } from '$app/state';
+	import { highlightedRuleId } from '$lib/ruleLink';
 	import Button from '$lib/components/Button.svelte';
 	import Badge from '$lib/components/Badge.svelte';
 	import Card from '$lib/components/Card.svelte';
@@ -44,6 +46,8 @@
 	let merchantDraft = $state('');
 
 	const exemptKeys = $derived(new Set(data.exemptions.map((e) => e.counterpartyKey)));
+
+	const highlightId = $derived(highlightedRuleId(page.url.searchParams));
 
 	const recentlyAutoApproved = $derived(sortByRecentlyCreated(data.recentlyAutoApproved));
 
@@ -205,6 +209,7 @@
 	<Card>
 		<RulesTable
 			rules={data.rules}
+			{highlightId}
 			{exemptKeys}
 			onedit={openEdit}
 			onrevoke={revoke}
