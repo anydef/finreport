@@ -569,16 +569,20 @@ async fn attach_applications(
     }
     let ids: Vec<Uuid> = rows.iter().map(|r| r.transaction_id).collect();
     let live = apply::live_splits(db, &ids).await?;
+    let overrides = apply::live_overrides(db, &ids).await?;
     let mut by_order: HashMap<String, Vec<apply::PurchaseOrderApplication>> = HashMap::new();
     for row in &rows {
         let parts: Vec<apply::StoredPart> = serde_json::from_value(row.parts.clone()).unwrap_or_default();
-        let intact = live
-            .get(&row.transaction_id)
-            .is_some_and(|l| apply::split_matches_record(&parts, l));
+        let state = apply::CurrentState {
+            splits: live.get(&row.transaction_id).cloned().unwrap_or_default(),
+            category_override: overrides.get(&row.transaction_id).copied(),
+        };
+        let intact = apply::application_intact(&parts, &state);
         by_order.entry(row.order_id.clone()).or_default().push(apply::PurchaseOrderApplication {
             transaction_id: GqlUuid(row.transaction_id),
             applied_at: crate::graphql::scalars::DateTime(row.applied_at.with_timezone(&Utc)),
             parts: apply::to_applied_parts(&parts),
+            applied_as: apply::applied_as(&parts),
             intact,
         });
     }

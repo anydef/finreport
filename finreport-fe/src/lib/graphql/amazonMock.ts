@@ -9,13 +9,14 @@
  *
  * Applying and undoing are exercisable too, and stateful for the life of the
  * server process (`resetAmazonMock()` clears it). The mock follows the real
- * rules, so the page can be reviewed against them: a single-item order has
- * nothing to split; one clean order's charge is marked as already split by the
+ * rules, so the page can be reviewed against them: a single-item order is
+ * applied as a category (`appliedAs: CATEGORY`), not a split; one clean order's charge is marked as already split by the
  * user and is skipped and reported, never overwritten; undo removes only what
  * applying wrote.
  */
 
 import type {
+	AppliedAs,
 	AppliedPart,
 	ChargeOutcome,
 	PurchaseOrder,
@@ -183,20 +184,26 @@ export function mockPurchaseOrderMatches(): { purchaseOrderMatches: PurchaseOrde
 
 const BLOCKED_REASON = 'it already has a split that was not made from an order; left as it is';
 
+/** A free (zero) item makes no part, as on the server. */
 function partsFor(m: PurchaseOrderMatch, categories: string[]): AppliedPart[] {
-	return m.order.items.map((item, i) => ({
-		amount: `-${item.lineTotal}`,
-		categorySlug: categories[i] ?? '',
-		label: item.title
-	}));
+	return m.order.items.flatMap((item, i) =>
+		Number(item.lineTotal) === 0
+			? []
+			: [{ amount: `-${item.lineTotal}`, categorySlug: categories[i] ?? '', label: item.title }]
+	);
+}
+
+/** One part is a pinned category, two or more a split - the server's rule. */
+function appliedAsFor(parts: AppliedPart[]): AppliedAs {
+	return parts.length === 1 ? 'CATEGORY' : 'SPLIT';
 }
 
 type MockResult<T> = { data: T } | { errors: { message: string }[] };
 
 /**
  * Mirrors `applyPurchaseOrderSplit`: refuses an order that is not a clean
- * match, skips a charge with fewer than two parts or one the user already
- * split, and is a no-op the second time.
+ * match, writes one part as a category and two or more as a split, skips a
+ * charge the user already split, and is a no-op the second time.
  */
 export function mockApplyPurchaseOrderSplit(
 	variables: Record<string, unknown> | undefined
@@ -210,26 +217,32 @@ export function mockApplyPurchaseOrderSplit(
 		return { errors: [{ message: 'this order needs review and cannot be applied' }] };
 	}
 	const outcomes: ChargeOutcome[] = match.charges.map((c): ChargeOutcome => {
-		const base = { transactionId: c.transactionId, parts: [] as AppliedPart[] };
-		if (match.order.items.length < 2) {
-			return {
-				...base,
-				status: 'SKIPPED',
-				reason:
-					'there is nothing to split: the charge is a single item with no shipping or adjustments'
-			};
-		}
+		const base = { transactionId: c.transactionId, parts: [] as AppliedPart[], appliedAs: null };
 		if (match.order.orderId === BLOCKED.orderId) {
 			return { ...base, status: 'SKIPPED', reason: BLOCKED_REASON };
 		}
 		const parts = partsFor(match, input.itemCategories);
+		if (parts.length === 0) {
+			return {
+				...base,
+				status: 'SKIPPED',
+				reason: 'there is nothing to apply: no part has an amount'
+			};
+		}
+		const kind = appliedAsFor(parts);
 		if (applied.has(match.order.orderId)) {
-			return { ...base, status: 'ALREADY_APPLIED', reason: null, parts };
+			return { ...base, status: 'ALREADY_APPLIED', reason: null, parts, appliedAs: kind };
 		}
 		applied.set(match.order.orderId, [
-			{ transactionId: c.transactionId, appliedAt: new Date().toISOString(), parts, intact: true }
+			{
+				transactionId: c.transactionId,
+				appliedAt: new Date().toISOString(),
+				parts,
+				appliedAs: kind,
+				intact: true
+			}
 		]);
-		return { ...base, status: 'APPLIED', reason: null, parts };
+		return { ...base, status: 'APPLIED', reason: null, parts, appliedAs: kind };
 	});
 	return { data: { applyPurchaseOrderSplit: { orderId: match.order.orderId, outcomes } } };
 }
@@ -248,7 +261,8 @@ export function mockUndoPurchaseOrderSplit(variables: Record<string, unknown> | 
 				transactionId: a.transactionId,
 				status: 'UNDONE' as const,
 				reason: null,
-				parts: a.parts
+				parts: a.parts,
+				appliedAs: a.appliedAs
 			}))
 		}
 	};
@@ -271,7 +285,12 @@ export function mockUploadPurchaseOrders(variables: Record<string, unknown> | un
 	};
 	files.forEach((text, index) => {
 		const [header, ...rows] = text.split(/\r?\n/);
-		if (!header.replace(/^﻿/, '').toLowerCase().startsWith('order id')) {
+		if (
+			!header
+				.replace(/^\uFEFF/, '')
+				.toLowerCase()
+				.startsWith('order id')
+		) {
 			result.files.push({
 				index,
 				orderCount: 0,

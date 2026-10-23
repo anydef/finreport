@@ -13,12 +13,18 @@ import type {
 	PurchaseOrderUploadResult
 } from './graphql/types';
 import {
+	appliedIntro,
+	applicationLabel,
+	applyActionLabel,
 	applyBlocker,
 	applyWarning,
 	buildApplyInput,
 	buildReview,
 	categoryPickerGroups,
 	chargedTotal,
+	confirmActionLabel,
+	intactNote,
+	isSinglePart,
 	chargeLabel,
 	describeOutcomes,
 	emptyChoices,
@@ -221,10 +227,46 @@ describe('applying a match', () => {
 		expect(applyBlocker(row, choices)).toBeNull();
 	});
 
-	it('is blocked for a single-item order, whatever is chosen', () => {
+	it('is open for a single-item order once its category is chosen', () => {
 		const row = rowFor('303-9169011-8123555');
-		const blocker = applyBlocker(row, { itemCategories: ['a'], remainderCategory: '' });
-		expect(blocker).toContain('Nothing to split');
+		expect(applyBlocker(row, emptyChoices(row.order))).toBe('Choose a category for every item.');
+		expect(applyBlocker(row, { itemCategories: ['a'], remainderCategory: '' })).toBeNull();
+	});
+
+	it('is blocked when no item has an amount', () => {
+		const row = rowFor('303-9169011-8123555');
+		row.order = {
+			...row.order,
+			items: row.order.items.map((i) => ({ ...i, lineTotal: '0.0000' }))
+		};
+		expect(applyBlocker(row, { itemCategories: [''], remainderCategory: '' })).toContain(
+			'Nothing to apply'
+		);
+	});
+
+	it('words a one-item order as setting a category, not a split', () => {
+		const one = rowFor('303-9169011-8123555');
+		expect(isSinglePart(one)).toBe(true);
+		expect(applyActionLabel(one)).toBe('Set category…');
+		expect(confirmActionLabel(one)).toBe('Yes, set the category');
+		const warning = applyWarning(one);
+		expect(warning).toContain('This changes your transactions');
+		expect(warning).toContain('not split');
+		expect(warning).toContain('category you chose');
+		expect(warning).toContain('undo');
+	});
+
+	it('keeps the split wording for an order with several parts', () => {
+		expect(isSinglePart(two())).toBe(false);
+		expect(applyActionLabel(two())).toBe('Apply split…');
+		expect(confirmActionLabel(two())).toBe('Yes, split the transaction');
+	});
+
+	it('counts shipping as a second part, so one item plus shipping is a split', () => {
+		const row = rowFor('303-9169011-8123555');
+		row.order = { ...row.order, remainder: '1.5000' };
+		expect(isSinglePart(row)).toBe(false);
+		expect(applyActionLabel(row)).toBe('Apply split…');
 	});
 
 	it('is blocked for an order the matcher sent to review', () => {
@@ -333,6 +375,35 @@ describe('the apply and undo mock', () => {
 		expect(buildReview(report()).applied).toHaveLength(0);
 	});
 
+	it('applies a single-item order as a category and undoes it as one', () => {
+		resetAmazonMock();
+		const out = mockApplyPurchaseOrderSplit({
+			input: {
+				orderId: '303-9169011-8123555',
+				itemCategories: ['personal'],
+				remainderCategory: null
+			}
+		});
+		if (!('data' in out)) throw new Error('expected data');
+		const outcome = out.data.applyPurchaseOrderSplit.outcomes[0];
+		expect(outcome.status).toBe('APPLIED');
+		expect(outcome.appliedAs).toBe('CATEGORY');
+		expect(outcome.parts).toHaveLength(1);
+		const app = buildReview(report()).applied[0].applications[0];
+		expect(app.appliedAs).toBe('CATEGORY');
+		const undone = mockUndoPurchaseOrderSplit({ orderId: '303-9169011-8123555' });
+		expect(undone.undoPurchaseOrderSplit.outcomes[0].appliedAs).toBe('CATEGORY');
+	});
+
+	it('reports a multi-item order as a split and a skip as written nothing', () => {
+		resetAmazonMock();
+		const ok = apply('307-5555555-6666666');
+		const skipped = apply('308-7777777-8888888');
+		if (!('data' in ok) || !('data' in skipped)) throw new Error('expected data');
+		expect(ok.data.applyPurchaseOrderSplit.outcomes[0].appliedAs).toBe('SPLIT');
+		expect(skipped.data.applyPurchaseOrderSplit.outcomes[0].appliedAs).toBeNull();
+	});
+
 	it('refuses an order that needs review', () => {
 		resetAmazonMock();
 		expect('errors' in apply('305-1111111-2222222')).toBe(true);
@@ -341,8 +412,12 @@ describe('the apply and undo mock', () => {
 
 describe('describeOutcomes', () => {
 	const part = { amount: '-1', categorySlug: 'a', label: 'x' };
-	const outcome = (status: string, reason: string | null = null) =>
-		({ transactionId: 't', status, reason, parts: [part, part] }) as never;
+	const outcome = (
+		status: string,
+		reason: string | null = null,
+		appliedAs: string | null = null,
+		parts = [part, part]
+	) => ({ transactionId: 't', status, reason, parts, appliedAs }) as never;
 
 	it('counts what was split and names what was left alone', () => {
 		const out = describeOutcomes(
@@ -355,6 +430,43 @@ describe('describeOutcomes', () => {
 		expect(out.tone).toBe('warn');
 		expect(out.lines[0]).toBe('Split 1 transaction into 2 parts.');
 		expect(out.lines).toContain('Left unchanged: it already has a split');
+	});
+
+	it('says a category was set, not a split', () => {
+		const out = describeOutcomes(
+			{
+				orderId: 'o',
+				outcomes: [outcome('APPLIED', null, 'CATEGORY', [part])]
+			},
+			'apply'
+		);
+		expect(out.tone).toBe('good');
+		expect(out.lines).toEqual(['Category set on 1 transaction.']);
+	});
+
+	it('reports a mix of splits and categories on separate lines', () => {
+		const out = describeOutcomes(
+			{
+				orderId: 'o',
+				outcomes: [outcome('APPLIED', null, 'SPLIT'), outcome('APPLIED', null, 'CATEGORY', [part])]
+			},
+			'apply'
+		);
+		expect(out.lines).toEqual([
+			'Split 1 transaction into 2 parts.',
+			'Category set on 1 transaction.'
+		]);
+	});
+
+	it('words a repeat and an undo by how the charge was written', () => {
+		const cat = outcome('ALREADY_APPLIED', null, 'CATEGORY', [part]);
+		expect(describeOutcomes({ orderId: 'o', outcomes: [cat] }, 'apply').lines[0]).toContain(
+			'already had the category set'
+		);
+		const undo = outcome('UNDONE', null, 'CATEGORY', [part]);
+		const out = describeOutcomes({ orderId: 'o', outcomes: [undo] }, 'undo');
+		expect(out.lines[0]).toContain('Category removed');
+		expect(out.lines[0]).not.toContain('Split');
 	});
 
 	it('is a failure when nothing was changed', () => {
@@ -451,5 +563,34 @@ describe('mockProposePurchaseOrderCategories', () => {
 		expect(new Set(sources.map((s) => s.source))).toEqual(new Set(['RULE', 'LLM', 'NONE']));
 		expect(sources.find((s) => s.source === 'NONE')?.categorySlug).toBeNull();
 		expect('errors' in mockProposePurchaseOrderCategories({ orderId: 'x' })).toBe(true);
+	});
+});
+
+describe('applications on record', () => {
+	const part = { amount: '-1', categorySlug: 'a', label: 'x' };
+	const app = (appliedAs: 'SPLIT' | 'CATEGORY', intact = true) => ({
+		appliedAs,
+		intact,
+		parts: appliedAs === 'SPLIT' ? [part, part] : [part]
+	});
+
+	it('labels a category application as such and a split by its part count', () => {
+		expect(applicationLabel(app('CATEGORY'))).toBe('Category set');
+		expect(applicationLabel(app('SPLIT'))).toBe('Split into 2 parts');
+	});
+
+	it('says nothing while intact, and never claims a split for a category', () => {
+		expect(intactNote(app('SPLIT'))).toBeNull();
+		expect(intactNote(app('CATEGORY'))).toBeNull();
+		expect(intactNote(app('CATEGORY', false))).not.toMatch(/split/i);
+		expect(intactNote(app('SPLIT', false))).toContain('undo will not touch it');
+	});
+
+	it('words the applied-card intro by what was applied', () => {
+		const rowOf = (...kinds: ('SPLIT' | 'CATEGORY')[]) =>
+			({ applications: kinds.map((k) => app(k)) }) as never;
+		expect(appliedIntro([rowOf('CATEGORY')])).not.toMatch(/split/i);
+		expect(appliedIntro([rowOf('SPLIT')])).toContain('removes the split');
+		expect(appliedIntro([rowOf('SPLIT'), rowOf('CATEGORY')])).toContain('split or category');
 	});
 });

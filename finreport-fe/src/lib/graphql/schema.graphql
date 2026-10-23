@@ -31,6 +31,22 @@ type Account {
 	displayName: String!
 }
 
+"""
+How an application is written to the transaction. Decided by the part count
+alone, so the record itself says how to undo it.
+"""
+enum AppliedAs {
+	"""
+	Two or more parts: a `transaction_split`.
+	"""
+	SPLIT
+	"""
+	Exactly one part: the charge is that single item, so its category is
+	pinned on the transaction instead (a one-part split is not a thing).
+	"""
+	CATEGORY
+}
+
 type AppliedPart {
 	"""
 	Signed like the transaction.
@@ -298,6 +314,11 @@ type ChargeOutcome {
 	status: ChargeOutcomeStatus!
 	reason: String
 	parts: [AppliedPart!]!
+	"""
+	How the charge was written, or `null` when nothing was written
+	(`SKIPPED`, `LEFT_ALONE`).
+	"""
+	appliedAs: AppliedAs
 }
 
 enum ChargeOutcomeStatus {
@@ -860,8 +881,13 @@ type PurchaseOrderApplication {
 	appliedAt: DateTime!
 	parts: [AppliedPart!]!
 	"""
-	The live split still equals what was applied, so undo will remove it.
-	`false` means it was changed or removed since; undo will not touch it.
+	Whether this was written as a split or as a pinned category.
+	"""
+	appliedAs: AppliedAs!
+	"""
+	The transaction still carries exactly what was applied - the split, or
+	the pinned category - so undo will remove it. `false` means it was
+	changed or removed since; undo will not touch it.
 	"""
 	intact: Boolean!
 }

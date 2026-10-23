@@ -49,6 +49,7 @@ query PurchaseOrderMatches {
 				transactionId
 				appliedAt
 				intact
+				appliedAs
 				parts {
 					amount
 					categorySlug
@@ -85,6 +86,7 @@ const OUTCOME_FIELDS = `
 		transactionId
 		status
 		reason
+		appliedAs
 		parts {
 			amount
 			categorySlug

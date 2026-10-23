@@ -5,8 +5,8 @@
 	 *
 	 * Uploading records evidence only. It does not split, recategorise or
 	 * otherwise change any transaction. Applying a clean match does: it splits
-	 * the order's bank charge into one part per item, in categories the user
-	 * picks, behind an explicit confirmation, and can be undone. The matcher
+	 * the order's bank charge into one part per item (or, for a single item, sets
+	 * its category), in categories the user picks, behind an explicit confirmation, and can be undone. The matcher
 	 * calls a match clean only when exactly one assignment of items to charges
 	 * reconciles, so most of this page is the cases it declined, grouped by
 	 * why and worded by the matcher itself. The server re-checks everything on
@@ -18,6 +18,9 @@
 	import Card from '$lib/components/Card.svelte';
 	import SearchMenu from '$lib/components/SearchMenu.svelte';
 	import {
+		appliedIntro,
+		applicationLabel,
+		applyActionLabel,
 		applyBlocker,
 		applyProposals,
 		applyWarning,
@@ -25,10 +28,13 @@
 		buildReview,
 		categoryPickerGroups,
 		chargeLabel,
+		confirmActionLabel,
 		describeOutcomes,
 		emptyChoices,
+		intactNote,
 		proposalReasonText,
 		proposalSourceLabel,
+		readyIntro,
 		reviewHeadline,
 		uploadOutcome
 	} from '$lib/amazonView';
@@ -123,7 +129,7 @@
 				actionOutcome = {
 					orderId: row.orderId,
 					tone: 'bad',
-					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not apply the split.']
+					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not apply.']
 				};
 			} else {
 				actionOutcome = {
@@ -152,7 +158,7 @@
 				actionOutcome = {
 					orderId: row.orderId,
 					tone: 'bad',
-					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not undo the split.']
+					lines: [result.error.graphQLErrors[0]?.message ?? 'Could not undo.']
 				};
 			} else {
 				actionOutcome = {
@@ -335,10 +341,7 @@
 
 		<Card title="Match cleanly ({review.ready.length})">
 			<p class="mb-2 text-sm text-slate-600">
-				Exactly one way of assigning the items to the charges reconciles. Nothing has been applied.
-				<strong>Applying changes your transactions:</strong> the bank charge is split into one part per
-				item, in the categories you choose. It never replaces a split or category you set yourself, and
-				you can undo it.
+				{readyIntro()}
 			</p>
 			<ul class="flex flex-col gap-3" aria-label="Orders that match cleanly">
 				{#each review.ready as row (row.orderId)}
@@ -392,7 +395,7 @@
 										onclick={() => applyOrder(row)}
 										disabled={acting !== null}
 									>
-										{acting === row.orderId ? 'Applying…' : 'Yes, split the transaction'}
+										{acting === row.orderId ? 'Applying…' : confirmActionLabel(row)}
 									</Button>
 									<Button
 										variant="ghost"
@@ -417,7 +420,7 @@
 									onclick={() => (confirming = row.orderId)}
 									disabled={blocker !== null || acting !== null}
 								>
-									Apply split…
+									{applyActionLabel(row)}
 								</Button>
 								{#if blocker}
 									<span class="text-xs text-slate-500">{blocker}</span>
@@ -444,9 +447,7 @@
 		{#if review.applied.length > 0}
 			<Card title="Applied ({review.applied.length})">
 				<p class="mb-2 text-sm text-slate-600">
-					These orders have split your transactions. <strong>Undo</strong> removes the split and the
-					transaction goes back to its automatic category, as it was before. If you have changed a split
-					yourself since, undo leaves your version alone.
+					{appliedIntro(review.applied)}
 				</p>
 				<ul class="flex flex-col gap-3" aria-label="Applied orders">
 					{#each review.applied as row (row.orderId)}
@@ -462,8 +463,9 @@
 								</Button>
 							</div>
 							{#each row.applications as app (app.transactionId)}
+								<p class="mt-2 text-xs font-medium text-slate-700">{applicationLabel(app)}</p>
 								<ul
-									class="mt-2 text-xs text-slate-600"
+									class="mt-1 text-xs text-slate-600"
 									aria-label="Parts applied to {app.transactionId}"
 								>
 									{#each app.parts as part, i (i)}
@@ -474,10 +476,8 @@
 											<span>{formatAmount(part.amount, row.currency)}</span>
 										</li>
 									{/each}
-									{#if !app.intact}
-										<li class="mt-1 text-amber-900">
-											Changed since it was applied: undo will not touch it.
-										</li>
+									{#if intactNote(app)}
+										<li class="mt-1 text-amber-900">{intactNote(app)}</li>
 									{/if}
 								</ul>
 							{/each}

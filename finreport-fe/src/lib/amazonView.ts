@@ -13,6 +13,7 @@
 import { decimalToNumber } from './chartShaping';
 import { categoryOptionGroups, type CategoryOptionGroup } from './categoryTree';
 import type {
+	AppliedAs,
 	ApplyPurchaseOrderInput,
 	Category,
 	ChargeOutcome,
@@ -269,8 +270,8 @@ export function applyBlocker(row: MatchRow, choices: ApplyChoices): string | nul
 	if (row.state !== 'apply') return 'The matcher no longer reports this order as a clean match.';
 	const needed = splittableIndexes(row.order);
 	const hasRemainder = !isZero(row.order.remainder);
-	if (needed.length + (hasRemainder ? 1 : 0) < 2) {
-		return 'Nothing to split: a single item with no shipping or adjustments stays one transaction.';
+	if (needed.length + (hasRemainder ? 1 : 0) < 1) {
+		return 'Nothing to apply: no item has an amount.';
 	}
 	if (needed.some((i) => !choices.itemCategories[i])) {
 		return 'Choose a category for every item.';
@@ -289,10 +290,48 @@ export function buildApplyInput(row: MatchRow, choices: ApplyChoices): ApplyPurc
 	};
 }
 
+/**
+ * True when the order has exactly one part to write (one priced item, no
+ * shipping or adjustments). Such a charge has nothing to divide, so the server
+ * sets its category instead of splitting it. A multi-charge order may still
+ * have single-part charges; the outcome's `appliedAs` reports those.
+ */
+export function isSinglePart(row: MatchRow): boolean {
+	const parts = splittableIndexes(row.order).length + (isZero(row.order.remainder) ? 0 : 1);
+	return parts === 1;
+}
+
+/** The button that opens the confirmation. */
+export function applyActionLabel(row: MatchRow): string {
+	return isSinglePart(row) ? 'Set category…' : 'Apply split…';
+}
+
+/** The button that confirms it. */
+export function confirmActionLabel(row: MatchRow): string {
+	return isSinglePart(row) ? 'Yes, set the category' : 'Yes, split the transaction';
+}
+
+/** Intro for the "match cleanly" card. */
+export function readyIntro(): string {
+	return (
+		'Exactly one way of assigning the items to the charges reconciles. Nothing has been applied. ' +
+		'Applying changes your transactions: a bank charge with several items is split into one part per ' +
+		'item, and one with a single item gets that item’s category, in the categories you choose. ' +
+		'It never replaces a split or category you set yourself, and you can undo it.'
+	);
+}
+
 /** Plain statement of what pressing Apply will do, shown before it is confirmed. */
 export function applyWarning(row: MatchRow): string {
 	const n = row.charges.length;
 	const charges = n === 1 ? 'the bank charge' : `each of the ${n} bank charges`;
+	if (isSinglePart(row)) {
+		return (
+			`This changes your transactions. ${charges[0].toUpperCase()}${charges.slice(1)} for this order ` +
+			`is a single item, so it is not split: the category you chose will be set on the transaction. ` +
+			`A transaction you have already split or categorised yourself is left as it is. You can undo it afterwards.`
+		);
+	}
 	return (
 		`This changes your transactions. ${charges[0].toUpperCase()}${charges.slice(1)} for this order ` +
 		`will be replaced by one split part per item, in the categories you chose. A transaction you have ` +
@@ -315,6 +354,47 @@ export function categoryPickerGroups(categories: Category[]): CategoryOptionGrou
 		.filter((g) => g.options.length > 0);
 }
 
+/** What an application on record did to its transaction. */
+export function applicationLabel(
+	app: Pick<PurchaseOrderApplication, 'appliedAs' | 'parts'>
+): string {
+	return app.appliedAs === 'CATEGORY'
+		? 'Category set'
+		: `Split into ${plural(app.parts.length, 'part', 'parts')}`;
+}
+
+/** Warning for an application the user changed since, or null while it is intact. */
+export function intactNote(
+	app: Pick<PurchaseOrderApplication, 'appliedAs' | 'intact'>
+): string | null {
+	if (app.intact) return null;
+	return app.appliedAs === 'CATEGORY'
+		? 'The category was changed since it was applied: undo will not touch it.'
+		: 'Changed since it was applied: undo will not touch it.';
+}
+
+/** Intro for the "Applied" card, from what the applications actually were. */
+export function appliedIntro(rows: MatchRow[]): string {
+	const kinds = new Set<AppliedAs>(rows.flatMap((r) => r.applications.map((a) => a.appliedAs)));
+	const wrote =
+		kinds.size === 1 && kinds.has('CATEGORY')
+			? 'set categories on'
+			: kinds.size === 1
+				? 'split'
+				: 'split or set categories on';
+	const removes =
+		kinds.size === 1 && kinds.has('CATEGORY')
+			? 'the category'
+			: kinds.size === 1
+				? 'the split'
+				: 'the split or category';
+	return (
+		`These orders have ${wrote} your transactions. Undo removes ${removes} and the transaction ` +
+		`goes back to its automatic category, as it was before. If you have changed it yourself since, ` +
+		`undo leaves your version alone.`
+	);
+}
+
 export interface ActionOutcome {
 	tone: 'good' | 'warn' | 'bad';
 	lines: string[];
@@ -334,28 +414,47 @@ export function describeOutcomes(
 	if (outcomes.length === 0) {
 		return {
 			tone: 'warn',
-			lines: [mode === 'undo' ? 'Nothing to undo for this order.' : 'No charge was found to split.']
+			lines: [mode === 'undo' ? 'Nothing to undo for this order.' : 'No charge was found to apply.']
 		};
 	}
 	const done = count(outcomes, mode === 'apply' ? 'APPLIED' : 'UNDONE');
 	const already = count(outcomes, 'ALREADY_APPLIED');
 	const problems = [...count(outcomes, 'SKIPPED'), ...count(outcomes, 'LEFT_ALONE')];
-	if (done.length > 0) {
+	// Anything not reported as a category is a split, as before `appliedAs` existed.
+	const asCategory = (list: ChargeOutcome[]) => list.filter((o) => o.appliedAs === 'CATEGORY');
+	const asSplit = (list: ChargeOutcome[]) => list.filter((o) => o.appliedAs !== 'CATEGORY');
+	const split = asSplit(done);
+	const category = asCategory(done);
+	if (split.length > 0) {
 		const verb = mode === 'apply' ? 'Split' : 'Restored';
 		lines.push(
-			`${verb} ${plural(done.length, 'transaction', 'transactions')}` +
+			`${verb} ${plural(split.length, 'transaction', 'transactions')}` +
 				(mode === 'apply'
 					? ` into ${plural(
-							done.reduce((n, o) => n + o.parts.length, 0),
+							split.reduce((n, o) => n + o.parts.length, 0),
 							'part',
 							'parts'
 						)}.`
 					: ' to how they were before.')
 		);
 	}
-	if (already.length > 0) {
+	if (category.length > 0) {
 		lines.push(
-			`${plural(already.length, 'transaction was', 'transactions were')} already split; nothing changed.`
+			mode === 'apply'
+				? `Category set on ${plural(category.length, 'transaction', 'transactions')}.`
+				: `Category removed from ${plural(category.length, 'transaction', 'transactions')}; back to how ${category.length === 1 ? 'it was' : 'they were'} before.`
+		);
+	}
+	const alreadySplit = asSplit(already);
+	const alreadyCategory = asCategory(already);
+	if (alreadySplit.length > 0) {
+		lines.push(
+			`${plural(alreadySplit.length, 'transaction was', 'transactions were')} already split; nothing changed.`
+		);
+	}
+	if (alreadyCategory.length > 0) {
+		lines.push(
+			`${plural(alreadyCategory.length, 'transaction', 'transactions')} already had the category set; nothing changed.`
 		);
 	}
 	for (const o of problems) {
