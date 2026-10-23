@@ -283,6 +283,24 @@ impl MutationRoot {
         crate::graphql::purchase_order_apply::apply_purchase_order(db, publisher(ctx), user, input).await
     }
 
+    /// `proposePurchaseOrderCategories`: a suggested category per item of one
+    /// order, from a rule, the LLM cache or the configured LLM, in that order.
+    /// **Changes nothing the user owns**: no split, label or transaction;
+    /// the only write is a fresh LLM answer into the shared cache.
+    async fn propose_purchase_order_categories(
+        &self,
+        ctx: &Context<'_>,
+        order_id: String,
+    ) -> GqlResult<Vec<crate::graphql::purchase_order_proposals::PurchaseOrderItemProposal>> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        let settings = ctx.data::<Arc<Settings>>()?;
+        crate::graphql::purchase_order_proposals::propose_purchase_order_categories(
+            db, publisher(ctx), settings, user, order_id,
+        )
+        .await
+    }
+
     /// `undoPurchaseOrderSplit`: removes the splits that applying this order
     /// wrote, but only those still exactly as written; a split the user has
     /// since changed is left alone.

@@ -19,6 +19,7 @@ pub mod links;
 mod loaders;
 mod mutations;
 pub mod purchase_order_apply;
+pub mod purchase_order_proposals;
 pub mod purchase_orders;
 mod queries;
 mod review_queue;

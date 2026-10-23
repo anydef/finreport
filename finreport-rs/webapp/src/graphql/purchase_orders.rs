@@ -386,7 +386,7 @@ pub fn parse_files(files: &[String]) -> Result<(Vec<PurchaseOrderFileResult>, Ve
 
 /// The user's stored Amazon orders (all, or just `ids`), rebuilt as parser
 /// `Order`s: one query for the orders and one for all their items.
-async fn stored_orders(
+pub(crate) async fn stored_orders(
     db: &impl ConnectionTrait,
     user_id: Uuid,
     ids: Option<&[String]>,

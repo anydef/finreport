@@ -616,18 +616,18 @@ pub async fn invalidate_contradicted_cache_entry(
 }
 
 /// A provider answer after checking its slug against the catalog.
-struct ValidatedSuggestion {
+pub(crate) struct ValidatedSuggestion {
     /// `category_slug` is `Some` only if the catalog contains it. An unknown
     /// slug is moved into `proposed_path` (unless the model already supplied
     /// one), so `classify_llm_answer` sees it as a `new_category` proposal.
-    suggestion: categorizer::provider::LabelSuggestion,
+    pub(crate) suggestion: categorizer::provider::LabelSuggestion,
     /// The slug that was rejected, for logging.
-    rejected_slug: Option<String>,
+    pub(crate) rejected_slug: Option<String>,
 }
 
 /// The single place a provider's `category_slug` is trusted: only a slug the
 /// catalog contains survives as `category_slug` (and later a `category_id`).
-fn validate_suggestion(
+pub(crate) fn validate_suggestion(
     mut suggestion: categorizer::provider::LabelSuggestion,
     catalog: &CategoryCatalog,
 ) -> ValidatedSuggestion {
@@ -645,7 +645,7 @@ fn validate_suggestion(
 
 /// A cache entry is usable if it holds no category id (a proposal / decline)
 /// or an id that names a catalog entry.
-fn cache_entry_is_usable(cached: &entity::entities::llm_label_cache::Model, catalog: &CategoryCatalog) -> bool {
+pub(crate) fn cache_entry_is_usable(cached: &entity::entities::llm_label_cache::Model, catalog: &CategoryCatalog) -> bool {
     match cached.category_id {
         None => true,
         Some(id) => catalog
@@ -910,7 +910,7 @@ async fn publish_rule(publisher: &EventPublisher, record: &RuleRecord) {
 /// Minimal headers for the labeling topics (§2.2): unlike the ingest topics,
 /// these carry our own JSON (versioned by the payload's own
 /// `schema_version`), so only `origin` matters on the wire.
-fn labeling_headers(origin: &str) -> rdkafka::message::OwnedHeaders {
+pub(crate) fn labeling_headers(origin: &str) -> rdkafka::message::OwnedHeaders {
     use rdkafka::message::Header;
     rdkafka::message::OwnedHeaders::new().insert(Header {
         key: crate::kafka::envelope::HEADER_ORIGIN,
