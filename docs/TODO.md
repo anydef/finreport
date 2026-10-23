@@ -530,10 +530,17 @@ Consequences, accepted deliberately:
   `OrderItemsDoNotReconcile` and `graphql/purchase_order_apply.rs`'s
   `build_parts` remainder path stays unreachable. Most real orders are in this
   state, so the apply feature covers a narrow slice by design, not by accident.
-- A single-item order still cannot be split at all (`graphql/labels.rs:624`,
-  `if parts.len() < 2`). Such an order needs a category, not a split; the page
-  should offer that rather than a dead row. Still open — XS/S, and the only
-  part of the dead end worth revisiting.
+- ~~A single-item order cannot be split at all~~ — done 2026-10-24. Such an
+  order needs a category, not a split, and now gets one: a charge whose only
+  non-zero part is a single item is applied by pinning that item's category
+  (`applied_as` = `CATEGORY`), recorded in `purchase_order_split` as a one-part
+  record so it stays idempotent and reversible. `labels.rs:624` is unchanged —
+  a one-part split is still refused, because a one-part split says nothing a
+  category does not.
+  Known rough edge: the page's button label is chosen from the *order's* part
+  count while the server decides per *charge*, so a multi-charge order whose
+  charges each hold one item reads "Apply split…" and then reports "Category
+  set". The SDL carries no order-level hint. XS, cosmetic.
 - The review list is informational: reason, totals, charges, no control. That
   is now intended behaviour, not a gap. Do not "fix" it by making unmatched
   orders applicable.
