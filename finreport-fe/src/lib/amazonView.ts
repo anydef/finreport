@@ -203,7 +203,11 @@ export function reviewHeadline(review: AmazonReview): string {
 
 export interface UploadOutcome {
 	tone: 'good' | 'warn' | 'bad';
-	/** Always says nothing was split, so an upload never reads as an action on transactions. */
+	/**
+	 * Says nothing was split whenever an order was read, so an upload never
+	 * reads as an action on transactions. A file rejected whole read nothing,
+	 * so that reassurance is left off — there was no order to act on.
+	 */
 	lines: string[];
 }
 
@@ -225,7 +229,8 @@ export function uploadOutcome(result: PurchaseOrderUploadResult): UploadOutcome 
 	for (const f of rejected) {
 		lines.push(`File ${f.index + 1} was not imported: ${f.error}`);
 	}
-	lines.push('No transaction was changed or split.');
+	if (read > 0) lines.push('No transaction was changed or split.');
+	if (lines.length === 0) lines.push('Nothing was imported.');
 	const tone = rejected.length === 0 ? 'good' : read > 0 ? 'warn' : 'bad';
 	return { tone, lines };
 }

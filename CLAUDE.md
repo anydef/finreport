@@ -13,10 +13,11 @@ Personal-finance reporting: a Rust Comdirect API client + GraphQL backend, feedi
   - `utils` — shared settings/config (`utils::settings::Settings`)
 - `finreport-fe/` — SvelteKit frontend, talks to the GraphQL backend. See `finreport-fe/CLAUDE.md` for frontend-specific commands.
 - `prompts/` — LLM categorization prompt (`categorize.txt`) + category taxonomy
-  (`taxonomy.json`, what `category-seed` publishes). `categories.json` is **dead**:
-  nothing in the repo reads it, it predates the `slug`/`kind` shape, and its
-  subcategory names disagree with the live ones (`child savings` vs
-  `child_savings`). Edit `taxonomy.json`.
+  (`taxonomy.json`, what `category-seed` publishes). The taxonomy lives in
+  `taxonomy.json` alone; an older `categories.json` was deleted on 2026-10-23
+  (unread since May 2026, pre-`slug`/`kind` shape, subcategory names disagreeing
+  with the live ones). `finreport-fe/src/lib/graphql/mocks/categories.json` is a
+  different, live file — frontend mock data, not the taxonomy.
 - `docs/` — Comdirect Postman collection, plus `docs/multi-agent-setup.md` tracking this repo's multi-agent prep
 - `terraform/` — deploy infra (Portainer stack)
 - `.gitea/` — CI

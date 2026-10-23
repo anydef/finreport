@@ -138,7 +138,7 @@ describe('uploadOutcome', () => {
 		unchangedOrders: 0
 	};
 
-	it('always says nothing was split', () => {
+	it('says nothing was split whenever an order was read', () => {
 		expect(uploadOutcome(ok).lines.at(-1)).toBe('No transaction was changed or split.');
 		expect(uploadOutcome(ok).tone).toBe('good');
 	});
@@ -165,6 +165,27 @@ describe('uploadOutcome', () => {
 			unchangedOrders: 0
 		};
 		expect(uploadOutcome(none).tone).toBe('bad');
+	});
+
+	it('leaves off the split reassurance when no order was read', () => {
+		const none: PurchaseOrderUploadResult = {
+			files: [{ index: 0, orderCount: 0, error: 'bad header' }],
+			newOrders: 0,
+			updatedOrders: 0,
+			unchangedOrders: 0
+		};
+		const out = uploadOutcome(none);
+		expect(out.lines).toEqual(['File 1 was not imported: bad header']);
+	});
+
+	it('never returns an empty message', () => {
+		const empty: PurchaseOrderUploadResult = {
+			files: [],
+			newOrders: 0,
+			updatedOrders: 0,
+			unchangedOrders: 0
+		};
+		expect(uploadOutcome(empty).lines).toEqual(['Nothing was imported.']);
 	});
 });
 
