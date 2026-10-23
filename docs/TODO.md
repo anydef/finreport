@@ -338,6 +338,36 @@ nothing about it was found wrong.
   `account-balance` per currency; and that the 3-year limit makes a first
   import incomplete by nature, which belongs in the runbook.
 
+## Amazon ingest: open after slice 2 (2026-10-23)
+
+- **The upload publishes the wrong schema version in its headers** — S, do
+  before this ships. The mutation reuses `events::publish_event`, whose headers
+  carry `kafka::labeling::CURRENT_SCHEMA_VERSION` — the *labeling* schema
+  version, not the purchase-order one. Harmless today because the two happen to
+  agree in meaning to nobody, but it actively undermines the mechanism we are
+  relying on: the record wraps `amazon_orders::Order` unchanged, so its serde
+  shape is the wire contract, and a `schema_version` bump is the only defence
+  against a field rename breaking stored records. A bump that does not reach the
+  header defends nothing.
+- **Amazon charges are found by text match** — M. The match report selects
+  candidate bank lines with an ILIKE on `amazon`/`amzn` against description or
+  counterparty. A charge that carries an order id but neither word is invisible
+  to the report, and would look like "no bank charge" for an order that in fact
+  matched. Comdirect lines do carry AMZN in practice, so this is a latent gap
+  rather than a present bug. Consider also matching on a description containing
+  something shaped like an order id, which `classify_description` already
+  recognises.
+- **One unexplained integration failure** — S, worth one deliberate look. During
+  slice 2 a full `--features integration` run reported 728 passed, 1 failed; the
+  agent did not capture which test, and two later runs were clean at 729. It is
+  probably the shared-database flakiness this repo already sees under parallel
+  worktrees, but "probably a flake" is not evidence. If it recurs, capture the
+  test name before rerunning.
+- **The review page and the real file picker are visually unverified** — S.
+  Type-checks pass and the mock path has unit tests, but no browser has rendered
+  `/admin/amazon`, and the actual file-input upload has never been exercised.
+  Review with `just dev-fe-mocks`.
+
 ## Housekeeping
 
 - **Delete `prompts/categories.json`** — XS. Dead since May 2026: nothing in
