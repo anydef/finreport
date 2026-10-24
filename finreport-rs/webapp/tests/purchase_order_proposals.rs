@@ -376,3 +376,119 @@ async fn another_users_order_is_not_found() {
         .await;
     assert_eq!(r.errors.len(), 1);
 }
+
+// ---------------------------------------------------------------------------
+// The read path (`purchaseOrderMatches`) and the process-wide budget, through
+// the real schema.
+// ---------------------------------------------------------------------------
+
+const ITEMS_QUERY: &str = "{ purchaseOrderMatches { unmatchedOrders { orderId items { title suggestedCategorySlug suggestionSource } } } }";
+
+/// The suggestion fields of `f`'s order, as the page would see them.
+async fn read_items(schema: &webapp::graphql::AppSchema, f: &Fixture) -> Vec<serde_json::Value> {
+    let r = schema
+        .execute(request_with_auth(Request::new(ITEMS_QUERY), Some(f.user.clone()), RawSessionToken::default()))
+        .await;
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let data = r.data.into_json().unwrap();
+    let orders = data["purchaseOrderMatches"]["unmatchedOrders"].as_array().unwrap().clone();
+    let order = orders.iter().find(|o| o["orderId"] == f.order_id.as_str()).expect("order in report");
+    order["items"].as_array().unwrap().clone()
+}
+
+/// Stores `slug` as the cached answer for `order.items[position]` under the
+/// fingerprint the read path will look up (the default `fake` provider's).
+async fn seed_cache(db: &DatabaseConnection, f: &Fixture, position: usize, slug: &str) {
+    let settings = common::dummy_settings();
+    let provider = categorizer::factory::build_provider(&settings).unwrap();
+    let order = order_of(db, f).await;
+    let fp = item_fingerprint(provider.as_ref(), &settings.prompt_version, &order.items[position]);
+    proj::project_llm_cache(
+        db,
+        &fp,
+        Some(CacheRecord {
+            schema_version: CURRENT_SCHEMA_VERSION,
+            fingerprint: fp.clone(),
+            category_slug: Some(slug.to_string()),
+            proposed_path: None,
+            confidence: 0.9,
+            provider: provider.id().into(),
+            model: provider.model().into(),
+            prompt_version: settings.prompt_version.clone(),
+            reasoning: None,
+            created_at: Utc::now(),
+        }),
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn the_read_path_serves_a_stored_answer_and_a_rule_beats_a_different_cached_one() {
+    let db = common::db().await;
+    let f = fixture(&db).await;
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let (_, cached_slug) = projected_category(&db, "expense.ppc").await;
+    let (rule_cat, rule_slug) = projected_category(&db, "expense.ppr").await;
+
+    // Item 0: cache only. Item 1: a rule AND a different cached answer.
+    seed_cache(&db, &f, 0, &cached_slug).await;
+    seed_cache(&db, &f, 1, &cached_slug).await;
+    add_rule(&db, &f.titles[1].to_lowercase(), rule_cat).await;
+
+    let items = read_items(&schema, &f).await;
+    let item = |t: &str| items.iter().find(|i| i["title"] == t).unwrap().clone();
+    let from_cache = item(&f.titles[0]);
+    assert_eq!(from_cache["suggestedCategorySlug"], cached_slug.as_str());
+    assert_eq!(from_cache["suggestionSource"], "CACHE");
+    let from_rule = item(&f.titles[1]);
+    assert_eq!(from_rule["suggestedCategorySlug"], rule_slug.as_str());
+    assert_eq!(from_rule["suggestionSource"], "RULE", "the rule outranks the cache");
+}
+
+#[tokio::test]
+async fn an_item_with_neither_rule_nor_cache_reports_no_suggestion_and_the_query_succeeds() {
+    let db = common::db().await;
+    let f = fixture(&db).await;
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let items = read_items(&schema, &f).await;
+    assert_eq!(items.len(), 2);
+    for i in &items {
+        assert!(i["suggestedCategorySlug"].is_null(), "{i}");
+        assert_eq!(i["suggestionSource"], "NONE");
+    }
+}
+
+#[tokio::test]
+async fn the_shared_budget_bounds_the_process_not_one_call() {
+    let db = common::db().await;
+    let mut settings = (*common::dummy_settings()).clone();
+    settings.llm_max_requests_per_run = 1;
+    settings.llm_budget_window_secs = 1_000_000; // no refill mid-test
+    let schema = create_schema(db.clone(), std::sync::Arc::new(settings));
+
+    let propose = |f: &Fixture| {
+        let q = format!(
+            r#"mutation {{ proposePurchaseOrderCategories(orderId: "{}") {{ source reason }} }}"#,
+            f.order_id
+        );
+        request_with_auth(Request::new(q), Some(f.user.clone()), RawSessionToken::default())
+    };
+    let first = fixture(&db).await;
+    let r = schema.execute(propose(&first)).await;
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let out = r.data.into_json().unwrap()["proposePurchaseOrderCategories"].clone();
+    assert_eq!(out[0]["source"], "LLM", "the one allowance is spent here");
+    assert_eq!(out[1]["reason"], "llm_budget_exhausted");
+
+    // A separate call, with its own uncached items, finds the allowance gone.
+    // Before the budget was process-wide, every call started with a fresh one.
+    let second = fixture(&db).await;
+    let r = schema.execute(propose(&second)).await;
+    assert!(r.errors.is_empty(), "{:?}", r.errors);
+    let out = r.data.into_json().unwrap()["proposePurchaseOrderCategories"].clone();
+    for item in out.as_array().unwrap() {
+        assert_eq!(item["source"], "NONE", "{item}");
+        assert_eq!(item["reason"], "llm_budget_exhausted", "{item}");
+    }
+}

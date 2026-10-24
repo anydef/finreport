@@ -1619,6 +1619,7 @@ mod purchase_orders {
                 &[
                     NewTopic::new(TOPIC_PURCHASE_ORDER, 1, TopicReplication::Fixed(1)),
                     NewTopic::new(TOPIC_USER_LABEL, 1, TopicReplication::Fixed(1)),
+                    NewTopic::new(webapp::kafka::labeling::TOPIC_LLM_CACHE, 1, TopicReplication::Fixed(1)),
                 ],
                 &AdminOptions::new().request_timeout(Some(Duration::from_secs(10))),
             )
@@ -1701,6 +1702,44 @@ mod purchase_orders {
         let moved = gql(&schema, &t.user, upload_query(&[csv(&[(&a, "10.00", "10.00", "Return started")])])).await;
         let moved = moved.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
         assert_eq!((moved["updatedOrders"].as_i64(), moved["newOrders"].as_i64()), (Some(1), Some(0)));
+    }
+
+    async fn llm_cache_rows(db: &DatabaseConnection) -> u64 {
+        use sea_orm::PaginatorTrait;
+        entity::entities::llm_label_cache::Entity::find().count(db).await.unwrap()
+    }
+
+    /// Cache rows are global, so the count is compared across the upload while
+    /// no other test in this binary writes to it (they all use the `fake`
+    /// provider, which the upload never warms against).
+    #[tokio::test]
+    async fn the_fake_provider_writes_no_cache_rows_on_upload_and_a_re_upload_warms_nothing() {
+        let db = common::db().await;
+        let (_kafka, bootstrap) = kafka_with_topic().await;
+        let mut settings = (*settings_with_kafka(&bootstrap)).clone();
+        assert_eq!(settings.llm_provider, "fake", "the default");
+        settings.llm_max_requests_per_run = 1_000;
+        let schema = create_schema(db.clone(), Arc::new(settings));
+        let t = tenant(&db, &format!("po-warm-{}", Uuid::new_v4().simple())).await;
+        // Titles unique to this run: a cache row left by an earlier run would
+        // otherwise answer from the cache and hide a write.
+        let tag = Uuid::new_v4().simple().to_string();
+        let file = csv(&[(&order_id(), "10.00", "10.00", "Delivered"), (&order_id(), "5.00", "5.00", "Delivered")])
+            .replace("Item 0", &format!("Zw{tag} Item 0"))
+            .replace("Item 1", &format!("Zw{tag} Item 1"));
+
+        let before = llm_cache_rows(&db).await;
+        let first = gql(&schema, &t.user, upload_query(&[file.clone()])).await;
+        assert!(first.errors.is_empty(), "{:?}", first.errors);
+        let first = first.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
+        assert_eq!(first["newOrders"], 2, "the orders are still imported");
+        assert_eq!(llm_cache_rows(&db).await, before, "fake answers are never stored on upload");
+
+        let again = gql(&schema, &t.user, upload_query(&[file])).await;
+        assert!(again.errors.is_empty(), "{:?}", again.errors);
+        let again = again.data.into_json().unwrap()["uploadPurchaseOrders"].clone();
+        assert_eq!((again["newOrders"].as_i64(), again["unchangedOrders"].as_i64()), (Some(0), Some(2)));
+        assert_eq!(llm_cache_rows(&db).await, before, "an unchanged order warms nothing");
     }
 
     #[tokio::test]

@@ -603,9 +603,19 @@ Open, deliberately not fixed in those slices:
   rule and cache only), so the "Suggested by AI, check it" badge is reachable
   only through the mutation. The frontend mock fakes one so the badge can be
   reviewed; that is mock-only.
-- **No integration test covers warm-on-upload or the new fields.** The
-  existing upload and matches tests pass but never exercise a provider or a
-  populated cache.
+- **Warm-on-upload against a live provider is still untested** - S. Covered
+  now (`purchase_order_proposals.rs`, and `graphql_integration.rs`'s
+  `purchase_orders` module): the `fake` provider writes no cache rows on upload
+  and a re-upload of unchanged orders warms nothing (the upload test would fail
+  if the `fake` gate were removed); `purchaseOrderMatches` serves a cached answer
+  as `CACHE`, a rule as `RULE` over a different cached answer, and `null`/`NONE`
+  for an item with neither; and the process-wide budget bounds two separate
+  `proposePurchaseOrderCategories` calls through one schema. What remains:
+  `warm_inner` builds its provider from `Settings` internally, so a *real*
+  warm (provider called, rows written, `should_stop_warming` honoured) needs
+  either an HTTP stub server for `APP_llm_provider=openai`/`ollama` with
+  `APP_llm_base_url`, or a small injection seam (e.g. `warm_suggestions` taking
+  an `Option<&dyn LabelProvider>` override). Neither was added.
 
 ## Labeling-engine findings from the proposal slice (2026-10-23)
 
