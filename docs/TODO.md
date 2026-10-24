@@ -129,6 +129,24 @@ against the tree on 2026-10-24, not from memory:
     own instruction; C24 and Scalable are not.
 7. Sankey cash-flow views.
 
+### Housekeeping found 2026-10-24
+
+- **`npm run lint` has not run ESLint in some time.** The script is
+  `prettier --check . && eslint .`, and `prettier --check` currently fails on
+  **12 files**, so the `&&` short-circuits and ESLint never executes. Running
+  `npx eslint .` directly reports **5 pre-existing errors**, none of them new:
+  `svelte/no-unused-svelte-ignore` in `GoalForm.svelte` (1) and
+  `TransactionItem.svelte` (2), an unused `i` in `compare/+page.svelte`, and
+  `svelte/prefer-writable-derived` in `transactions/+page.svelte`. Verified
+  pre-existing by checking the same lines at `6749bd0`.
+- Not fixed here on purpose: `prettier --write` over those 12 files is
+  formatting churn across code unrelated to any current slice, which would
+  bury a real diff. It is a deliberate, separate cleanup — and a user call,
+  since it rewrites files nobody asked to touch. Note that CI runs
+  `just lint` (Rust clippy), **not** `npm run lint`, so nothing is gated on
+  this today; it is a quality gate that has quietly stopped working, not a
+  broken build.
+
 ### Deployment / data actions outstanding (user)
 
 - Redeploy for the labeler, bulk-edit, goals, rules and sort changes.
