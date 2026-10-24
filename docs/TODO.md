@@ -578,9 +578,21 @@ categories."*
 
 Open, deliberately not fixed in those slices:
 
-- **Three independent LLM budgets** now: the labeler, the per-order mutation
-  and the upload. `APP_llm_max_requests_per_run` bounds none of them in
-  total. One worse in count than the 2026-10-23 finding, not in kind.
+- ~~**Three independent LLM budgets**: the labeler, the per-order mutation
+  and the upload.~~ Closed 2026-10-24. The webapp built a fresh `CostGuard`
+  per GraphQL call, so N mutations cost N times the configured cap. It now
+  holds **one** `labeling::budget::SharedLlmBudget`, built in `create_schema`
+  and shared by the mutation and warm-on-upload alike, refilled every
+  `APP_llm_budget_window_secs` (default 3600). A process-lifetime counter
+  would have been wrong: the webapp never restarts, so it would spend the
+  allowance once and then stop suggesting forever.
+
+  The labeler deliberately keeps its own budget. It is a separate container,
+  and one process cannot police another's spend without shared state in
+  Postgres or Kafka - far more machinery than a cost cap is worth. So two
+  budgets remain, and they are two deployments rather than two leaks in one.
+  Note the cap defaults to `0` (unlimited), so nothing was over-spending;
+  this makes the opt-in mean what it says.
 - ~~The `fake` provider answers.~~ Closed 2026-10-24: `warm_inner` returns
   early when `APP_llm_provider` is `fake`, so an import never stores invented
   categories against real orders. Rules still answer on the read path, and the
@@ -602,11 +614,11 @@ Open, deliberately not fixed in those slices:
   (publish, then project), shared with the proposal mutation. A publish failure
   is logged at `error` and still projected, like labels; a replay would then
   lose that one entry, which is refilled by the next LLM call.
-- **Two independent LLM cost guards** — S. The labeler's guard is per process;
-  the proposal mutation builds a fresh `CostGuard` per call, so the two spend
-  against separate budgets and `APP_llm_max_requests_per_run` no longer bounds
-  total spend. Budget exhaustion is at least visible: the item returns `NONE`
-  with `reason: "llm_budget_exhausted"` plus one `warn`.
+- ~~**Two independent LLM cost guards**~~ — fixed 2026-10-24, see the
+  purchase-order section above: the webapp's per-call `CostGuard` became one
+  process-wide windowed budget. The labeler's separate budget stays, by
+  design. Exhaustion stays visible: the item returns `NONE` with
+  `reason: "llm_budget_exhausted"` plus one `warn`.
 - **The item fingerprint is not item-specific** — nil, noted. A bank line whose
   normalised counterparty equals an item's normalised title (with an empty
   description) shares the cache row. Acceptable, but it is an overlap.
