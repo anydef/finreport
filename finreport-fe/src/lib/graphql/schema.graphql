@@ -94,6 +94,16 @@ type AttentionSummary {
 	Labels held for human review (see the `needsReview` filter).
 	"""
 	needsReview: AttentionBucket!
+	"""
+	Rules the system learned from the user's own decisions that are live
+	now: `origin = learned` **and** `state = active`, all-time like the
+	buckets. Deliberately narrow, so do not widen it: `user`-origin rules
+	are hand-authored, not learned from decisions; `in_review`, `revoked`
+	and `rejected` rules label nothing, so counting them would overstate
+	what the user's decisions achieved. Rules are shared, not per-user, so
+	this is not scoped to the caller's accounts.
+	"""
+	rulesLearned: Int!
 }
 
 type Balance {

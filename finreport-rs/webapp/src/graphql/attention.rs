@@ -8,15 +8,17 @@
 //! backlog count would hide the very rows it exists to surface.
 
 use async_graphql::SimpleObject;
-use entity::entities::transaction;
+use entity::entities::{rule, transaction};
 use rust_decimal::Decimal as RustDecimal;
 use sea_orm::sea_query::Expr;
-use sea_orm::{DatabaseConnection, EntityTrait, FromQueryResult, QueryFilter, QuerySelect};
+use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, FromQueryResult, PaginatorTrait, QueryFilter, QuerySelect};
 use uuid::Uuid;
 
 use crate::graphql::scalars::Decimal;
 use crate::graphql::transactions::build_condition_with_category_filters;
 use crate::graphql::types::TransactionFilter;
+use crate::kafka::labeling::{RuleOrigin, RuleState};
+use crate::projection::labeling::{rule_origin_str, rule_state_str};
 
 /// A count of transactions and what they are worth.
 #[derive(SimpleObject, Debug)]
@@ -33,6 +35,24 @@ pub struct AttentionSummary {
     pub uncategorized: AttentionBucket,
     /// Labels held for human review (see the `needsReview` filter).
     pub needs_review: AttentionBucket,
+    /// Rules the system learned from the user's own decisions that are live
+    /// now: `origin = learned` **and** `state = active`, all-time like the
+    /// buckets. Deliberately narrow, so do not widen it: `user`-origin rules
+    /// are hand-authored, not learned from decisions; `in_review`, `revoked`
+    /// and `rejected` rules label nothing, so counting them would overstate
+    /// what the user's decisions achieved. Rules are shared, not per-user, so
+    /// this is not scoped to the caller's accounts.
+    pub rules_learned: i32,
+}
+
+/// One `COUNT(*)` over `rule`; never loads rows.
+async fn count_rules_learned(db: &DatabaseConnection) -> async_graphql::Result<i32> {
+    let n = rule::Entity::find()
+        .filter(rule::Column::Origin.eq(rule_origin_str(RuleOrigin::Learned)))
+        .filter(rule::Column::State.eq(rule_state_str(RuleState::Active)))
+        .count(db)
+        .await?;
+    Ok(i32::try_from(n).unwrap_or(i32::MAX))
 }
 
 #[derive(FromQueryResult)]
@@ -70,18 +90,24 @@ pub async fn fetch_attention_summary(
     scoped_ids: &[Uuid],
 ) -> async_graphql::Result<AttentionSummary> {
     if scoped_ids.is_empty() {
-        return Ok(AttentionSummary { uncategorized: zero_bucket(), needs_review: zero_bucket() });
+        return Ok(AttentionSummary {
+            uncategorized: zero_bucket(),
+            needs_review: zero_bucket(),
+            rules_learned: count_rules_learned(db).await?,
+        });
     }
     let uncategorized = TransactionFilter { uncategorized: Some(true), ..Default::default() };
     let needs_review = TransactionFilter { needs_review: Some(true), ..Default::default() };
-    let (uncategorized, needs_review) = tokio::try_join!(
+    let (uncategorized, needs_review, rules_learned) = tokio::try_join!(
         bucket(db, scoped_ids, &uncategorized),
         bucket(db, scoped_ids, &needs_review),
+        count_rules_learned(db),
     )?;
     tracing::debug!(
         uncategorized = uncategorized.count,
         needs_review = needs_review.count,
+        rules_learned,
         "attention summary"
     );
-    Ok(AttentionSummary { uncategorized, needs_review })
+    Ok(AttentionSummary { uncategorized, needs_review, rules_learned })
 }
