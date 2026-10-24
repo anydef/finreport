@@ -1,3 +1,5 @@
+import { env as publicEnv } from '$env/dynamic/public';
+import { MOCK_CURATION_BASELINES, MOCK_RULES_LEARNED } from '$lib/graphql/curationMock';
 import { createGraphqlClient } from '$lib/graphqlClient';
 import {
 	ACCOUNTS_QUERY,
@@ -84,6 +86,7 @@ function groupingForDimension(dimension: 'counterparty' | 'category'): {
 
 export const load: PageLoad = async ({ fetch, url }) => {
 	const today = new Date();
+	const mockMode = publicEnv.PUBLIC_USE_MOCKS === '1';
 	const preset = parsePeriodSelection(url.searchParams.get('preset'));
 	const range = rangeFromParams(url.searchParams, preset, today);
 	const granularity =
@@ -198,6 +201,9 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
 		categories,
 		attention: attentionResult.data?.attentionSummary as AttentionSummary | undefined,
+		/** Mock mode only: the schema has no "rules learned" field yet. */
+		rulesLearned: mockMode ? MOCK_RULES_LEARNED : undefined,
+		curationSeedBaselines: mockMode ? MOCK_CURATION_BASELINES : undefined,
 		allTags: (tagsResult.data?.tags ?? []) as TagCount[],
 		summary: summaryResult.data?.cashflowSummary as CashflowSummary | undefined,
 		graph: graphResult.data?.cashflowGraph as CashflowGraph | undefined,
