@@ -7,6 +7,7 @@
 	import TransactionFilters from '$lib/components/TransactionFilters.svelte';
 	import NoMatchingTransactions from '$lib/components/NoMatchingTransactions.svelte';
 	import ReimbursementNote from '$lib/components/ReimbursementNote.svelte';
+	import Button from '$lib/components/Button.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import type { PeriodSelection } from '$lib/period';
 	import PeriodOptions from '$lib/components/PeriodOptions.svelte';
@@ -16,6 +17,7 @@
 		writePanelFilters,
 		type PanelFilters
 	} from '$lib/transactionFilters';
+	import { COUNTERPARTY_KEYS_PARAM } from '$lib/counterpartyView';
 	import { writeSort } from '$lib/transactionSort';
 	import type { TransactionSort } from '$lib/graphql/types';
 	import type { PageData } from './$types';
@@ -56,7 +58,22 @@
 		go(params);
 	}
 
-	const filtered = $derived(hasActiveFilters(data.panel));
+	function clearMerchant() {
+		const params = new URLSearchParams(page.url.searchParams);
+		params.delete(COUNTERPARTY_KEYS_PARAM);
+		params.delete('offset');
+		go(params);
+	}
+
+	/** "Clear filters" also drops the merchant, or an empty list could not be escaped. */
+	function onClearAll() {
+		const params = writePanelFilters(clearedFilters(), page.url.searchParams);
+		params.delete(COUNTERPARTY_KEYS_PARAM);
+		params.delete('offset');
+		go(params);
+	}
+
+	const filtered = $derived(hasActiveFilters(data.panel) || data.counterpartyKeys.length > 0);
 </script>
 
 <svelte:head>
@@ -87,6 +104,13 @@
 		{/snippet}
 	</TransactionFilters>
 
+	{#if data.counterpartyKeys.length}
+		<div class="flex items-center justify-between gap-2 text-sm text-slate-600">
+			<p>Narrowed to merchant: {data.counterpartyKeys.join(', ')}</p>
+			<Button variant="ghost" onclick={clearMerchant}>Clear merchant</Button>
+		</div>
+	{/if}
+
 	{#if data.error}
 		<p role="alert" class="text-sm text-[var(--color-spending)]">
 			Failed to load transactions from the GraphQL API.
@@ -98,7 +122,7 @@
 		/>
 		<Card>
 			{#if data.transactions.totalCount === 0}
-				<NoMatchingTransactions {filtered} onclear={() => onFiltersChange(clearedFilters())} />
+				<NoMatchingTransactions {filtered} onclear={onClearAll} />
 			{:else}
 				<TransactionTable
 					transactions={data.transactions.items}

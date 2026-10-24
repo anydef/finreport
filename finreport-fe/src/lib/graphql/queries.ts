@@ -751,3 +751,22 @@ mutation SetAccountSavings($accountId: UUID!, $isSavings: Boolean!) {
 		isSavings
 	}
 }`;
+
+export const COUNTERPARTY_BREAKDOWN_QUERY = `
+query CounterpartyBreakdown($filter: TransactionFilter!, $limit: Int! = 20) {
+	counterpartyBreakdown(filter: $filter, limit: $limit) {
+		rows {
+			counterpartyKey
+			displayName
+			amount
+			transactionCount
+		}
+		other {
+			counterpartyKey
+			displayName
+			amount
+			transactionCount
+		}
+		currency
+	}
+}`;

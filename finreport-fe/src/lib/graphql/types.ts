@@ -768,3 +768,20 @@ export interface PurchaseOrderItemProposal {
 	/** Machine-readable code when `source` is NONE. */
 	reason: string | null;
 }
+
+export interface CounterpartyBreakdownRow {
+	/** `null` = the bucket of transactions with no counterparty key. */
+	counterpartyKey: string | null;
+	displayName: string;
+	/** Signed net: refunds cancel charges, income is positive. There is no share. */
+	amount: Decimal;
+	transactionCount: number;
+}
+
+export interface CounterpartyBreakdown {
+	/** Top counterparties by `|amount|`, largest first. */
+	rows: CounterpartyBreakdownRow[];
+	/** Everything beyond `limit` as one tail row; `null` when nothing is beyond it. */
+	other: CounterpartyBreakdownRow | null;
+	currency: string;
+}

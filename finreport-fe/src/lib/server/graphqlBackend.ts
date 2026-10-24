@@ -46,6 +46,7 @@ import cashflowGraphTruncatedMock from '$lib/graphql/mocks/cashflow-graph-trunca
 import transactionsMock from '$lib/graphql/mocks/transactions.json';
 import categoriesMock from '$lib/graphql/mocks/categories.json';
 import categoryBreakdownMock from '$lib/graphql/mocks/category-breakdown.json';
+import counterpartyBreakdownMock from '$lib/graphql/mocks/counterparty-breakdown.json';
 import categoryBreakdownChildrenMock from '$lib/graphql/mocks/category-breakdown-children.json';
 import {
 	savingsBreakdownMock,
@@ -949,6 +950,8 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		// return NOT_IMPLEMENTED until their owning WP lands.
 		case 'CategoryBreakdown':
 			return { status: 200, body: { data: mockCategoryBreakdown(body.variables) }, setCookies: [] };
+		case 'CounterpartyBreakdown':
+			return { status: 200, body: { data: counterpartyBreakdownMock.data }, setCookies: [] };
 		case 'CategoryComparison':
 			return {
 				status: 200,
