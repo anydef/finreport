@@ -15,9 +15,11 @@
 //! `Debit`. A fresh answer is stored under it exactly as the labeler stores
 //! its own (`CacheRecord`), so a second order of the same product costs no
 //! call, and a rule or label the user later confirms still wins in front of
-//! it. Cost is bounded by the labeler's `CostGuard`
-//! (`APP_llm_max_requests_per_run`), one window per mutation call; a refused
-//! item is `NONE` with reason `llm_budget_exhausted`, never an error.
+//! it. Cost is bounded by the process-wide `SharedLlmBudget`
+//! (`APP_llm_max_requests_per_run`, refilled every
+//! `APP_llm_budget_window_secs`), shared by every mutation call and every
+//! upload's warming; a refused item is `NONE` with reason
+//! `llm_budget_exhausted`, never an error. The labeler keeps its own budget.
 //!
 //! The decisions that need no I/O (`rule_hit`, `cache_hit`, `llm_answer`,
 //! `item_fingerprint`) are pure and unit-tested; `propose_for_items` threads
@@ -46,6 +48,7 @@ use crate::kafka::producer::EventPublisher;
 use crate::labeling::cache_publish::publish_and_project_cache;
 use crate::labeling::fingerprint::{fingerprint, Direction};
 use crate::labeling::normalize::normalize;
+use crate::labeling::budget::SharedLlmBudget;
 use crate::labeling::processor::{cache_entry_is_usable, validate_suggestion, CostGuard};
 use crate::labeling::rules::{most_specific_match, RuleMatchInput};
 use crate::projection::labeling as proj;
@@ -330,6 +333,7 @@ pub async fn propose_purchase_order_categories(
     db: &DatabaseConnection,
     publisher: Option<&Arc<EventPublisher>>,
     settings: &utils::settings::Settings,
+    budget: &SharedLlmBudget,
     user: &AuthenticatedUser,
     order_id: String,
 ) -> async_graphql::Result<Vec<PurchaseOrderItemProposal>> {
@@ -341,14 +345,14 @@ pub async fn propose_purchase_order_categories(
     let rules = proj::active_rules(db).await?;
     let catalog = proj::build_catalog(db).await?;
     let provider = build_provider_or_warn(settings);
-    let guard = CostGuard::new(settings.llm_max_requests_per_run);
+    let guard = budget.guard();
     let sink = KafkaCacheSink { db, publisher };
     let ctx = ProposalContext {
         rules: &rules,
         catalog: &catalog,
         provider: provider.as_deref(),
         prompt_version: &settings.prompt_version,
-        cost_guard: &guard,
+        cost_guard: guard,
         sink: &sink,
     };
     Ok(propose_for_items(db, &ctx, &order).await?)
@@ -441,19 +445,21 @@ pub fn should_stop_warming(proposals: &[PurchaseOrderItemProposal]) -> bool {
 ///
 /// **Never fails the caller**: a database error, an unavailable provider, an
 /// exhausted budget or a provider error is logged at `warn` and ends the
-/// warming. One `CostGuard` covers the whole call, so
-/// `APP_llm_max_requests_per_run` bounds the upload, not each order. Rule and
+/// warming. Draws on the process-wide `SharedLlmBudget`, so
+/// `APP_llm_max_requests_per_run` bounds the process per budget window, not
+/// each upload or order. Rule and
 /// cache hits cost nothing; only items with neither reach the provider.
 pub async fn warm_suggestions(
     db: &DatabaseConnection,
     publisher: Option<&Arc<EventPublisher>>,
     settings: &utils::settings::Settings,
+    budget: &SharedLlmBudget,
     orders: &[Order],
 ) {
     if orders.iter().all(|o| o.items.is_empty()) {
         return;
     }
-    if let Err(e) = warm_inner(db, publisher, settings, orders).await {
+    if let Err(e) = warm_inner(db, publisher, settings, budget, orders).await {
         warn!(error = %e, "purchase-order proposals: could not warm suggestions after upload; the upload is unaffected");
     }
 }
@@ -462,6 +468,7 @@ async fn warm_inner(
     db: &DatabaseConnection,
     publisher: Option<&Arc<EventPublisher>>,
     settings: &utils::settings::Settings,
+    budget: &SharedLlmBudget,
     orders: &[Order],
 ) -> Result<(), sea_orm::DbErr> {
     let rules = proj::active_rules(db).await?;
@@ -478,14 +485,14 @@ async fn warm_inner(
     let Some(provider) = build_provider_or_warn(settings) else {
         return Ok(()); // Rules answer on the read path; nothing to warm.
     };
-    let guard = CostGuard::new(settings.llm_max_requests_per_run);
+    let guard = budget.guard();
     let sink = KafkaCacheSink { db, publisher };
     let ctx = ProposalContext {
         rules: &rules,
         catalog: &catalog,
         provider: Some(provider.as_ref()),
         prompt_version: &settings.prompt_version,
-        cost_guard: &guard,
+        cost_guard: guard,
         sink: &sink,
     };
     let started = Instant::now();

@@ -68,6 +68,13 @@ pub fn create_schema(conn: Arc<DatabaseConnection>, settings: Arc<Settings>) -> 
             }
         });
 
+    // Exactly one budget for the whole process, built here rather than per
+    // request so the configured cap bounds the process, not one call.
+    let llm_budget = Arc::new(crate::labeling::budget::SharedLlmBudget::new(
+        settings.llm_max_requests_per_run,
+        std::time::Duration::from_secs(settings.llm_budget_window_secs),
+    ));
+
     let mut builder = Schema::build(QueryRoot, MutationRoot, EmptySubscription)
         // `DateTime` (§5) isn't reachable from any field yet — nothing in
         // this iteration's resolvers returns a raw timestamp — so it needs
@@ -75,6 +82,7 @@ pub fn create_schema(conn: Arc<DatabaseConnection>, settings: Arc<Settings>) -> 
         // from the SDL.
         .register_output_type::<scalars::DateTime>()
         .data(conn)
+        .data(llm_budget)
         .data(settings);
     if let Some(publisher) = publisher {
         builder = builder.data(publisher);

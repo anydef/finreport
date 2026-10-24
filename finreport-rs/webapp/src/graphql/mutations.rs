@@ -265,7 +265,8 @@ impl MutationRoot {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let settings = ctx.data::<Arc<Settings>>()?;
-        crate::graphql::purchase_orders::upload_purchase_orders(db, publisher(ctx), settings, user, files).await
+        let budget = ctx.data::<Arc<crate::labeling::budget::SharedLlmBudget>>()?;
+        crate::graphql::purchase_orders::upload_purchase_orders(db, publisher(ctx), settings, budget, user, files).await
     }
 
     /// `applyPurchaseOrderSplit`: **changes transactions.** Splits each bank
@@ -296,8 +297,9 @@ impl MutationRoot {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
         let settings = ctx.data::<Arc<Settings>>()?;
+        let budget = ctx.data::<Arc<crate::labeling::budget::SharedLlmBudget>>()?;
         crate::graphql::purchase_order_proposals::propose_purchase_order_categories(
-            db, publisher(ctx), settings, user, order_id,
+            db, publisher(ctx), settings, budget, user, order_id,
         )
         .await
     }
