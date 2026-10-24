@@ -6,6 +6,7 @@ mod bulk;
 pub(crate) mod cashflow;
 pub mod categories;
 pub mod cookies;
+mod counterparty_breakdown;
 pub mod current_user;
 pub mod display_aliases;
 mod events;

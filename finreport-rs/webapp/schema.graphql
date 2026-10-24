@@ -405,6 +405,37 @@ type ComparisonPeriod {
 	needsReview: Decimal!
 }
 
+type CounterpartyBreakdown {
+	"""
+	The top counterparties by `|amount|`, largest first.
+	"""
+	rows: [CounterpartyBreakdownRow!]!
+	"""
+	Everything beyond `limit` as one row (`counterpartyKey` null, named
+	"Other"); `null` when nothing is beyond it. `rows + other` is the whole
+	filtered set. Do not mistake it for the no-key bucket.
+	"""
+	other: CounterpartyBreakdownRow
+	currency: String!
+}
+
+type CounterpartyBreakdownRow {
+	"""
+	`null` = the bucket of transactions with no counterparty key.
+	"""
+	counterpartyKey: String
+	"""
+	The user's alias for the counterparty if any, else the bank's most
+	common name for it. The no-key bucket is "No merchant key".
+	"""
+	displayName: String!
+	"""
+	Signed net of the counterparty's transactions: refunds cancel charges.
+	"""
+	amount: Decimal!
+	transactionCount: Int!
+}
+
 scalar Date
 
 scalar DateTime
@@ -1095,6 +1126,14 @@ type Query {
 	"""
 	categories(includeArchived: Boolean! = false): [Category!]!
 	categoryBreakdown(filter: TransactionFilter!, level: Int! = 1, kind: CategoryKind): CategoryBreakdown!
+	"""
+	Net per counterparty across `filter`, largest `|amount|` first, top
+	`limit` (clamped to 1..=200) plus the rest as one `other` row. No
+	`kind` argument and transfers are **not** dropped (pass `transfer:
+	false` to leave them out); `amount` is the signed net and there is no
+	share. Same filter path as the transaction list. See the module docs.
+	"""
+	counterpartyBreakdown(filter: TransactionFilter!, limit: Int! = 20): CounterpartyBreakdown!
 	"""
 	Spending per category across consecutive calendar periods of
 	`filter`'s `startDate`..`endDate`, plus each period's total — one
