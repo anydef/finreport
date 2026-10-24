@@ -473,9 +473,10 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **579** Rust unit tests via `just test`, **656** frontend via
-  `npm run test:unit` (verified 2026-10-24; the previous 517/582 figures were
-  stale, which cost two agents a paragraph each explaining the mismatch). Report the verbatim `test result:` lines and show the
+  **595** Rust unit tests via `just test`, **665** frontend via
+  `npm run test:unit` (both re-verified 2026-10-24; earlier 517/582 and
+  579/656 figures were stale, which cost two agents a paragraph each
+  explaining the mismatch). Report the verbatim `test result:` lines and show the
   addition. A truncated `cargo test` run stops at the first failing crate and
   undercounts badly — pass `--no-fail-fast` when totalling.
 - **A single red run is not yet evidence.** The shared `CARGO_TARGET_DIR`

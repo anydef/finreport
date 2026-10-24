@@ -148,12 +148,18 @@ pub struct Settings {
     /// (§2.5).
     #[serde(default = "default_llm_min_confidence")]
     pub llm_min_confidence: f32,
-    /// Cost guard: bounds uncached LLM calls per *sweep* (§2.3), and, as a
-    /// separate allowance of the same size, per sweep interval for live
-    /// records. "Run" means one sweep window, NOT the process lifetime: the
-    /// budget is refilled at the start of every sweep (see
-    /// `labeler_sweep_interval_secs`), so a long-lived labeler never goes
-    /// permanently silent after spending it once.
+    /// Cost guard: the size of one allowance of uncached LLM calls. "Run"
+    /// never means the process lifetime - every holder refills it, so a
+    /// long-lived process cannot go permanently silent after spending it
+    /// once. Each process gets its own allowances, since one process cannot
+    /// police another's spend without shared state:
+    ///
+    /// - the labeler takes two of this size, one per *sweep* (§2.3) and one
+    ///   per sweep interval for live records, refilled on
+    ///   `labeler_sweep_interval_secs`;
+    /// - the webapp takes **one**, shared by the purchase-order proposal
+    ///   mutation and warm-on-upload alike, refilled on
+    ///   `llm_budget_window_secs`.
     #[serde(default = "default_llm_max_requests_per_run")]
     pub llm_max_requests_per_run: u32,
     /// Part of the cache fingerprint (§2.5); bumping it invalidates the
