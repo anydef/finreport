@@ -166,6 +166,49 @@ Recorded feature requests, not yet prioritised. The estimate is effort, the
 note is what makes it worth more or less than its cost. Pull one into "Next"
 by agreeing where it goes.
 
+- **Identify a counterparty by IBAN, not by name alone** — M (read-path
+  only) to L (re-keying), high value, requested 2026-10-24: *"I want that
+  counterparties should be identifiable not only by name, but by their
+  account id (iban) additionally. My mortgage accounts have my name but its a
+  loan account."*
+
+  The defect behind the request: `transaction.counterparty_key` is
+  `normalize(counterparty_name, description)` — **name-only** — so two
+  different IBANs under the same name become one counterparty. The user's
+  mortgage is indistinguishable from themselves. `transaction.counterparty_iban`
+  is already stored on every row and is simply unused for identity. A display
+  alias does not help: aliases are keyed by `counterparty_key`, so renaming
+  one renames both.
+
+  **What makes this expensive is that `counterparty_key` is an identifier
+  other state points at**: `rule.conditions.counterparty_key` (every learned
+  and hand-written rule), `learning_exemption` (it is the primary key),
+  `display_alias`, `TransactionFilter.counterpartyKeys`, `heldMerchantGroups`
+  and `counterpartyBreakdown`. Changing its *derivation* silently re-keys all
+  of them: existing rules stop matching, exemptions orphan, aliases detach.
+  That is migration-and-replay work, not a tweak.
+
+  Three ways to do it, cheapest first:
+
+  1. **Read-path grouping only (M).** Group by `(counterparty_key,
+     counterparty_iban)` in the breakdown and the lists, showing the IBAN only
+     to disambiguate when one key has more than one. Nothing is re-keyed, no
+     rule or exemption moves, no replay. Solves "identifiable", which is what
+     was actually asked for.
+  2. **An optional `counterparty_iban` rule condition (M).** Rule matching is
+     already AND-of-present-conditions, so this is additive and re-keys
+     nothing: it lets one rule target the loan account and another the person.
+     Pairs naturally with 1.
+  3. **Put the IBAN in the key itself (L, risky).** Honest identity, but needs
+     a migration that rewrites every rule condition, exemption and alias, plus
+     a labeler replay — and a careless version loses the user's curation.
+     Only worth it if 1 and 2 prove insufficient.
+
+  Recommendation: 1, then 2 if labelling them differently is still awkward.
+  **Privacy:** an IBAN is sensitive. Show it masked by default (last 4), and
+  it must never reach a log line or an error message — the same posture the
+  Amazon recipient-address columns already have.
+
 - **Display nicknames for merchants and for own accounts** — S–M, needs a
   decision on scope first. The user: "I want to be able to give some merchants
   nicknames, e.g. all my accounts have my names on them, and it is hard to
