@@ -70,19 +70,27 @@ then the things that make the tool worth opening when nothing is broken.
   ~~retiring the broad merchant-wide rule once narrow rules exist~~ — without
   which the first PayPal decision left a blanket rule labelling everything.
 
-### In progress
+### Done 2026-10-24 (verified shipped; this section had gone stale)
 
-1. **Review queue groups by merchant.** 196 held transactions are nowhere near
-   196 decisions — the same merchants repeat. Grouping by `counterparty_key`
-   with one assign per group is the largest reduction in effort available.
-2. **Exempt a merchant from rule learning.** The safety valve for item 1 of the
-   Done list above: one correction on a catch-all like Amazon or PayPal would
-   otherwise create a counterparty-wide rule, and those are exactly the
-   merchants the user wants to split by hand.
-3. **The dashboard says what needs attention** — uncategorised and held counts
-   and what they are worth, linking into the filtered views.
-4. **A transaction row shows its own state** — split indicator (the row shows
-   the whole amount while totals count it by parts) and label source.
+All four items previously listed here as "in progress" are built end to end —
+entity, resolver, integration test and the page that renders each. Verified
+against the tree on 2026-10-24, not from memory:
+
+1. ~~**Review queue groups by merchant.**~~ 196 held transactions were nowhere
+   near 196 decisions. `/review` groups by `counterparty_key` with one assign
+   per group (`lib/heldGroups.ts`, `heldGroups.test.ts`,
+   `tests/graphql_held_groups.rs`).
+2. ~~**Exempt a merchant from rule learning.**~~ The safety valve for item 1:
+   one correction on a catch-all like Amazon or PayPal would otherwise create
+   a counterparty-wide rule, and those are exactly the merchants the user
+   wants to split by hand. `entity/learning_exemption.rs`,
+   `graphql/learning_exemptions.rs`, exempt/remove on `/admin/rules`.
+3. ~~**The dashboard says what needs attention**~~ — `attentionSummary`
+   (uncategorised and held counts plus what they are worth), rendered on the
+   dashboard and linking into the filtered views.
+4. ~~**A transaction row shows its own state**~~ — `splitIndicator` (the row
+   shows the whole amount while totals count it by parts) and
+   `labelSourceBadge`, both in `TransactionItem.svelte`.
 
 ### Next, in this order
 
@@ -90,8 +98,21 @@ then the things that make the tool worth opening when nothing is broken.
 
 
 1. **Progress feedback while curating** — the uncategorised count falling, and
-   "N rules learned from your decisions". Cheap once item 3's counts exist, and
-   meaningful now that one decision learns a rule.
+   "N rules learned from your decisions". Cheap now that the attention counts
+   exist, and meaningful now that one decision learns a rule. **Started
+   2026-10-24, mock UI first** per the user's standing preference. Two
+   deliberate constraints found while specifying it:
+   - There is **no stored history** of the uncategorised count — no
+     projection, no time series — so "falling" is measured against a
+     **session baseline** in `sessionStorage` and must be labelled "since you
+     opened this page". Anything else would be a lie. A real daily or
+     all-time trend needs a counts projection, which is a separate decision.
+   - "N rules learned" has **no field in the frozen schema**, and
+     `queries.test.ts` validates every exported operation against it, so the
+     mock slice takes it as an optional prop and omits the line when absent.
+     Serving it for real is a second slice: a field on `attentionSummary`,
+     counting `rule` rows with `origin = 'learned'`, plus the SDL in both
+     live copies.
 2. Accounts as a multi-select dropdown in the filter panel (needs a
    multi-select mode on `SearchMenu`, which would also serve categories and
    tags there).
@@ -104,8 +125,9 @@ then the things that make the tool worth opening when nothing is broken.
 5. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
     decision about credential storage** (security-critical).
 6. C24, PayPal and Scalable Capital integrations. First research the access
-    method for each (API vs. CSV fallback).
-8. Sankey cash-flow views.
+    method for each (API vs. CSV fallback). **PayPal is paused** by the user's
+    own instruction; C24 and Scalable are not.
+7. Sankey cash-flow views.
 
 ### Deployment / data actions outstanding (user)
 
