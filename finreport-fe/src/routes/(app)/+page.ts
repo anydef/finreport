@@ -1,5 +1,5 @@
 import { env as publicEnv } from '$env/dynamic/public';
-import { MOCK_CURATION_BASELINES, MOCK_RULES_LEARNED } from '$lib/graphql/curationMock';
+import { MOCK_CURATION_BASELINES } from '$lib/graphql/curationMock';
 import { createGraphqlClient } from '$lib/graphqlClient';
 import {
 	ACCOUNTS_QUERY,
@@ -201,8 +201,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
 		categories,
 		attention: attentionResult.data?.attentionSummary as AttentionSummary | undefined,
-		/** Mock mode only: the schema has no "rules learned" field yet. */
-		rulesLearned: mockMode ? MOCK_RULES_LEARNED : undefined,
+		rulesLearned: attentionResult.data?.attentionSummary?.rulesLearned as number | undefined,
 		curationSeedBaselines: mockMode ? MOCK_CURATION_BASELINES : undefined,
 		allTags: (tagsResult.data?.tags ?? []) as TagCount[],
 		summary: summaryResult.data?.cashflowSummary as CashflowSummary | undefined,

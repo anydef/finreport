@@ -4,7 +4,8 @@ import { ALL_TIME_START, attentionItems, formatWorth, uncategorizedHref } from '
 
 const summary = (u: [number, string], r: [number, string]): AttentionSummary => ({
 	uncategorized: { count: u[0], totalAmount: u[1] },
-	needsReview: { count: r[0], totalAmount: r[1] }
+	needsReview: { count: r[0], totalAmount: r[1] },
+	rulesLearned: 0
 });
 
 describe('attentionItems', () => {

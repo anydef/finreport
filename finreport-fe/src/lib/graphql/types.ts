@@ -526,6 +526,8 @@ export interface AttentionBucket {
 export interface AttentionSummary {
 	uncategorized: AttentionBucket;
 	needsReview: AttentionBucket;
+	/** Active learned rules, from the user's own decisions. */
+	rulesLearned: number;
 }
 
 /** One merchant's held transactions (`heldMerchantGroups`). */

@@ -649,6 +649,7 @@ query AttentionSummary {
 			count
 			totalAmount
 		}
+		rulesLearned
 	}
 }`;
 
