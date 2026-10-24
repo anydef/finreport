@@ -1,0 +1,64 @@
+{
+  "query": "query CounterpartyBreakdown($filter: TransactionFilter!, $limit: Int! = 20) {\n\tcounterpartyBreakdown(filter: $filter, limit: $limit) {\n\t\trows {\n\t\t\tcounterpartyKey\n\t\t\tdisplayName\n\t\t\tamount\n\t\t\ttransactionCount\n\t\t}\n\t\tother {\n\t\t\tcounterpartyKey\n\t\t\tdisplayName\n\t\t\tamount\n\t\t\ttransactionCount\n\t\t}\n\t\tcurrency\n\t}\n}",
+  "data": {
+    "counterpartyBreakdown": {
+      "rows": [
+        {
+          "counterpartyKey": "acme-payroll",
+          "displayName": "Acme Payroll",
+          "amount": "3200.00",
+          "transactionCount": 1
+        },
+        {
+          "counterpartyKey": "example-landlord",
+          "displayName": "Example Landlord",
+          "amount": "-1150.00",
+          "transactionCount": 1
+        },
+        {
+          "counterpartyKey": "sample-market",
+          "displayName": "Sample Market",
+          "amount": "-286.40",
+          "transactionCount": 9
+        },
+        {
+          "counterpartyKey": "demo-electronics",
+          "displayName": "Demo Electronics",
+          "amount": "-79.00",
+          "transactionCount": 2
+        },
+        {
+          "counterpartyKey": "test-rail",
+          "displayName": "Test Rail",
+          "amount": "-62.50",
+          "transactionCount": 1
+        },
+        {
+          "counterpartyKey": "mock-pharmacy",
+          "displayName": "Mock Pharmacy",
+          "amount": "0.00",
+          "transactionCount": 2
+        },
+        {
+          "counterpartyKey": "fake-friend",
+          "displayName": "Fake Friend",
+          "amount": "41.00",
+          "transactionCount": 3
+        },
+        {
+          "counterpartyKey": null,
+          "displayName": "No merchant key",
+          "amount": "-33.20",
+          "transactionCount": 4
+        }
+      ],
+      "other": {
+        "counterpartyKey": null,
+        "displayName": "Other",
+        "amount": "-0.80",
+        "transactionCount": 17
+      },
+      "currency": "EUR"
+    }
+  }
+}

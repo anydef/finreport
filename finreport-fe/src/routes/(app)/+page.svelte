@@ -12,6 +12,8 @@
 	import CashflowSankey from '$lib/components/CashflowSankey.svelte';
 	import SavingsCard from '$lib/components/SavingsCard.svelte';
 	import CategoryBreakdown from '$lib/components/CategoryBreakdown.svelte';
+	import CounterpartyBreakdown from '$lib/components/CounterpartyBreakdown.svelte';
+	import { writeBreakdownDimension, type BreakdownDimension } from '$lib/counterpartyView';
 	import TransactionTable from '$lib/components/TransactionTable.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import Button from '$lib/components/Button.svelte';
@@ -77,6 +79,7 @@
 		panel?: PanelFilters;
 		resetDrilldown?: boolean;
 		sankeyDimension?: 'counterparty' | 'category';
+		breakdownDimension?: BreakdownDimension;
 		/** A new sort; omitted = keep the current one. */
 		sort?: TransactionSort;
 	}
@@ -98,6 +101,7 @@
 				};
 		const merged = { ...base, ...opts };
 		const sankeyDimension = opts.sankeyDimension ?? data.sankeyDimension;
+		const breakdownDimension = opts.breakdownDimension ?? data.breakdownDimension;
 
 		let params = new URLSearchParams();
 		if (preset !== 'this-month') params.set('preset', preset);
@@ -125,7 +129,10 @@
 		params = writeSort(opts.sort ?? data.sort, params);
 		if (merged.offset) params.set('offset', String(merged.offset));
 
-		const withPanel = writePanelFilters(opts.panel ?? data.panel, params);
+		const withPanel = writeBreakdownDimension(
+			breakdownDimension,
+			writePanelFilters(opts.panel ?? data.panel, params)
+		);
 		goto(`${page.url.pathname}?${withPanel.toString()}`, { keepFocus: true, noScroll: true });
 	}
 
@@ -221,6 +228,11 @@
 
 	function onSankeyDimensionChange(dimension: 'counterparty' | 'category') {
 		navigate({ sankeyDimension: dimension, resetDrilldown: true });
+	}
+
+	function onBreakdownDimensionChange(dimension: BreakdownDimension) {
+		// A tab switch keeps the chart selection and paging as they are.
+		navigate({ breakdownDimension: dimension });
 	}
 
 	const bars = $derived(data.summary ? shapeCashflowBars(data.summary, data.granularity) : []);
@@ -327,17 +339,48 @@
 		     `kind: SAVING` row is money that left the current account just as
 		     an expense did. Asking for EXPENSE alone was why savings appeared
 		     nowhere on the dashboard despite being labelled. -->
-		{#if data.breakdown}
-			<Card title="Spending and savings by category">
-				<CategoryBreakdown
-					breakdown={mergeExpenseAndSavingBreakdowns(data.breakdown, data.savingsBreakdown)}
-					categories={data.categories}
-					loadChildren={loadBreakdownChildren}
-					scopeKey={JSON.stringify(data.breakdownFilter)}
-					onSelect={onBreakdownSelect}
+		<Card
+			title={data.breakdownDimension === 'category'
+				? 'Spending and savings by category'
+				: 'Net by counterparty'}
+		>
+			<div class="mb-3 flex justify-end gap-1" role="group" aria-label="Breakdown grouping">
+				<Button
+					variant={data.breakdownDimension === 'category' ? 'primary' : 'ghost'}
+					aria-pressed={data.breakdownDimension === 'category'}
+					onclick={() => onBreakdownDimensionChange('category')}
+				>
+					Category
+				</Button>
+				<Button
+					variant={data.breakdownDimension === 'counterparty' ? 'primary' : 'ghost'}
+					aria-pressed={data.breakdownDimension === 'counterparty'}
+					onclick={() => onBreakdownDimensionChange('counterparty')}
+				>
+					Counterparty
+				</Button>
+			</div>
+			{#if data.breakdownDimension === 'category'}
+				{#if data.breakdown}
+					<CategoryBreakdown
+						breakdown={mergeExpenseAndSavingBreakdowns(data.breakdown, data.savingsBreakdown)}
+						categories={data.categories}
+						loadChildren={loadBreakdownChildren}
+						scopeKey={JSON.stringify(data.breakdownFilter)}
+						onSelect={onBreakdownSelect}
+					/>
+				{/if}
+			{:else if data.counterpartyBreakdown}
+				<CounterpartyBreakdown
+					breakdown={data.counterpartyBreakdown}
+					scope={{ preset: data.preset, start: data.start, end: data.end, panel: data.panel }}
 				/>
-			</Card>
-		{/if}
+			{:else}
+				<p role="alert" class="py-4 text-center text-sm text-[var(--color-spending)]">
+					Could not load the counterparty breakdown.
+				</p>
+			{/if}
+		</Card>
 
 		<SavingsCard state={data.savings} />
 

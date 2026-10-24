@@ -19,6 +19,7 @@ import {
 	rangeFromParams,
 	toDateInputValue
 } from '$lib/period';
+import { parseCounterpartyKeys } from '$lib/counterpartyView';
 import { parsePanelFilters, toTransactionFilter } from '$lib/transactionFilters';
 import { parseSort, sortVariable } from '$lib/transactionSort';
 import type { PageLoad } from './$types';
@@ -32,6 +33,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
 	const panel = parsePanelFilters(url.searchParams);
 	const sort = parseSort(url.searchParams);
+	// Set by the dashboard's Counterparty tab; not part of the filter panel.
+	const counterpartyKeys = parseCounterpartyKeys(url.searchParams);
 
 	const client = createGraphqlClient(fetch);
 
@@ -45,7 +48,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const filter = {
 		startDate: range.start,
 		endDate: range.end,
-		...toTransactionFilter(panel, categories)
+		...toTransactionFilter(panel, categories),
+		...(counterpartyKeys.length ? { counterpartyKeys } : {})
 	};
 
 	const [transactionsResult, reimbursementResult] = await Promise.all([
@@ -66,6 +70,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		end: range.end,
 		granularity: defaultGranularity(range),
 		panel,
+		counterpartyKeys,
 		sort,
 		offset,
 		error: Boolean(

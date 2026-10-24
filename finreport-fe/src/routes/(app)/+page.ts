@@ -8,6 +8,7 @@ import {
 	CASHFLOW_SUMMARY_QUERY,
 	CATEGORIES_QUERY,
 	CATEGORY_BREAKDOWN_QUERY,
+	COUNTERPARTY_BREAKDOWN_QUERY,
 	REIMBURSEMENT_SUMMARY_QUERY,
 	SAVINGS_SUMMARY_QUERY,
 	TAGS_QUERY,
@@ -21,12 +22,14 @@ import type {
 	CashflowSummary,
 	Category,
 	CategoryBreakdown,
+	CounterpartyBreakdown,
 	ReimbursementSummary,
 	SavingsSummary,
 	TagCount,
 	TransactionFilter,
 	TransactionPage
 } from '$lib/graphql/types';
+import { parseBreakdownDimension } from '$lib/counterpartyView';
 import { savingsCardState } from '$lib/savingsView';
 import {
 	defaultGranularity,
@@ -94,6 +97,9 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
 	const drilldown = readDrilldown(url);
 	const sankeyDimension = readSankeyDimension(url);
+	// Only the shown breakdown dimension is fetched.
+	const breakdownDimension = parseBreakdownDimension(url.searchParams);
+	const categoryTab = breakdownDimension === 'category';
 	// A bucket click narrows the transaction list to that bucket's own date
 	// range; absent, the list covers the whole selected period.
 	const txStart = url.searchParams.get('txStart') ?? range.start;
@@ -132,6 +138,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		transactionsResult,
 		breakdownResult,
 		savingsBreakdownResult,
+		counterpartyResult,
 		reimbursementResult,
 		savingsResult
 	] = await Promise.all([
@@ -149,29 +156,37 @@ export const load: PageLoad = async ({ fetch, url }) => {
 				sort: sortVariable(sort)
 			})
 			.toPromise(),
-		client
-			.query(CATEGORY_BREAKDOWN_QUERY, {
-				filter: periodFilter,
-				level: 1,
-				// "Spending by category" means spending. Without a kind the
-				// resolver returns every kind but transfer, so income
-				// categories were showing up under a spending card, and
-				// savings count as saving rather than spending (requirements,
-				// "Categories (iteration 2)").
-				kind: 'EXPENSE'
-			})
-			.toPromise(),
+		categoryTab
+			? client
+					.query(CATEGORY_BREAKDOWN_QUERY, {
+						filter: periodFilter,
+						level: 1,
+						// "Spending by category" means spending. Without a kind the
+						// resolver returns every kind but transfer, so income
+						// categories were showing up under a spending card, and
+						// savings count as saving rather than spending (requirements,
+						// "Categories (iteration 2)").
+						kind: 'EXPENSE'
+					})
+					.toPromise()
+			: Promise.resolve(null),
 		// Savings is its own card: a `kind: SAVING` category is money put aside,
 		// not consumed, so folding it into the spending card would inflate
 		// spending with money the user still has. Asking for EXPENSE alone was
 		// why savings was invisible everywhere despite being labelled.
-		client
-			.query(CATEGORY_BREAKDOWN_QUERY, {
-				filter: periodFilter,
-				level: 1,
-				kind: 'SAVING'
-			})
-			.toPromise(),
+		categoryTab
+			? client
+					.query(CATEGORY_BREAKDOWN_QUERY, {
+						filter: periodFilter,
+						level: 1,
+						kind: 'SAVING'
+					})
+					.toPromise()
+			: Promise.resolve(null),
+		// The Counterparty tab: same filter, signed nets, no share.
+		categoryTab
+			? Promise.resolve(null)
+			: client.query(COUNTERPARTY_BREAKDOWN_QUERY, { filter: periodFilter }).toPromise(),
 		// The netted figure beside the totals; its failure never fails the dashboard.
 		client.query(REIMBURSEMENT_SUMMARY_QUERY, { filter: periodFilter }).toPromise(),
 		// Same period + panel filter as every other card. Its failure never fails
@@ -196,6 +211,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		/** The period + panel filter the breakdown ran with; expanding a row scopes a copy of it. */
 		breakdownFilter: periodFilter as Partial<TransactionFilter>,
 		sankeyDimension,
+		breakdownDimension,
 		offset,
 		error,
 		accounts: (accountsResult.data?.accounts ?? []) as Account[],
@@ -208,11 +224,16 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		graph: graphResult.data?.cashflowGraph as CashflowGraph | undefined,
 		transactionFilter,
 		transactions: transactionsResult.data?.transactions as TransactionPage | undefined,
-		breakdown: breakdownResult.data?.categoryBreakdown as CategoryBreakdown | undefined,
+		breakdown: breakdownResult?.data?.categoryBreakdown as CategoryBreakdown | undefined,
 		/** `kind: SAVING` rows for the same period; its failure never fails the dashboard. */
-		savingsBreakdown: savingsBreakdownResult.data?.categoryBreakdown as
+		savingsBreakdown: savingsBreakdownResult?.data?.categoryBreakdown as
 			| CategoryBreakdown
 			| undefined,
+		counterpartyBreakdown: counterpartyResult?.data?.counterpartyBreakdown as
+			| CounterpartyBreakdown
+			| undefined,
+		/** Set when the Counterparty tab's own fetch failed (the page shows it in the card). */
+		counterpartyError: Boolean(counterpartyResult?.error),
 		reimbursementSummary: reimbursementResult.data?.reimbursementSummary as
 			| ReimbursementSummary
 			| undefined,
