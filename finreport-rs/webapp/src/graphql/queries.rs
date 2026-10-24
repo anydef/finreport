@@ -18,7 +18,7 @@ use crate::graphql::types::{
 use crate::graphql::comparison::CategoryComparison;
 use crate::graphql::scalars::{Date, Uuid};
 use crate::graphql::{
-    accounts, attention, breakdown, categories, comparison, goals, held_groups, review_queue, rules, transactions,
+    accounts, attention, breakdown, categories, comparison, counterparty_breakdown, goals, held_groups, review_queue, rules, transactions,
 };
 
 pub struct QueryRoot;
@@ -146,6 +146,29 @@ impl QueryRoot {
             .map(|ids| ids.iter().map(|id| id.0).collect());
         let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
         breakdown::fetch_breakdown(db, &scoped_ids, &filter, level, kind).await
+    }
+
+    /// Net per counterparty across `filter`, largest `|amount|` first, top
+    /// `limit` (clamped to 1..=200) plus the rest as one `other` row. No
+    /// `kind` argument and transfers are **not** dropped (pass `transfer:
+    /// false` to leave them out); `amount` is the signed net and there is no
+    /// share. Same filter path as the transaction list. See the module docs.
+    async fn counterparty_breakdown(
+        &self,
+        ctx: &Context<'_>,
+        mut filter: TransactionFilter,
+        #[graphql(default = 20)] limit: i32,
+    ) -> GqlResult<counterparty_breakdown::CounterpartyBreakdown> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        filter.viewer = Some(user.user_id);
+        let requested_ids: Option<Vec<uuid::Uuid>> = filter
+            .account_ids
+            .as_ref()
+            .map(|ids| ids.iter().map(|id| id.0).collect());
+        let scoped_ids = scoped_account_ids(user, requested_ids.as_deref())?;
+        let aliases = crate::graphql::display_aliases::book_for(ctx).await?;
+        counterparty_breakdown::fetch_counterparty_breakdown(db, &scoped_ids, &aliases, &filter, limit).await
     }
 
     /// Spending per category across consecutive calendar periods of
