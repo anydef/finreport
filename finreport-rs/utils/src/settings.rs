@@ -188,6 +188,14 @@ pub struct Settings {
     /// with `--until-caught-up`, which sweeps at start and at the end.
     #[serde(default = "default_labeler_sweep_interval_secs")]
     pub labeler_sweep_interval_secs: u64,
+    /// How often (seconds) the *webapp's* shared `llm_max_requests_per_run`
+    /// allowance is refilled. The webapp holds one process-wide budget for
+    /// the purchase-order proposal mutation and warm-on-upload. `0` means no
+    /// refill for the process lifetime. The labeler is a separate process and
+    /// refills its own budget on its sweep cadence
+    /// (`labeler_sweep_interval_secs`) instead.
+    #[serde(default = "default_llm_budget_window_secs")]
+    pub llm_budget_window_secs: u64,
     /// Consumer-group-style scope for the offsets the projector and labeler
     /// persist in `projection_offset`. Both read and write only rows under
     /// this id, so changing it makes them find no offsets and replay their
@@ -610,6 +618,11 @@ fn default_llm_max_requests_per_run() -> u32 {
 /// sweep. With the default uncapped budget one sweep drains the whole backlog
 /// it can see, so the interval only governs how soon leftovers are retried.
 fn default_labeler_sweep_interval_secs() -> u64 {
+    3600
+}
+
+/// `APP_llm_budget_window_secs` default: one hour.
+fn default_llm_budget_window_secs() -> u64 {
     3600
 }
 

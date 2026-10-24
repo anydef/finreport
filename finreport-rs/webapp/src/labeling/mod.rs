@@ -17,6 +17,7 @@
 //! WP2/WP3 build the real implementations in parallel. WP2/WP3 own changing
 //! these signatures if the real implementation needs a different shape.
 
+pub mod budget;
 pub mod cache_publish;
 pub mod fingerprint;
 pub mod learn;

@@ -442,6 +442,7 @@ pub async fn upload_purchase_orders(
     db: &DatabaseConnection,
     publisher: Option<&Arc<EventPublisher>>,
     settings: &utils::settings::Settings,
+    budget: &crate::labeling::budget::SharedLlmBudget,
     user: &AuthenticatedUser,
     files: Vec<String>,
 ) -> async_graphql::Result<PurchaseOrderUploadResult> {
@@ -508,7 +509,7 @@ pub async fn upload_purchase_orders(
     }
     // Only the orders just published: a re-upload of unchanged orders stays
     // free. Infallible by design - the suggestions are a convenience.
-    proposals::warm_suggestions(db, Some(publisher), settings, &warm).await;
+    proposals::warm_suggestions(db, Some(publisher), settings, budget, &warm).await;
     Ok(result)
 }
 

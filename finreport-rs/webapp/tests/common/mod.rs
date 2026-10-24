@@ -79,6 +79,7 @@ pub fn dummy_settings() -> Arc<utils::settings::Settings> {
         rule_auto_approve_threshold: 0.9,
         labeler_max_projection_lag: 0,
         labeler_sweep_interval_secs: 3600,
+        llm_budget_window_secs: 3600,
         projection_group: "default".to_string(),
         transfer_match_days: 3,
         recurring_min_occurrences: 3,
