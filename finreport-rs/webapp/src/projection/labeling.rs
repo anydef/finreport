@@ -63,7 +63,7 @@ fn category_origin_str(origin: CategoryOrigin) -> &'static str {
     }
 }
 
-fn rule_state_str(state: RuleState) -> &'static str {
+pub(crate) fn rule_state_str(state: RuleState) -> &'static str {
     match state {
         RuleState::Active => "active",
         RuleState::InReview => "in_review",
@@ -72,7 +72,7 @@ fn rule_state_str(state: RuleState) -> &'static str {
     }
 }
 
-fn rule_origin_str(origin: RuleOrigin) -> &'static str {
+pub(crate) fn rule_origin_str(origin: RuleOrigin) -> &'static str {
     match origin {
         RuleOrigin::User => "user",
         RuleOrigin::Learned => "learned",
