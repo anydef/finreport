@@ -551,12 +551,13 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
      is deliberately **not** the transfer flag. Adding a transfer kind there
      would blur a boundary that was drawn on purpose. Prefer 1.
 
-  **Hard dependency: the transfer-scope fix.** A cash account's income is
-  *entirely* inbound transfers. Under today's rule every one of them is
-  dropped from the cashflow aggregations, so a cash account would show a
-  **100% deficit** - the same bug as the phantom-deficit entry, in its most
-  extreme form. **Do not start this until that fix has landed**, or the
-  feature will look broken on arrival.
+  **Hard dependency: the transfer-scope fix - now satisfied (2026-10-25).** A
+  cash account's income is *entirely* inbound transfers. Under the old rule
+  every one of them was dropped from the cashflow aggregations, so a cash
+  account would have shown a **100% deficit** - the same bug as the
+  phantom-deficit entry, in its most extreme form. The scope-aware exclusion
+  has landed (see that entry), so a cash account selected on its own now reads
+  its funding transfers as income. This no longer blocks the work.
 
   **"Ephemeral" needs a definition.** Compacted topics with
   `prevent_destroy` are the opposite of ephemeral; deletion is a tombstone,
@@ -582,11 +583,13 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
   category directly via the existing user-override precedence.
 
 
-- **Transfers between the user's own accounts are invisible, and make the
-  receiving account look like it is bleeding money** - M backend + S
-  frontend, **high value, and this is a correctness bug, not a missing
-  feature**, so by this file's own ordering principle it outranks the feature
-  items above it. Requested 2026-10-25. The user: *"I am getting my salary to
+- ~~**Transfers between the user's own accounts are invisible, and make the
+  receiving account look like it is bleeding money**~~ - **Backend fixed
+  2026-10-25** (branch `fix/transfer-scope-aware`); the frontend needs no
+  change, since the fix is in the resolvers the dashboard already calls. Was M
+  backend + S frontend, **high value, and this is a correctness bug, not a
+  missing feature**, so by this file's own ordering principle it outranked the
+  feature items above it. Requested 2026-10-25. The user: *"I am getting my salary to
   my one account. and from that account I transfer a portion of money to my
   other comdirect account and to my c24 account for the different spending
   buckets. 1. Technically this is a money transfer, but it is not being
@@ -640,12 +643,56 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
   then allocations out to each spending bucket. That is envelope budgeting
   across accounts, and the chart is already shaped for it.
 
-  **Do not start without a decision on one thing:** whether the *default*
-  `cashflowSummary` for a multi-account scope should also change. Changing the
-  default silently alters every existing number the user has looked at;
-  keeping it and adding scope-awareness only where a single account is
-  selected is more conservative but leaves two accounts selected out of three
-  behaving oddly. Ask first.
+  **Decided and implemented 2026-10-25 - the rule as shipped.** A row is
+  dropped from a cashflow aggregation when either:
+
+  - its resolved category `kind = 'transfer'` (**unchanged**, and it is not
+    scope-aware: a user who files something as a transfer means it, whatever
+    the selection); or
+  - `transaction_insight.is_transfer = true` **and NOT** (`transfer_counterpart_id
+    IS NOT NULL` **and** the counterpart transaction's `account_id` is outside
+    the *effective scope*).
+
+  So a flagged leg is included as real income/spending only when the other
+  side is **provably** outside the scope. A NULL `transfer_counterpart_id`
+  proves nothing, so such a row **stays excluded** - a deliberate conservative
+  choice: unknown data must not flip a figure the user has already looked at.
+
+  **The effective scope is `TransactionFilter.accountIds` when it is set and
+  non-empty, else the caller's whole authorisation scope.** The two are
+  different sets and confusing them silently reverts the fix: both of the
+  user's accounts are always in the authorisation scope, so a rule written
+  against that alone would still drop both legs. One helper,
+  `cashflow::effective_scope_ids`, makes the choice, with its own unit tests.
+
+  **The default is unchanged by construction, not by care.** With every
+  account selected (the dashboard default) both legs are inside the effective
+  scope, so both are still dropped and every existing figure is identical.
+  That is the whole reason this was preferred over adding a new filter mode,
+  and it is asserted as a test
+  (`transfer_scope::the_whole_household_view_still_excludes_both_legs`), not
+  assumed. The "two of three accounts selected" case now behaves correctly
+  rather than oddly: the transfer between the two selected accounts is
+  excluded, the transfer out to the unselected third counts as spending.
+
+  Applied to `cashflowSummary`, `cashflowGraph` (both the counterparty and the
+  CATEGORY dimension) through the shared `cashflow::transfer_filter_sql` /
+  `scoped_transfer_exclusion_sql`, so the two surfaces cannot disagree.
+  `filter.transfer = true` ("only transfers") is untouched. Goal evaluation
+  (`goals::rows`) deliberately keeps the household-level
+  `transfer_exclusion_sql`: a goal has no selection of its own and is
+  evaluated over the whole household, where moving money between your own
+  accounts is genuinely not a contribution. `categoryBreakdown` has its own
+  separate `kind: TRANSFER` rule and shares none of these helpers, so it was
+  left alone.
+
+  **This also unblocks two queued items.** The C24 import would otherwise have
+  merely *moved* the bug: pairing the C24 leg converts the
+  counted-as-spending symptom into the phantom-deficit symptom on the C24
+  account. And the requested **manual cash accounts** are funded *entirely* by
+  inbound transfers, so under the old rule a cash account would have shown a
+  100% deficit - every euro in dropped, every euro out counted. This fix is a
+  prerequisite for both.
 
 
 Recorded feature requests, not yet prioritised. The estimate is effort, the
