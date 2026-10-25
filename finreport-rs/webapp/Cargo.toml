@@ -9,6 +9,7 @@ categorizer = {path = "../categorizer"}
 migration = { path = "../migration" }
 entity = { path = "../entity" }
 amazon-orders = { path = "../amazon-orders" }
+c24-csv = { path = "../c24-csv" }
 
 dotenv = "0.15.0"
 rand = "0.9.1"
@@ -39,7 +40,7 @@ sha2 = "0.10"
 base64 = "0.22"
 # Exact-decimal money, shared by sea-orm's NUMERIC(20,4) columns and the
 # GraphQL `Decimal` scalar (§5) — never `f64`.
-rust_decimal = "1"
+rust_decimal = { version = "1", features = ["serde-str"] }
 # §2.7 rule matching: `description_regex` conditions, compiled with a size
 # limit and rejected (mutation) / skipped-not-panicked (labeler) on failure.
 # Deviation from the WP0-frozen dep list (not pre-populated there) — minimal

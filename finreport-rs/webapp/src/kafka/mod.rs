@@ -5,6 +5,7 @@
 //! of truth, so publishing is best-effort — a broker outage degrades the event
 //! log, it must never stop an import.
 
+pub mod c24;
 pub mod envelope;
 pub mod events;
 pub mod goals;

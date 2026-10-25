@@ -5272,6 +5272,7 @@ dependencies = [
  "async-graphql-actix-web",
  "async-trait",
  "base64 0.22.1",
+ "c24-csv",
  "categorizer",
  "chrono",
  "comdirect-rs",

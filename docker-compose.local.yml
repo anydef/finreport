@@ -112,6 +112,13 @@ services:
         # compacted; a tombstone deletes the order. Never holds address data.
         $$RPK topic create finreport.purchase-order \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        # C24 CSV ingest: account keyed by Kontonummer, transaction keyed by the
+        # row's derived external_id; both compacted. No c24-account-balance topic
+        # on purpose: the C24 export has no balance column.
+        $$RPK topic create finreport.c24-account \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.c24-transaction \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 
   finreport-be:

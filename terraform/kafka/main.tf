@@ -332,3 +332,44 @@ resource "kafka_topic" "purchase_order" {
     prevent_destroy = true
   }
 }
+
+# C24 CSV ingest, account side: one record per C24 account number (`Kontonummer`),
+# keyed by it; compacted. On topics of their own, NOT finreport.account /
+# finreport.transaction: those promise the raw Comdirect JSON byte for byte and
+# the projector deserialises them as such. Two topics (not one) because
+# transaction.account_id is a real FK, so the account row has to exist or be
+# stubbed. The payload is `webapp::kafka::c24::C24AccountRecord`, a frozen wire
+# contract. Mirrored in docker-compose.local.yml's finreport-redpanda-init.
+resource "kafka_topic" "c24_account" {
+  name               = "finreport.c24-account"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# C24 CSV ingest, transaction side: keyed by the row's derived external_id
+# (`<content_key>-<occurrence>`), so re-importing an overlapping export
+# compacts onto the same keys. Payload is `C24TransactionRecord`, a frozen wire
+# contract. There is deliberately NO c24-account-balance topic: the C24 export
+# has no balance column, so there is nothing to publish. Mirrored in
+# docker-compose.local.yml's finreport-redpanda-init.
+resource "kafka_topic" "c24_transaction" {
+  name               = "finreport.c24-transaction"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
