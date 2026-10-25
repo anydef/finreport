@@ -5,6 +5,7 @@ import {
 	RECENTLY_AUTO_APPROVED_RULES_QUERY,
 	RULES_QUERY
 } from '$lib/graphql/adminRulesQueries';
+import { isForbidden } from '$lib/adminAccess';
 import type { Category, LearningExemption, Rule } from '$lib/graphql/types';
 import type { PageLoad } from './$types';
 
@@ -22,6 +23,7 @@ export const load: PageLoad = async ({ fetch }) => {
 		error: Boolean(
 			rulesResult.error || recentResult.error || categoriesResult.error || exemptionsResult.error
 		),
+		forbidden: [rulesResult, recentResult, exemptionsResult].some((r) => isForbidden(r.error)),
 		rules: (rulesResult.data?.rules ?? []) as Rule[],
 		recentlyAutoApproved: (recentResult.data?.recentlyAutoApprovedRules ?? []) as Rule[],
 		categories: (categoriesResult.data?.categories ?? []) as Category[],

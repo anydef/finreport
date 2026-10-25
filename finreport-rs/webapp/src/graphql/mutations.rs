@@ -14,7 +14,7 @@ use utils::settings::Settings;
 
 use crate::auth;
 use crate::graphql::cookies::{clear_cookie_header, cookie_header};
-use crate::graphql::current_user::{current_user, scoped_account_ids};
+use crate::graphql::current_user::{current_user, AdminOnly, scoped_account_ids};
 use crate::graphql::types::{
     Category, CategoryInput, LoginInput, Me, Rule, RuleInput, RuleState, SplitPartInput,
     Transaction, TransactionFilter,
@@ -131,6 +131,9 @@ impl MutationRoot {
         labels::unsplit_transaction(db, publisher, &scoped_ids, transaction_id.0).await
     }
 
+    /// `createCategory`: add a category. Strict about duplicates (see `ensureCategory`).
+    /// Administrators only (`FORBIDDEN` otherwise): the category taxonomy is shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn create_category(&self, ctx: &Context<'_>, input: CategoryInput) -> GqlResult<Category> {
         current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
@@ -141,6 +144,14 @@ impl MutationRoot {
     /// Idempotent `createCategory` for the review flow ("assign and create
     /// new category"): an equivalent existing category (same kind and parent)
     /// is returned as is; a clashing definition fails with `CONFLICT`.
+    ///
+    /// Deliberately NOT admin-only, unlike `createCategory`. The review page
+    /// (accepting an LLM proposal) and the shared `CategoryCreate` component
+    /// call it for every user, so gating it would break the core curation
+    /// flow. The tension is known and accepted: this lets a non-admin bring a
+    /// new category into existence in the shared taxonomy, but never rename,
+    /// archive or alter an existing one. Revisit if the taxonomy ever needs
+    /// to be admin-curated only.
     async fn ensure_category(&self, ctx: &Context<'_>, input: CategoryInput) -> GqlResult<Category> {
         current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
@@ -148,6 +159,9 @@ impl MutationRoot {
         categories::ensure_category(db, publisher, input).await
     }
 
+    /// `renameCategory`: change a category's display name.
+    /// Administrators only (`FORBIDDEN` otherwise): the category taxonomy is shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn rename_category(
         &self,
         ctx: &Context<'_>,
@@ -160,6 +174,9 @@ impl MutationRoot {
         categories::rename_category(db, publisher, id.0, name).await
     }
 
+    /// `archiveCategory`: retire a category.
+    /// Administrators only (`FORBIDDEN` otherwise): the category taxonomy is shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn archive_category(&self, ctx: &Context<'_>, id: crate::graphql::scalars::Uuid) -> GqlResult<Category> {
         current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
@@ -167,6 +184,9 @@ impl MutationRoot {
         categories::archive_category(db, publisher, id.0).await
     }
 
+    /// `createRule`: add a labeling rule.
+    /// Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn create_rule(&self, ctx: &Context<'_>, input: RuleInput) -> GqlResult<Rule> {
         current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
@@ -174,6 +194,9 @@ impl MutationRoot {
         rules::create_rule(db, publisher, input).await
     }
 
+    /// `updateRule`: edit a labeling rule.
+    /// Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn update_rule(
         &self,
         ctx: &Context<'_>,
@@ -186,6 +209,9 @@ impl MutationRoot {
         rules::update_rule(db, publisher, id.0, input).await
     }
 
+    /// `setRuleState`: approve, revoke or reject a rule.
+    /// Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn set_rule_state(
         &self,
         ctx: &Context<'_>,
@@ -198,6 +224,9 @@ impl MutationRoot {
         rules::set_rule_state(db, publisher, id.0, state).await
     }
 
+    /// `reapplyRule`: re-run a rule over existing transactions.
+    /// Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn reapply_rule(&self, ctx: &Context<'_>, id: crate::graphql::scalars::Uuid) -> GqlResult<i32> {
         let user = current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
@@ -208,6 +237,9 @@ impl MutationRoot {
 
     /// `exemptFromLearning`: never learn a rule for this merchant again, and
     /// discard its learned rules unless the user has touched them.
+    ///
+    /// Administrators only (`FORBIDDEN` otherwise): exemptions are shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn exempt_from_learning(
         &self,
         ctx: &Context<'_>,
@@ -229,6 +261,9 @@ impl MutationRoot {
 
     /// `removeLearningExemption`: let the learner work on this merchant
     /// again. True when an exemption existed.
+    ///
+    /// Administrators only (`FORBIDDEN` otherwise): exemptions are shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn remove_learning_exemption(
         &self,
         ctx: &Context<'_>,

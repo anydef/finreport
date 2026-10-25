@@ -790,27 +790,67 @@ type Mutation {
 	clearTransactionCategory(transactionId: UUID!): Transaction!
 	splitTransaction(transactionId: UUID!, parts: [SplitPartInput!]!): Transaction!
 	unsplitTransaction(transactionId: UUID!): Transaction!
+	"""
+	`createCategory`: add a category. Strict about duplicates (see `ensureCategory`).
+	Administrators only (`FORBIDDEN` otherwise): the category taxonomy is shared state.
+	"""
 	createCategory(input: CategoryInput!): Category!
 	"""
 	Idempotent `createCategory` for the review flow ("assign and create
 	new category"): an equivalent existing category (same kind and parent)
 	is returned as is; a clashing definition fails with `CONFLICT`.
+	
+	Deliberately NOT admin-only, unlike `createCategory`. The review page
+	(accepting an LLM proposal) and the shared `CategoryCreate` component
+	call it for every user, so gating it would break the core curation
+	flow. The tension is known and accepted: this lets a non-admin bring a
+	new category into existence in the shared taxonomy, but never rename,
+	archive or alter an existing one. Revisit if the taxonomy ever needs
+	to be admin-curated only.
 	"""
 	ensureCategory(input: CategoryInput!): Category!
+	"""
+	`renameCategory`: change a category's display name.
+	Administrators only (`FORBIDDEN` otherwise): the category taxonomy is shared state.
+	"""
 	renameCategory(id: UUID!, name: String!): Category!
+	"""
+	`archiveCategory`: retire a category.
+	Administrators only (`FORBIDDEN` otherwise): the category taxonomy is shared state.
+	"""
 	archiveCategory(id: UUID!): Category!
+	"""
+	`createRule`: add a labeling rule.
+	Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+	"""
 	createRule(input: RuleInput!): Rule!
+	"""
+	`updateRule`: edit a labeling rule.
+	Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+	"""
 	updateRule(id: UUID!, input: RuleInput!): Rule!
+	"""
+	`setRuleState`: approve, revoke or reject a rule.
+	Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+	"""
 	setRuleState(id: UUID!, state: RuleState!): Rule!
+	"""
+	`reapplyRule`: re-run a rule over existing transactions.
+	Administrators only (`FORBIDDEN` otherwise): labeling rules is shared state.
+	"""
 	reapplyRule(id: UUID!): Int!
 	"""
 	`exemptFromLearning`: never learn a rule for this merchant again, and
 	discard its learned rules unless the user has touched them.
+	
+	Administrators only (`FORBIDDEN` otherwise): exemptions are shared state.
 	"""
 	exemptFromLearning(counterpartyKey: String!): LearningExemption!
 	"""
 	`removeLearningExemption`: let the learner work on this merchant
 	again. True when an exemption existed.
+	
+	Administrators only (`FORBIDDEN` otherwise): exemptions are shared state.
 	"""
 	removeLearningExemption(counterpartyKey: String!): Boolean!
 	"""
@@ -1181,13 +1221,15 @@ type Query {
 	categoryComparison(filter: TransactionFilter!, granularity: Granularity! = MONTH, level: Int! = 1, kind: CategoryKind! = EXPENSE): CategoryComparison!
 	"""
 	`rules` (§5): like `categories`, not tenant-scoped — rules apply to
-	every account the labeler sees.
+	every account the labeler sees. Administrators only (`FORBIDDEN`
+	otherwise): rules are shared state.
 	"""
 	rules(state: RuleState): [Rule!]!
 	"""
 	`learningExemptions`: merchants the user has told the learner to
 	leave alone. Like `rules`, the list itself is not tenant-scoped; the
 	per-merchant name and count are computed over the caller's accounts.
+	Administrators only (`FORBIDDEN` otherwise): exemptions are shared state.
 	"""
 	learningExemptions: [LearningExemption!]!
 	"""
@@ -1195,6 +1237,10 @@ type Query {
 	accounts, each with the original name alongside.
 	"""
 	displayAliases: [DisplayAlias!]!
+	"""
+	Rules the learner approved on its own, newest first. Administrators
+	only (`FORBIDDEN` otherwise): rules are shared state.
+	"""
 	recentlyAutoApprovedRules(limit: Int! = 20): [Rule!]!
 	reviewQueue(page: PageInput): ReviewQueue!
 	"""

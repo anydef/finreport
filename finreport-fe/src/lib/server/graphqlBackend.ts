@@ -123,7 +123,7 @@ function mockMe(event: RequestEvent): unknown {
 						id: '00000000-0000-0000-0000-000000000001',
 						username: MOCK_USERNAME,
 						displayName: 'Demo User',
-						isAdmin: false
+						isAdmin: true // mock mode has a single demo session; it must reach every screen
 					}
 				: null
 		}
@@ -150,7 +150,7 @@ function mockLogin(
 					id: '00000000-0000-0000-0000-000000000001',
 					username: input.username,
 					displayName: 'Demo User',
-					isAdmin: false
+					isAdmin: true // mock mode has a single demo session; it must reach every screen
 				}
 			}
 		},

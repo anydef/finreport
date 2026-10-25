@@ -365,7 +365,8 @@ async fn rule_crud_and_reapply_scope_to_the_callers_accounts() {
     let (_kafka, bootstrap) = start_kafka_with_labeling_topics().await;
     let db = common::db().await;
 
-    let (user, _) = common::seed_user(&db, "grace-rule-test", "pw").await;
+    // Rule mutations and `rules` are admin-only.
+    let (user, _) = common::seed_admin(&db, "grace-rule-test", "pw").await;
     let account = common::seed_account(&db, "EUR", "Grace's account").await;
     common::link(&db, user, account).await;
     let (_, subs_slug) = common::seed_category(&db, "expense.subscriptions", "Subscriptions", "EXPENSE").await;

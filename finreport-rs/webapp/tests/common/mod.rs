@@ -11,7 +11,7 @@
 use chrono::Utc;
 use entity::entities::{account, app_user, category, transaction, transaction_label, user_account};
 use rust_decimal::Decimal;
-use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, Set};
+use sea_orm::{ActiveModelTrait, Database, DatabaseConnection, EntityTrait, Set};
 use secrecy::SecretString;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -121,6 +121,23 @@ pub async fn seed_user(db: &DatabaseConnection, username: &str, password: &str) 
     .insert(db)
     .await
     .expect("insert app_user");
+    (user_id, unique_username)
+}
+
+/// [`seed_user`], then promotes the row to administrator. Kept explicit
+/// (rather than making every seeded user an admin) so the default test user
+/// is the realistic, unprivileged one and a test that needs the admin gate
+/// open has to say so.
+pub async fn seed_admin(db: &DatabaseConnection, username: &str, password: &str) -> (Uuid, String) {
+    let (user_id, unique_username) = seed_user(db, username, password).await;
+    let mut row: app_user::ActiveModel = app_user::Entity::find_by_id(user_id)
+        .one(db)
+        .await
+        .expect("load app_user")
+        .expect("seeded app_user exists")
+        .into();
+    row.is_admin = Set(true);
+    row.update(db).await.expect("promote app_user to admin");
     (user_id, unique_username)
 }
 

@@ -87,6 +87,9 @@ fn read_user_labels(bootstrap: &str) -> Vec<serde_json::Value> {
 struct World {
     db: Arc<DatabaseConnection>,
     user: AuthenticatedUser,
+    /// An administrator, for the admin-only mutations (`createCategory`);
+    /// `user` stays unprivileged so everything else runs as a normal user.
+    admin: AuthenticatedUser,
     account: Uuid,
     schema: webapp::graphql::AppSchema,
     bootstrap: String,
@@ -99,10 +102,12 @@ async fn world_with_limit(bulk_max: u32) -> World {
     let (user_id, username) = common::seed_user(&db, "bulk-test", "pw").await;
     let account = common::seed_account(&db, "EUR", "Bulk account").await;
     common::link(&db, user_id, account).await;
+    let (admin_id, admin_name) = common::seed_admin(&db, "bulk-admin", "pw").await;
     let schema = create_schema(db.clone(), settings(&bootstrap, bulk_max));
     World {
         db,
         user: AuthenticatedUser { user_id, username, account_ids: vec![account] },
+        admin: AuthenticatedUser { user_id: admin_id, username: admin_name, account_ids: vec![] },
         account,
         schema,
         bootstrap,
@@ -121,6 +126,16 @@ impl World {
 
     async fn run(&self, query: String) -> async_graphql::Response {
         self.schema.execute(authed(Request::new(query), &self.user)).await
+    }
+
+    async fn run_admin(&self, query: String) -> async_graphql::Response {
+        self.schema.execute(authed(Request::new(query), &self.admin)).await
+    }
+
+    async fn run_admin_ok(&self, query: String) -> serde_json::Value {
+        let response = self.run_admin(query).await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        response.data.into_json().unwrap()
     }
 
     async fn run_ok(&self, query: String) -> serde_json::Value {
@@ -679,7 +694,7 @@ async fn create_category_stays_strict_about_duplicates() {
     let slug = format!("strict_{}", Uuid::new_v4().simple());
     w.run_ok(ensure_category(&slug, "EXPENSE", None)).await;
     let dup = w
-        .run(format!(
+        .run_admin(format!(
             r#"mutation {{ createCategory(input: {{ slug: "{slug}", name: "Again", kind: EXPENSE }}) {{ id }} }}"#
         ))
         .await;
@@ -722,11 +737,11 @@ async fn child_category_slug_must_be_parent_slug_plus_one_segment() {
     };
 
     // Parent + one segment: accepted, and findable as a descendant by prefix.
-    let ok = w.run_ok(create(format!("{parent}.gym"), Some(parent.clone()))).await;
+    let ok = w.run_admin_ok(create(format!("{parent}.gym"), Some(parent.clone()))).await;
     assert_eq!(ok["createCategory"]["slug"], format!("{parent}.gym"));
 
     // A bare leaf: rejected with the slug it should have been.
-    let bare = w.run(create("gym".into(), Some(parent.clone()))).await;
+    let bare = w.run_admin(create("gym".into(), Some(parent.clone()))).await;
     assert_eq!(error_code(&bare).as_deref(), Some("VALIDATION"), "{:?}", bare.errors);
     assert!(
         bare.errors[0].message.contains(&format!("e.g. '{parent}.gym'")),
@@ -735,11 +750,11 @@ async fn child_category_slug_must_be_parent_slug_plus_one_segment() {
     );
 
     // Two segments below the parent: rejected.
-    let deep = w.run(create(format!("{parent}.a.b"), Some(parent.clone()))).await;
+    let deep = w.run_admin(create(format!("{parent}.a.b"), Some(parent.clone()))).await;
     assert_eq!(error_code(&deep).as_deref(), Some("VALIDATION"), "{:?}", deep.errors);
 
     // A dotted slug with no parent: rejected, naming the parent to pass.
-    let orphan = w.run(create(format!("{parent}.other"), None)).await;
+    let orphan = w.run_admin(create(format!("{parent}.other"), None)).await;
     assert_eq!(error_code(&orphan).as_deref(), Some("VALIDATION"), "{:?}", orphan.errors);
     assert!(orphan.errors[0].message.contains("parentSlug"), "{:?}", orphan.errors);
 
