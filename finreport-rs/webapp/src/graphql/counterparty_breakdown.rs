@@ -36,8 +36,12 @@
 //!   display alias is per key, siblings under one key show the same name; the
 //!   row's IBAN is what tells them apart, and `ibanDisambiguated` says when
 //!   that is the case.
-//! * **No-key bucket.** Rows whose `counterparty_key` is NULL or empty form one
-//!   row with a `null` key, named like `heldMerchantGroups`' bucket.
+//! * **No-key bucket.** Rows whose `counterparty_key` is NULL or empty get a
+//!   `null` key, named like `heldMerchantGroups`' bucket. Since the grouping
+//!   is on the pair, that is **one row per distinct IBAN**, not one row
+//!   overall - several rows can therefore carry the same bucket name, and
+//!   `ibanDisambiguated` is set on them because the IBAN is their only
+//!   identity.
 //!
 //! # One filter path
 //!
