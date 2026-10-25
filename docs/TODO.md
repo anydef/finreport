@@ -160,6 +160,45 @@ against the tree on 2026-10-24, not from memory:
   records still exist on `finreport.transaction-label`, and a projector replay
   would resurrect exactly what was deleted.
 
+## `isAdmin` is served but never enforced (2026-10-25) - needs a decision
+
+Found while building the mock-only `/admin/users` page. **`is_admin` is
+reported and never checked.** Evidence:
+
+- `webapp/src/graphql/queries.rs:40-45` and `mutations.rs:66` set `is_admin`
+  on the viewer; `grep -rn is_admin webapp/src/graphql` returns those three
+  sites and nothing else. **No resolver and no mutation gates on it.**
+- On the frontend, `isAdmin` appears only in `queries.ts` (selected) and in
+  the new users page (rendered as a badge). **No `/admin/*` route guards on
+  it**; the only guard is the `(app)` login redirect.
+
+So today every logged-in user can open `/admin/accounts` and `/admin/amazon`
+and use them - that includes toggling savings flags and applying Amazon
+splits, which write. This is pre-existing, not introduced by the users page,
+but it blocks that page's backend half: a user-management API that any
+logged-in user may call is worse than no API, because it would let an
+ordinary user promote themselves.
+
+**Decisions needed from the user before the backend slice:**
+
+1. Should `/admin/*` require `is_admin`, enforced **server-side** on every
+   resolver and mutation (a client-side route guard alone is decoration)?
+2. Is there a password policy, or is any non-empty password acceptable?
+   `auth/password.rs::hash_password` accepts any `SecretString` today,
+   including an empty one - Argon2 with defaults, which is fine, but there is
+   no length or complexity rule anywhere. The mock page therefore claims
+   none, deliberately: a client-side rule the server does not share is a
+   false promise.
+3. May an admin demote or delete another admin? The CLI has no promote,
+   demote or delete command at all, so there is no precedent to follow. The
+   mock proposes "the last admin can be neither demoted nor deleted, and a
+   disabled admin does not count as a remaining admin" - a proposal, not a
+   decision.
+
+Until 1 is settled, the users page stays mock-only and inert. The
+`user-admin` CLI remains the only way to change users, which is itself the
+safe answer, since it needs shell access to the host.
+
 ## Backlog
 
 Recorded feature requests, not yet prioritised. The estimate is effort, the
