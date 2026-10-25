@@ -43,6 +43,23 @@ pub(crate) fn counterparty_key_list(filter: &TransactionFilter) -> Option<Vec<St
     filter.counterparty_keys.clone().filter(|k| !k.is_empty())
 }
 
+/// The filter's `counterpartyIbans`, if it names any. Empty is unconstrained,
+/// as `counterpartyKeys`.
+pub(crate) fn counterparty_iban_list(filter: &TransactionFilter) -> Option<Vec<String>> {
+    filter.counterparty_ibans.clone().filter(|k| !k.is_empty())
+}
+
+/// `hasCounterpartyIban`'s predicate over `{alias}.counterparty_iban`: "has
+/// one" means non-empty, "has none" covers both NULL and `''`. Takes no
+/// parameter, so it never shifts the numbering of the others.
+fn has_iban_sql(alias: &str, has: bool) -> String {
+    if has {
+        format!("COALESCE({alias}.counterparty_iban, '') <> ''")
+    } else {
+        format!("COALESCE({alias}.counterparty_iban, '') = ''")
+    }
+}
+
 /// The filter's `categorySlugsExact`, if it names any. Empty is
 /// unconstrained, as `counterpartyKeys`.
 pub(crate) fn category_slug_exact_list(filter: &TransactionFilter) -> Option<Vec<String>> {
@@ -126,7 +143,7 @@ pub(crate) fn counterparty_sort_key(viewer: Option<Uuid>) -> String {
     }
 }
 
-/// Hand-rolled SQL twin of the `transactionIds`/`counterpartyKeys`/`categorySlugsExact`/`amountMin`/`amountMax`
+/// Hand-rolled SQL twin of the `transactionIds`/`counterpartyKeys`/`counterpartyIbans`/`hasCounterpartyIban`/`categorySlugsExact`/`amountMin`/`amountMax`
 /// predicates in [`build_condition`], for the aggregation queries in
 /// `cashflow` that do not go through sea-orm. `alias` is the transaction
 /// table's alias (or name) in that query; `first_param` is the next free
@@ -149,6 +166,14 @@ pub(crate) fn id_and_amount_sql(
         sql.push_str(&format!(" AND {alias}.counterparty_key = ANY(${idx})"));
         params.push(keys.into());
         idx += 1;
+    }
+    if let Some(ibans) = counterparty_iban_list(filter) {
+        sql.push_str(&format!(" AND {alias}.counterparty_iban = ANY(${idx})"));
+        params.push(ibans.into());
+        idx += 1;
+    }
+    if let Some(has) = filter.has_counterparty_iban {
+        sql.push_str(&format!(" AND {}", has_iban_sql(alias, has)));
     }
     if let Some(slugs) = category_slug_exact_list(filter) {
         sql.push_str(&format!(" AND {}", category_exact_sql(alias, &format!("${idx}"))));
@@ -182,6 +207,12 @@ pub fn build_condition(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Condi
     }
     if let Some(keys) = counterparty_key_list(filter) {
         condition = condition.add(transaction::Column::CounterpartyKey.is_in(keys));
+    }
+    if let Some(ibans) = counterparty_iban_list(filter) {
+        condition = condition.add(transaction::Column::CounterpartyIban.is_in(ibans));
+    }
+    if let Some(has) = filter.has_counterparty_iban {
+        condition = condition.add(sea_orm::sea_query::Expr::cust(has_iban_sql("transaction", has)));
     }
     if let Some(slugs) = category_slug_exact_list(filter) {
         condition = condition.add(sea_orm::sea_query::Expr::cust_with_values(
@@ -643,6 +674,65 @@ mod tests {
             ..Default::default()
         });
         assert!(!without.contains(r#""counterparty_key" IN"#), "{without}");
+    }
+
+    #[test]
+    fn counterparty_iban_sql_follows_keys_and_keeps_parameter_numbering() {
+        let filter = TransactionFilter {
+            transaction_ids: Some(vec![GqlUuid(Uuid::nil())]),
+            counterparty_keys: Some(vec!["me".into()]),
+            counterparty_ibans: Some(vec!["DE01".into(), "DE02".into()]),
+            has_counterparty_iban: Some(true),
+            amount_max: Some(dec("20")),
+            ..Default::default()
+        };
+        let (sql, params) = id_and_amount_sql("t", &filter, 1);
+        assert_eq!(
+            sql,
+            " AND t.id = ANY($1) AND t.counterparty_key = ANY($2) AND t.counterparty_iban = ANY($3) \
+             AND COALESCE(t.counterparty_iban, '') <> '' AND ABS(t.amount) <= $4"
+        );
+        assert_eq!(params.len(), 4);
+
+        let empty = TransactionFilter { counterparty_ibans: Some(vec![]), ..Default::default() };
+        assert_eq!(counterparty_iban_list(&empty), None);
+        assert!(id_and_amount_sql("t", &empty, 1).0.is_empty());
+    }
+
+    #[test]
+    fn has_counterparty_iban_false_matches_null_and_empty_in_both_paths() {
+        use sea_orm::{DbBackend, QueryTrait};
+        let filter = TransactionFilter { has_counterparty_iban: Some(false), ..Default::default() };
+        let (sql, params) = id_and_amount_sql("t", &filter, 1);
+        assert_eq!(sql, " AND COALESCE(t.counterparty_iban, '') = ''");
+        assert!(params.is_empty());
+        let built = transaction::Entity::find()
+            .filter(build_condition(&[Uuid::nil()], &filter))
+            .build(DbBackend::Postgres)
+            .to_string();
+        assert!(built.contains("COALESCE(transaction.counterparty_iban, '') = ''"), "{built}");
+        let unset = TransactionFilter::default();
+        assert!(id_and_amount_sql("t", &unset, 1).0.is_empty());
+    }
+
+    #[test]
+    fn counterparty_iban_condition_is_added_only_when_non_empty() {
+        use sea_orm::{DbBackend, QueryTrait};
+        let sql = |filter: &TransactionFilter| {
+            transaction::Entity::find()
+                .filter(build_condition(&[Uuid::nil()], filter))
+                .build(DbBackend::Postgres)
+                .to_string()
+        };
+        let with = sql(&TransactionFilter {
+            counterparty_ibans: Some(vec!["DE01".into(), "DE02".into()]),
+            has_counterparty_iban: Some(true),
+            ..Default::default()
+        });
+        assert!(with.contains(r#""counterparty_iban" IN ('DE01', 'DE02')"#), "{with}");
+        assert!(with.contains("COALESCE(transaction.counterparty_iban, '') <> ''"), "{with}");
+        let without = sql(&TransactionFilter { counterparty_ibans: Some(vec![]), ..Default::default() });
+        assert!(!without.contains(r#""counterparty_iban" IN"#), "{without}");
     }
 
     #[test]

@@ -205,9 +205,19 @@ by agreeing where it goes.
      Only worth it if 1 and 2 prove insufficient.
 
   Recommendation: 1, then 2 if labelling them differently is still awkward.
-  **Privacy:** an IBAN is sensitive. Show it masked by default (last 4), and
-  it must never reach a log line or an error message — the same posture the
-  Amazon recipient-address columns already have.
+  **Privacy:** an IBAN is sensitive and must never reach a log line or an
+  error message — the same posture the Amazon recipient-address columns
+  already have. Masking (last 4) is a *display* concern, not an API one: the
+  SDL already serves full IBANs on `Transaction.counterpartyIban`, so the new
+  fields return the raw value and the UI decides how to show it.
+
+  **Status (2026-10-25):** option 1's backend half is done.
+  `TransactionFilter` gained `counterpartyIbans` and `hasCounterpartyIban`
+  (both SQL paths), and `counterpartyBreakdown` now groups by (key, IBAN) with
+  `CounterpartyBreakdownRow.counterpartyIban` and `.ibanDisambiguated`
+  (computed over the returned rows). Nothing is re-keyed. The UI half is still
+  open: show the IBAN (masked) when `ibanDisambiguated`, drill down via the
+  new filter fields, and cover `heldMerchantGroups`. Option 2 is untouched.
 
 - **Display nicknames for merchants and for own accounts** — S–M, needs a
   decision on scope first. The user: "I want to be able to give some merchants

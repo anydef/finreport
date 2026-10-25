@@ -384,6 +384,15 @@ pub struct TransactionFilter {
     /// Matches variants of one merchant that `counterpartyNames` would miss.
     /// Omitted or empty = unconstrained.
     pub counterparty_keys: Option<Vec<String>>,
+    /// Exact `counterpartyIban` values, OR-ed. Tells apart two counterparties
+    /// that share a name but not an account (a loan account in the user's own
+    /// name). Omitted or empty = unconstrained, as `counterpartyKeys`.
+    pub counterparty_ibans: Option<Vec<String>>,
+    /// `true` = only rows with a counterparty IBAN, `false` = only rows with
+    /// none (null or empty), omitted = unconstrained. Together with
+    /// `counterpartyKeys` it addresses the "this key, no IBAN" group that a
+    /// list of IBANs cannot express.
+    pub has_counterparty_iban: Option<bool>,
     /// Whether the offsetting side of reimbursement links is included.
     /// `None` = `INCLUDE`: reimbursements are counted as the money they are
     /// until the caller asks otherwise, so no existing view changes.

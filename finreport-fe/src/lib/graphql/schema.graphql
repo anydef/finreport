@@ -430,6 +430,22 @@ type CounterpartyBreakdownRow {
 	"""
 	displayName: String!
 	"""
+	The group's counterparty IBAN, **raw and unmasked**; `null` when the
+	group has none. Raw is deliberate: `Transaction.counterpartyIban`
+	already serves the full IBAN, so this exposes nothing new, and a client
+	needs the exact value to drill down via `counterpartyIbans`. Masking is
+	a display concern. Never log it.
+	"""
+	counterpartyIban: String
+	"""
+	`true` when this row's `counterpartyKey` appears under more than one
+	distinct IBAN among the returned rows (or, with no key, the IBAN is
+	the only identity), i.e. the IBAN is what tells it from a sibling. A
+	client shows the IBAN only then. Computed over the returned `rows`, so
+	a sibling that fell beyond `limit` (into `other`) is not seen.
+	"""
+	ibanDisambiguated: Boolean!
+	"""
 	Signed net of the counterparty's transactions: refunds cancel charges.
 	"""
 	amount: Decimal!
@@ -1596,6 +1612,19 @@ input TransactionFilter {
 	Omitted or empty = unconstrained.
 	"""
 	counterpartyKeys: [String!]
+	"""
+	Exact `counterpartyIban` values, OR-ed. Tells apart two counterparties
+	that share a name but not an account (a loan account in the user's own
+	name). Omitted or empty = unconstrained, as `counterpartyKeys`.
+	"""
+	counterpartyIbans: [String!]
+	"""
+	`true` = only rows with a counterparty IBAN, `false` = only rows with
+	none (null or empty), omitted = unconstrained. Together with
+	`counterpartyKeys` it addresses the "this key, no IBAN" group that a
+	list of IBANs cannot express.
+	"""
+	hasCounterpartyIban: Boolean
 	"""
 	Whether the offsetting side of reimbursement links is included.
 	`None` = `INCLUDE`: reimbursements are counted as the money they are
