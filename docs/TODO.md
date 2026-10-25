@@ -446,6 +446,54 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
 
 ## Backlog
 
+- **PayPal REST API import (unattended sync)** - M-L, deferred by the user on
+  2026-10-25 in favour of the CSV route, which is the scheduled work. This
+  entry is the API path's own record so it is not lost.
+
+  **What it buys over CSV:** unattended sync. The CSV route needs a human to
+  export and upload; the API windows, watermarks and runs itself, like the
+  Comdirect importer.
+
+  **Why it was deferred and what unblocks it.** The spec
+  `docs/specs/iteration-5-paypal.md` §4 wants a recorded sandbox payload,
+  because "the mapper is where a provider's surprises surface". The user has
+  no PayPal sandbox account, so fixtures would be hand-made from the
+  documented response shape - proving our logic self-consistent, not that
+  PayPal behaves as documented. A **free developer app at
+  developer.paypal.com** gives sandbox credentials in minutes and satisfies
+  that requirement; that is the cheapest unblock and it has not changed.
+
+  **Doing CSV first makes this strictly easier**, which is the main reason the
+  order is right: the CSV import answers the spec's open questions against
+  *real* exported data instead of guesses - which `transaction_status` values
+  to import, how a status change is represented without creating two rows,
+  whether refunds need special handling, and whether to publish one
+  `account-balance` per currency. Answer them from the export, then build the
+  API mapper to match.
+
+  **The existing partial work is a liability.** Commit `7ad6e7e` on branch
+  `worktree-agent-a079872cd80f0ce44` (verified present 2026-10-25): 572 lines
+  across `paypal-rs/{lib,error,token,watermark,window}.rs` plus a workspace
+  member entry, **never compiled, never tested**. Review it line by line or
+  discard it; do not merge it as-is. An unverified skeleton that compiles
+  reads as done and is more dangerous than a blank page.
+
+  **Also still open from the spec:** the 3-year transaction-history limit
+  makes a first import incomplete by nature, which belongs in the runbook
+  rather than being discovered later.
+
+  **Credential rule, binding:** PayPal credentials never go into chat. One
+  `op://` reference per value in `.env.tpl`, a `sensitive = true` terraform
+  variable, `extra_env` into the container - the same path as the Anthropic
+  key. The CSV route needs none of this, which is part of why it goes first.
+
+  **A third route exists and may make this moot:** PayPal is on
+  **FinTS/Connect**'s institution list (EUR 80/year, see the C24/Scalable
+  entry). If that subscription is ever bought for C24, PayPal arrives with it
+  and needs no PayPal credentials at all - but it needs a FinTS client this
+  repo does not have.
+
+
 - **User-created cash accounts, with manually entered transactions** - L,
   high value, requested 2026-10-25. The user: *"I need an option to create an
   ephemeral Cash account(s), so that I can track my spendings in cash. I
@@ -919,7 +967,13 @@ are unchanged, but the landscape around them moved today):
   and needs no PayPal credentials at all. It still needs a FinTS client,
   which this repo does not have.
 
-**Recommendation: CSV first.** It reuses machinery that will already exist,
+**DECIDED by the user, 2026-10-25: CSV first, API later.** Their words:
+*"lets do the CSV fisrt and the API later. but still add it to the backlog"*.
+So the CSV import is the scheduled work (after C24, before cash accounts),
+and the API path is a backlog item in its own right - see "PayPal REST API
+import" in the Backlog. The reasoning that led there:
+
+**CSV first.** It reuses machinery that will already exist,
 needs no credentials, no OAuth, no windowing, no watermark and no deployed
 service, and it gives the user real PayPal data in their own reports sooner.
 Keep the API path as the follow-up for unattended sync, by which time the
