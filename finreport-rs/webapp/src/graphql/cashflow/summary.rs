@@ -178,8 +178,10 @@ pub fn build_summary_sql(
         None => {}
     }
     // §4 "totals exclude transfers" (unless the caller explicitly asked for
-    // them via `filter.transfer = true`).
-    sql.push_str(&crate::graphql::cashflow::transfer_filter_sql("id", filter));
+    // them via `filter.transfer = true`) — scope-aware: a flagged leg whose
+    // counterpart is provably outside the effective scope is this selection's
+    // real income/spending. See `cashflow::scoped_transfer_exclusion_sql`.
+    sql.push_str(&crate::graphql::cashflow::transfer_filter_sql("id", filter, scoped_ids));
 
     sql.push_str(" GROUP BY bucket_start ORDER BY bucket_start");
     (sql, params)

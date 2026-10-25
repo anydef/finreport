@@ -99,7 +99,19 @@ fn uuid_array_literal(ids: &[Uuid]) -> String {
 /// unchanged by construction.
 ///
 /// `transfer_counterpart_id` is a *transaction* id, so the counterpart's
-/// account needs a join back to `transaction`.
+/// account is reached by going back to `transaction`.
+///
+/// **That lookup is a nested scalar subquery, not a `JOIN transaction ct` in
+/// the `EXISTS` arm, and it must stay one.** Call sites splice an
+/// `id_expr` that may be unqualified (`"id"`, where the outer `FROM` is
+/// `transaction`); a `transaction` in the subquery's own `FROM` shadows it,
+/// so `ti.transaction_id = id` would silently become
+/// `ti.transaction_id = ct.id` — never true, and the fix becomes a no-op.
+/// Only `transaction_insight` appears in the correlated query's `FROM`, and
+/// it has no `id` column, so `id_expr` resolves outward as intended.
+///
+/// The `COALESCE(..., true)` is what keeps a NULL `transfer_counterpart_id`
+/// excluded: no counterpart row means "treat it as inside the scope".
 pub(crate) fn scoped_transfer_exclusion_sql(id_expr: &str, scope_ids: &[Uuid]) -> String {
     // No scope at all: nothing can be proven outside it, so fall back to the
     // household rule rather than letting `= ANY(ARRAY[]::uuid[])` (always
@@ -112,9 +124,9 @@ pub(crate) fn scoped_transfer_exclusion_sql(id_expr: &str, scope_ids: &[Uuid]) -
         " AND (COALESCE((SELECT ti.is_transfer FROM transaction_insight ti \
            WHERE ti.transaction_id = {id_expr}), false) = false \
          OR EXISTS (SELECT 1 FROM transaction_insight ti \
-           JOIN transaction ct ON ct.id = ti.transfer_counterpart_id \
            WHERE ti.transaction_id = {id_expr} AND ti.is_transfer = true \
-             AND NOT (ct.account_id = ANY({scope}))))"
+             AND NOT COALESCE((SELECT ct.account_id = ANY({scope}) FROM transaction ct \
+               WHERE ct.id = ti.transfer_counterpart_id), true)))"
     )
 }
 
@@ -376,14 +388,22 @@ fn build_category_outcome_sql(
     // category `kind = TRANSFER` is dropped from the aggregation, unless
     // the caller explicitly asked for transfers (`filter.transfer = true`),
     // in which case only such rows are kept.
+    //
+    // The `is_transfer` half is now scope-aware (see
+    // `scoped_transfer_exclusion_sql`): a flagged leg whose counterpart is
+    // provably outside the effective scope is real spending for the selected
+    // account. The category-`kind` half is untouched — a user who categorises
+    // something as a transfer means it, whatever the selection.
     if filter.transfer == Some(true) {
         extra.push_str(
             " AND (COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = t.id), false) = true OR c.kind = 'transfer')",
         );
     } else {
-        extra.push_str(
-            " AND COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = t.id), false) = false AND COALESCE(c.kind, '') != 'transfer'",
-        );
+        extra.push_str(&scoped_transfer_exclusion_sql(
+            "t.id",
+            &effective_scope_ids(scoped_ids, filter),
+        ));
+        extra.push_str(" AND COALESCE(c.kind, '') != 'transfer'");
     }
 
     let sql = format!(
@@ -494,4 +514,95 @@ fn rows_to_flows(
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graphql::scalars::Uuid as GqlUuid;
+
+    fn uuid(n: u8) -> Uuid {
+        Uuid::from_bytes([n; 16])
+    }
+
+    fn filter_with(account_ids: Option<Vec<Uuid>>) -> TransactionFilter {
+        TransactionFilter {
+            account_ids: account_ids
+                .map(|ids| ids.into_iter().map(GqlUuid).collect()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn no_selection_falls_back_to_the_authorisation_scope() {
+        let scoped = vec![uuid(1), uuid(2)];
+        assert_eq!(
+            effective_scope_ids(&scoped, &filter_with(None)),
+            vec![uuid(1), uuid(2)]
+        );
+    }
+
+    #[test]
+    fn an_empty_selection_falls_back_to_the_authorisation_scope() {
+        let scoped = vec![uuid(1), uuid(2)];
+        assert_eq!(
+            effective_scope_ids(&scoped, &filter_with(Some(vec![]))),
+            vec![uuid(1), uuid(2)]
+        );
+    }
+
+    #[test]
+    fn a_selection_wins_over_the_authorisation_scope() {
+        // The whole point of the helper: drilling into one of two accounts
+        // must narrow the transfer rule's scope, not keep the household one.
+        let scoped = vec![uuid(1), uuid(2)];
+        assert_eq!(
+            effective_scope_ids(&scoped, &filter_with(Some(vec![uuid(2)]))),
+            vec![uuid(2)]
+        );
+    }
+
+    #[test]
+    fn an_empty_scope_keeps_the_household_exclusion() {
+        // `= ANY(ARRAY[]::uuid[])` is always false, so a naive render would
+        // make every flagged leg "provably outside scope" and include it.
+        let sql = scoped_transfer_exclusion_sql("t.id", &[]);
+        assert_eq!(sql, transfer_exclusion_sql("t.id"));
+    }
+
+    #[test]
+    fn the_scoped_exclusion_requires_a_counterpart_outside_the_scope() {
+        let sql = scoped_transfer_exclusion_sql("t.id", &[uuid(7)]);
+        // A flagged leg survives only via the EXISTS arm, which looks the
+        // counterpart's account up and demands it be outside the scope array.
+        assert!(sql.contains("ti.is_transfer = true"));
+        assert!(sql.contains("WHERE ct.id = ti.transfer_counterpart_id"));
+        assert!(sql.contains(&uuid(7).to_string()));
+        // A NULL counterpart yields no row, and COALESCE(..., true) then
+        // treats it as inside the scope, so it stays excluded.
+        assert!(sql.contains("NOT COALESCE((SELECT ct.account_id = ANY("));
+        // The correlated query must not pull `transaction` into its own FROM:
+        // that would shadow an unqualified `id_expr` and void the whole fix.
+        assert!(!sql.contains("JOIN transaction ct"));
+    }
+
+    #[test]
+    fn only_transfers_is_not_scope_aware() {
+        let filter = TransactionFilter {
+            transfer: Some(true),
+            ..filter_with(Some(vec![uuid(2)]))
+        };
+        assert_eq!(
+            transfer_filter_sql("id", &filter, &[uuid(1), uuid(2)]),
+            transfer_inclusion_sql("id")
+        );
+    }
+
+    #[test]
+    fn the_default_filter_excludes_transfers_over_the_whole_scope() {
+        let scoped = vec![uuid(1), uuid(2)];
+        let sql = transfer_filter_sql("id", &filter_with(None), &scoped);
+        assert_eq!(sql, scoped_transfer_exclusion_sql("id", &scoped));
+        assert!(sql.contains(&uuid(1).to_string()) && sql.contains(&uuid(2).to_string()));
+    }
 }

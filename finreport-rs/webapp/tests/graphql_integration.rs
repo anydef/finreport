@@ -2114,3 +2114,358 @@ mod purchase_orders {
         assert_eq!(splits_of(&w.db, w.tx).await, before, "Bob cannot undo Alice's split");
     }
 }
+
+// ---------------------------------------------------------------------------
+// Scope-aware transfer exclusion: a flagged transfer leg is dropped only when
+// its counterpart is inside the *effective* scope (the selected
+// `accountIds`, else the whole authorisation scope). Excluding transfers is
+// right at household level — the money did not leave — and wrong per account,
+// where an inbound transfer *is* that account's income. Before this, the
+// detector flagged both legs and both were dropped, so the receiving account
+// showed only its outflows and read as a phantom deficit.
+//
+// Test isolation: the integration database is shared and sibling tests in the
+// same binary run concurrently, so every test here seeds its own tenant and
+// asserts only on that tenant's accounts. `cashflowSummary`/`cashflowGraph`
+// are already scoped to the caller, so these assertions cannot be perturbed
+// by another test's rows.
+// ---------------------------------------------------------------------------
+
+mod transfer_scope {
+    use super::*;
+    use chrono::Utc;
+    use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
+    use uuid::Uuid;
+
+    fn dec(s: &str) -> Decimal {
+        Decimal::from_str(s).unwrap()
+    }
+
+    /// A user with `labels.len()` linked accounts, named uniquely per run.
+    async fn tenant(
+        db: &DatabaseConnection,
+        name: &str,
+        labels: &[&str],
+    ) -> (AuthenticatedUser, Vec<Uuid>) {
+        let (user_id, username) = common::seed_user(db, name, "pw").await;
+        let mut ids = Vec::new();
+        for label in labels {
+            let id = common::seed_account(db, "EUR", label).await;
+            common::link(db, user_id, id).await;
+            ids.push(id);
+        }
+        (
+            AuthenticatedUser { user_id, username, account_ids: ids.clone() },
+            ids,
+        )
+    }
+
+    fn insight(id: Uuid, counterpart: Option<Uuid>) -> entity::entities::transaction_insight::ActiveModel {
+        entity::entities::transaction_insight::ActiveModel {
+            transaction_id: Set(id),
+            is_transfer: Set(true),
+            transfer_counterpart_id: Set(counterpart),
+            transfer_match: Set(Some("amount_date".to_string())),
+            is_recurring: Set(false),
+            recurring_series_id: Set(None),
+            recurring_cadence: Set(None),
+            recurring_median_amount: Set(None),
+            detected_at: Set(Utc::now().into()),
+            revision: Set(Utc::now().into()),
+        }
+    }
+
+    /// Marks two transactions as the two legs of one detected transfer —
+    /// exactly what `detect::transfer` does: it flags **both** sides.
+    async fn pair_as_transfer(db: &DatabaseConnection, a: Uuid, b: Uuid) {
+        for (id, other) in [(a, b), (b, a)] {
+            insight(id, Some(other)).insert(db).await.unwrap();
+        }
+    }
+
+    /// A leg flagged as a transfer whose counterpart was never resolved.
+    async fn flag_without_counterpart(db: &DatabaseConnection, id: Uuid) {
+        insight(id, None).insert(db).await.unwrap();
+    }
+
+    const MAY: &str = r#"startDate: "2024-05-01", endDate: "2024-05-31""#;
+
+    fn accounts_arg(ids: &[Uuid]) -> String {
+        let list: Vec<String> = ids.iter().map(|id| format!("\"{id}\"")).collect();
+        format!("accountIds: [{}]", list.join(", "))
+    }
+
+    /// `(income, spending, net, transactionCount)` from `cashflowSummary`.
+    async fn summary(
+        schema: &webapp::graphql::AppSchema,
+        user: &AuthenticatedUser,
+        filter: &str,
+    ) -> (Decimal, Decimal, Decimal, i64) {
+        let query = format!(
+            "{{ cashflowSummary(filter: {{ {filter} }}, granularity: MONTH) \
+               {{ total {{ income spending net transactionCount }} }} }}"
+        );
+        let response = schema
+            .execute(authed(Request::new(query), Some(user.clone())))
+            .await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let total = response.data.into_json().unwrap()["cashflowSummary"]["total"].clone();
+        (
+            dec(total["income"].as_str().unwrap()),
+            dec(total["spending"].as_str().unwrap()),
+            dec(total["net"].as_str().unwrap()),
+            total["transactionCount"].as_i64().unwrap(),
+        )
+    }
+
+    /// `(income into accounts, spending out of accounts)` as the Sankey
+    /// renders it — the same reconciliation
+    /// `cashflow_graph_conserves_flow_and_reconciles_with_summary` uses, so
+    /// the graph and the summary can be checked against each other.
+    async fn graph_totals(
+        schema: &webapp::graphql::AppSchema,
+        user: &AuthenticatedUser,
+        filter: &str,
+        grouping: Option<&str>,
+    ) -> (Decimal, Decimal, serde_json::Value) {
+        let grouping = grouping
+            .map(|g| format!(", grouping: {{ dimensions: [{g}] }}"))
+            .unwrap_or_default();
+        let query = format!(
+            "{{ cashflowGraph(filter: {{ {filter} }}{grouping}) \
+               {{ nodes {{ id kind value refType refId }} links {{ sourceId targetId value }} }} }}"
+        );
+        let response = schema
+            .execute(authed(Request::new(query), Some(user.clone())))
+            .await;
+        assert!(response.errors.is_empty(), "{:?}", response.errors);
+        let data = response.data.into_json().unwrap()["cashflowGraph"].clone();
+        let nodes = data["nodes"].as_array().unwrap().clone();
+        let links = data["links"].as_array().unwrap().clone();
+        let kind = |id: &serde_json::Value| -> String {
+            nodes
+                .iter()
+                .find(|n| &n["id"] == id)
+                .map(|n| n["kind"].as_str().unwrap().to_string())
+                .unwrap_or_default()
+        };
+        let value = |l: &serde_json::Value| dec(l["value"].as_str().unwrap());
+        let income: Decimal = links
+            .iter()
+            .filter(|l| kind(&l["targetId"]) == "ACCOUNT" && kind(&l["sourceId"]) != "DEFICIT")
+            .map(value)
+            .sum();
+        let spending: Decimal = links
+            .iter()
+            .filter(|l| kind(&l["sourceId"]) == "ACCOUNT" && kind(&l["targetId"]) != "NET")
+            .map(value)
+            .sum();
+        (income, spending, data)
+    }
+
+    /// Salary into `a`, a slice of it transferred to `b` (both legs flagged
+    /// and paired, as the detector leaves them), plus ordinary spending on
+    /// `b` — the exact shape the user described.
+    async fn salary_and_bucket(db: &DatabaseConnection, a: Uuid, b: Uuid) {
+        common::seed_transaction(db, a, "2024-05-01", "3000.00", Some("Employer")).await;
+        let out = common::seed_transaction(db, a, "2024-05-02", "-1000.00", Some("Own account")).await;
+        let inn = common::seed_transaction(db, b, "2024-05-02", "1000.00", Some("Own account")).await;
+        pair_as_transfer(db, out, inn).await;
+        common::seed_transaction(db, b, "2024-05-10", "-400.00", Some("Supermarkt")).await;
+    }
+
+    /// (1) The whole-household view is unchanged by construction: both legs
+    /// are inside the effective scope, so both are still dropped by
+    /// `cashflowSummary` *and* `cashflowGraph`. This is the reason this
+    /// approach was chosen over a new filter mode, so it is a test rather
+    /// than an assumption.
+    #[tokio::test]
+    async fn the_whole_household_view_still_excludes_both_legs() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let (user, ids) = tenant(&db, "ts-household", &["Salary", "Bucket"]).await;
+        salary_and_bucket(&db, ids[0], ids[1]).await;
+
+        // Salary 3000 in, 400 spent. The 1000 moved between the two accounts
+        // appears nowhere: the money did not leave the household.
+        assert_eq!(
+            summary(&schema, &user, MAY).await,
+            (dec("3000.0000"), dec("400.0000"), dec("2600.0000"), 2)
+        );
+
+        let (g_income, g_spending, _) = graph_totals(&schema, &user, MAY, None).await;
+        assert_eq!((g_income, g_spending), (dec("3000.0000"), dec("400.0000")));
+
+        // An explicit, redundant selection of *all* accounts is the same view.
+        let all = format!("{MAY}, {}", accounts_arg(&ids));
+        assert_eq!(
+            summary(&schema, &user, &all).await,
+            (dec("3000.0000"), dec("400.0000"), dec("2600.0000"), 2)
+        );
+    }
+
+    /// (2) The phantom deficit: with only the receiving account selected, the
+    /// inbound leg's counterpart is outside the scope, so it counts as that
+    /// account's income and the account is no longer in deficit.
+    #[tokio::test]
+    async fn the_receiving_account_alone_counts_the_inbound_leg_as_income() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let (user, ids) = tenant(&db, "ts-receiving", &["Salary", "Bucket"]).await;
+        salary_and_bucket(&db, ids[0], ids[1]).await;
+
+        let only_bucket = format!("{MAY}, {}", accounts_arg(&ids[1..2]));
+        let (income, spending, net, count) = summary(&schema, &user, &only_bucket).await;
+        assert_eq!(income, dec("1000.0000"), "the transfer in is this account's income");
+        assert_eq!(spending, dec("400.0000"));
+        assert_eq!(net, dec("600.0000"));
+        assert!(net > Decimal::ZERO, "the account must not read as a deficit");
+        assert_eq!(count, 2);
+
+        let (g_income, g_spending, _) = graph_totals(&schema, &user, &only_bucket, None).await;
+        assert_eq!(
+            (g_income, g_spending),
+            (dec("1000.0000"), dec("400.0000")),
+            "cashflowGraph must not disagree with cashflowSummary"
+        );
+    }
+
+    /// (3) Symmetry: the sending account alone counts the outbound leg as
+    /// spending — the allocation left *that* account.
+    #[tokio::test]
+    async fn the_sending_account_alone_counts_the_outbound_leg_as_spending() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let (user, ids) = tenant(&db, "ts-sending", &["Salary", "Bucket"]).await;
+        salary_and_bucket(&db, ids[0], ids[1]).await;
+
+        let only_salary = format!("{MAY}, {}", accounts_arg(&ids[0..1]));
+        assert_eq!(
+            summary(&schema, &user, &only_salary).await,
+            (dec("3000.0000"), dec("1000.0000"), dec("2000.0000"), 2)
+        );
+
+        let (g_income, g_spending, _) = graph_totals(&schema, &user, &only_salary, None).await;
+        assert_eq!((g_income, g_spending), (dec("3000.0000"), dec("1000.0000")));
+    }
+
+    /// (4) A flagged leg with no resolved counterpart stays excluded: we
+    /// cannot *prove* the other side is outside the scope, and unknown data
+    /// must not flip a figure the user has already looked at.
+    #[tokio::test]
+    async fn a_flagged_leg_without_a_counterpart_stays_excluded() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let (user, ids) = tenant(&db, "ts-null-counterpart", &["Bucket"]).await;
+        let orphan = common::seed_transaction(&db, ids[0], "2024-05-02", "1000.00", Some("Own account")).await;
+        flag_without_counterpart(&db, orphan).await;
+        common::seed_transaction(&db, ids[0], "2024-05-10", "-50.00", Some("Supermarkt")).await;
+
+        let only = format!("{MAY}, {}", accounts_arg(&ids));
+        assert_eq!(
+            summary(&schema, &user, &only).await,
+            (dec("0.0000"), dec("50.0000"), dec("-50.0000"), 1),
+            "an unprovable counterpart keeps the conservative exclusion"
+        );
+    }
+
+    /// (5) Unchanged: a row whose resolved category is `kind = transfer` is
+    /// dropped from the CATEGORY dimension by its own rule, with no
+    /// `transaction_insight` row at all and whatever the selection.
+    #[tokio::test]
+    async fn a_transfer_kind_category_stays_excluded_even_for_one_account() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let (user, ids) = tenant(&db, "ts-kind", &["Salary"]).await;
+        let (transfer_cat, transfer_slug) =
+            common::seed_category(&db, "transfer.internal", "Internal", "transfer").await;
+        let (rent_cat, rent_slug) = common::seed_category(&db, "expense.rent", "Rent", "expense").await;
+
+        common::seed_transaction(&db, ids[0], "2024-05-01", "3000.00", Some("Employer")).await;
+        let moved = common::seed_transaction(&db, ids[0], "2024-05-02", "-1000.00", Some("Own account")).await;
+        common::seed_transaction_label(&db, moved, Some(transfer_cat), "user", "resolved").await;
+        let rent = common::seed_transaction(&db, ids[0], "2024-05-03", "-900.00", Some("Landlord")).await;
+        common::seed_transaction_label(&db, rent, Some(rent_cat), "user", "resolved").await;
+
+        let only = format!("{MAY}, {}", accounts_arg(&ids));
+        let (_, spending, data) =
+            graph_totals(&schema, &user, &only, Some("INCOME_SOURCE, ACCOUNT, CATEGORY")).await;
+        assert_eq!(spending, dec("900.0000"), "only the rent is spending");
+        let nodes = data["nodes"].as_array().unwrap();
+        assert!(
+            nodes.iter().any(|n| n["refType"] == "category" && n["refId"] == rent_slug),
+            "rent must have a category node: {nodes:?}"
+        );
+        assert!(
+            !nodes.iter().any(|n| n["refId"] == transfer_slug),
+            "a transfer-kind category must not appear: {nodes:?}"
+        );
+    }
+
+    /// (6) `transfer: true` ("show me only transfers") means exactly what it
+    /// always did — it is not scope-aware, so a single-account selection
+    /// still shows that account's flagged leg.
+    #[tokio::test]
+    async fn only_transfers_is_unchanged() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let (user, ids) = tenant(&db, "ts-only-transfers", &["Salary", "Bucket"]).await;
+        salary_and_bucket(&db, ids[0], ids[1]).await;
+
+        // Household: both legs, nothing else.
+        assert_eq!(
+            summary(&schema, &user, &format!("{MAY}, transfer: true")).await,
+            (dec("1000.0000"), dec("1000.0000"), dec("0.0000"), 2)
+        );
+        // One account: that account's leg, nothing else.
+        let only_bucket = format!("{MAY}, transfer: true, {}", accounts_arg(&ids[1..2]));
+        assert_eq!(
+            summary(&schema, &user, &only_bucket).await,
+            (dec("1000.0000"), dec("0.0000"), dec("1000.0000"), 1)
+        );
+    }
+
+    /// (7) The case that proves the rule is about the *selection*, not the
+    /// authorisation scope: all three accounts are linked to the caller, so
+    /// `scoped_ids` always holds all three. With two selected, the transfer
+    /// between them is still excluded while the transfer to the unselected
+    /// third counts as spending.
+    #[tokio::test]
+    async fn with_two_of_three_accounts_selected_only_the_inside_transfer_is_excluded() {
+        let db = common::db().await;
+        let schema = create_schema(db.clone(), common::dummy_settings());
+        let (user, ids) = tenant(&db, "ts-three", &["Salary", "Bucket", "Outside"]).await;
+        let (a, b, c) = (ids[0], ids[1], ids[2]);
+
+        common::seed_transaction(&db, a, "2024-05-01", "3000.00", Some("Employer")).await;
+        let to_b_out = common::seed_transaction(&db, a, "2024-05-02", "-500.00", Some("Own account")).await;
+        let to_b_in = common::seed_transaction(&db, b, "2024-05-02", "500.00", Some("Own account")).await;
+        pair_as_transfer(&db, to_b_out, to_b_in).await;
+        let to_c_out = common::seed_transaction(&db, a, "2024-05-03", "-700.00", Some("Own account")).await;
+        let to_c_in = common::seed_transaction(&db, c, "2024-05-03", "700.00", Some("Own account")).await;
+        pair_as_transfer(&db, to_c_out, to_c_in).await;
+
+        // Household: neither transfer is spending.
+        assert_eq!(
+            summary(&schema, &user, MAY).await,
+            (dec("3000.0000"), dec("0.0000"), dec("3000.0000"), 1)
+        );
+
+        // A and B selected: the A->B pair is inside the selection and stays
+        // excluded; A->C leaves the selection and is spending.
+        let a_and_b = format!("{MAY}, {}", accounts_arg(&[a, b]));
+        assert_eq!(
+            summary(&schema, &user, &a_and_b).await,
+            (dec("3000.0000"), dec("700.0000"), dec("2300.0000"), 2)
+        );
+        let (g_income, g_spending, _) = graph_totals(&schema, &user, &a_and_b, None).await;
+        assert_eq!((g_income, g_spending), (dec("3000.0000"), dec("700.0000")));
+
+        // The unselected third account on its own: its inbound leg is income.
+        let only_c = format!("{MAY}, {}", accounts_arg(&[c]));
+        assert_eq!(
+            summary(&schema, &user, &only_c).await,
+            (dec("700.0000"), dec("0.0000"), dec("700.0000"), 1)
+        );
+    }
+}
