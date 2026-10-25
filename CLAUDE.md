@@ -269,18 +269,40 @@ the excess of an over-reimbursement reported as `surplus`.
 
 ## C24 CSV import
 
-The `c24-csv` crate parses C24's CSV account export. **Parser only so far** —
-no Kafka topic, no migration, no projection, no upload mutation. The wire
-contract was settled on 2026-10-25 (`docs/TODO.md`, item 6's "Design
-questions"): C24 records go on **their own topic**
-`finreport.c24-transaction`, not on `finreport.transaction` (whose
-byte-for-byte-Comdirect-JSON promise the projector relies on), and they
-project into the same `transaction` table, since
-`transaction_uuid(source, external_id)` already namespaces the ids.
-**`C24Row` is deliberately not the payload** — the published record is its own
-explicit type in `webapp`, so this does not repeat the
-`amazon_orders::Order` trap below. Nothing in the crate is frozen until that
-record exists. Same shape and the same two binding properties as
+The `c24-csv` crate parses C24's CSV account export. **Parser, topics, wire
+records and projection exist; the upload mutation does not** (no resolver, no
+frontend yet, and nothing publishes to the topics outside tests). C24 records
+go on **their own topics** `finreport.c24-account` and
+`finreport.c24-transaction` (compacted, `prevent_destroy`, keyed by the account
+number / the row's derived `external_id`, mirrored in `terraform/kafka/main.tf`
+and `docker-compose.local.yml`), not on `finreport.transaction` (whose
+byte-for-byte-Comdirect-JSON promise the projector relies on). Two topics
+because `transaction.account_id` is a real FK; there is **no** balance topic
+because the export has no balance column. They project into the same
+`account` / `transaction` tables with `source = "c24"`, via
+`projection::c24::C24Mapper` registered at `("c24", "source")`.
+
+- **`webapp::kafka::c24::{C24AccountRecord, C24TransactionRecord}` are now a
+  frozen wire contract.** Their serde shape is the stored payload: renaming a
+  field needs a `schema_version` bump and a migration path, not just a passing
+  test suite (`transaction_wire_shape_is_frozen` pins the key set).
+  **`C24Row` is deliberately not the payload** - `from_row` is the one
+  translation, so the parser stays free to be refactored and this does not
+  repeat the `amazon_orders::Order` trap below.
+- `C24Mapper` never constructs a value-carrying `MapError` variant and never
+  forwards a serde message: every failure is `InvalidPayload` with a static
+  string. `map_balance` always fails (nothing to fabricate).
+- The record's `currency` is the literal `"EUR"` set in `from_row` (the export
+  has no currency column; the parser drops the `€`). The account record's
+  `iban` is `None` on purpose: the export's `IBAN` column is the
+  *counterparty's*. C24's own `Kategorie`/`Unterkategorie` live in
+  `raw_payload` only.
+- **Not wired yet:** the labeler consumes `finreport.transaction` only
+  (`LABELER_INPUT_TOPICS`), so projected C24 rows get no category until it also
+  reads `finreport.c24-transaction`; its projector-lag guard checks only the
+  three Comdirect ingest topics.
+
+Same shape and the same two binding properties as
 `amazon-orders`:
 
 - **A bad file is rejected whole, never row by row.** A half-imported bank
@@ -542,9 +564,9 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **653** Rust unit tests via `just test`, **738** integration via
+  **667** Rust unit tests via `just test`, **755** integration via
   `just test-integration`, **758** frontend (37 files) via
-  `npm run test:unit` (all re-measured 2026-10-25). **These go stale within a
+  `npm run test:unit` (re-measured 2026-10-26; frontend unchanged). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph
   explaining the mismatch, so refresh this line in the same commit that adds
   tests, and treat a small discrepancy as a stale baseline rather than as

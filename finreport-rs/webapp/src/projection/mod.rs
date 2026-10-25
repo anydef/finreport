@@ -6,6 +6,7 @@
 //! directly; [`run`] is the thin, hard-to-unit-test half that polls a
 //! `StreamConsumer` and feeds it batches.
 
+pub mod c24;
 pub mod comdirect;
 pub mod account_savings;
 pub mod display_alias;
@@ -36,6 +37,7 @@ use crate::kafka::envelope::{
     transaction_uuid, Envelope, SourceEvent, TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE,
     TOPIC_TRANSACTION,
 };
+use crate::kafka::c24::{TOPIC_C24_ACCOUNT, TOPIC_C24_TRANSACTION};
 use crate::kafka::labeling::{
     CacheRecord, CategoryRecord, LabelRecord, RuleRecord, UserLabelRecord,
 };
@@ -57,11 +59,18 @@ pub const DEFAULT_BATCH_MAX_WAIT: Duration = Duration::from_millis(500);
 /// what tells the two apart without a human watching.
 pub const DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 5;
 
-/// The three ingest topics the projector consumes — **not**
-/// `finreport.import-watermark`, which is importer-private (§2.3). All three
-/// are single-partition (§2.1's ordering guarantee), so partition 0 is the
-/// only partition that ever exists.
-pub const INGEST_TOPICS: [&str; 3] = [TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION];
+/// The ingest topics the projector consumes - **not**
+/// `finreport.import-watermark`, which is importer-private (§2.3). All are
+/// single-partition (§2.1's ordering guarantee), so partition 0 is the only
+/// partition that ever exists. The two C24 topics have no balance sibling:
+/// the C24 export carries no balance.
+pub const INGEST_TOPICS: [&str; 5] = [
+    TOPIC_ACCOUNT,
+    TOPIC_ACCOUNT_BALANCE,
+    TOPIC_TRANSACTION,
+    TOPIC_C24_ACCOUNT,
+    TOPIC_C24_TRANSACTION,
+];
 const INGEST_PARTITION: i32 = 0;
 
 /// The nine labeling *output* topics ([`labeling_topic_for`]) this projector
@@ -103,6 +112,8 @@ fn entity_kind_for_topic(topic: &str) -> Option<EntityKind> {
         TOPIC_ACCOUNT => Some(EntityKind::Account),
         TOPIC_ACCOUNT_BALANCE => Some(EntityKind::Balance),
         TOPIC_TRANSACTION => Some(EntityKind::Transaction),
+        TOPIC_C24_ACCOUNT => Some(EntityKind::Account),
+        TOPIC_C24_TRANSACTION => Some(EntityKind::Transaction),
         _ => None,
     }
 }

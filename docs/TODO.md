@@ -443,6 +443,19 @@ guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
    `Option`, so the read side was untouched. `docs/specs/iteration-1.md` §2.2
    is amended with the same reasoning.
 
+   **Slice 2 landed 2026-10-26** (branch `feat/c24-topic-projection`): the
+   topics `finreport.c24-account` / `finreport.c24-transaction` (terraform +
+   local compose), `webapp::kafka::c24` (the two frozen wire records and
+   `from_row`), `projection::c24::C24Mapper`, `INGEST_TOPICS` 3 -> 5, unit
+   tests and `tests/projector_c24.rs` (rows land with `source = "c24"`,
+   re-projection and overlapping exports change nothing). Keys are the bare
+   `external_id` / account number, not `<source>:<external_id>` as (a) above
+   said: `source` is already in the id derivation. **Remaining:** the
+   `uploadC24Csv`-style mutation (parse, merge, publish) and its resolver; the
+   frontend; teaching the labeler to read `finreport.c24-transaction` (until
+   then C24 rows are projected but never categorised) and its lag guard the
+   two new topics; `terraform apply` for the two topics on the central broker.
+
    **Still open, and smaller than it was:** `graphql/events.rs` builds its own
    two-header set (`origin`, `schema_version`) for the WP4 topics, bypassing
    `RecordMeta` precisely because of the Comdirect shape that (c) just
