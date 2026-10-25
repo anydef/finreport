@@ -124,10 +124,20 @@ against the tree on 2026-10-24, not from memory:
 4. Admin user management in the UI.
 5. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
     decision about credential storage** (security-critical).
-6. C24, PayPal and Scalable Capital integrations. First research the access
-    method for each (API vs. CSV fallback). **PayPal is paused** by the user's
-    own instruction; C24 and Scalable are not.
-7. Sankey cash-flow views.
+6. C24, PayPal and Scalable Capital integrations. **Access method researched
+    2026-10-25 - see "C24 and Scalable Capital: access methods" below.** Both
+    are CSV-only in practice. **PayPal is paused** by the user's own
+    instruction; C24 and Scalable are not.
+7. ~~Sankey cash-flow views.~~ **Shipped** - verified 2026-10-25.
+    `CashflowSankey.svelte` is wired on the dashboard, fed by
+    `cashflowGraph(filter, grouping)`, with a `?sankey=` toggle between two
+    dimension presets (`readSankeyDimension` / `groupingForDimension` in
+    `routes/(app)/+page.ts`): counterparty = `INCOME_SOURCE, ACCOUNT,
+    OUTCOME`, category = `INCOME_SOURCE, ACCOUNT, CATEGORY`. Three mock
+    fixtures exist (`cashflow-graph-category`, `-net-deficit`, `-truncated`).
+    **One gap, cheap:** `CashflowDimension` also has `TAG`, which no preset
+    uses, so a tag-dimension Sankey is a frontend-only addition (S) if the
+    user wants it. Not filed as agreed work; ask first.
 
 ### Housekeeping found 2026-10-24
 
@@ -227,6 +237,95 @@ locked out of Rules and Categories** (`rules` fails, so the Rules page cannot
 load). Fix from a shell with DB access:
 `user-admin promote --username <u>`. Run `user-admin list-users` first to see
 who is `[admin]`.
+
+## C24 and Scalable Capital: access methods (researched 2026-10-25)
+
+Item 6's prerequisite. **Both are CSV-only in practice; neither offers an
+API worth building against.** Sources are listed at the end.
+
+### C24 Bank
+
+- **No publicly documented API.**
+- **Official CSV export** in online banking, and its columns are a good fit:
+  transaction type, booking date, amount, payee, IBAN, BIC, purpose,
+  description, category and subcategory. Note it carries the **counterparty
+  IBAN**, which the identity work finished today can use directly.
+- Statements are PDF, one per calendar month, in the app - not a useful feed.
+- An **XS2A (PSD2) interface exists**, per a C24 support reply in a forum
+  thread from around 2022, authenticated with phone number and app PIN. No
+  official documentation for it was findable. Third-party services that do
+  reach C24 (e.g. Copreo) go through **BANKSapi**, a BaFin-licensed payment
+  service provider, for account data only.
+- **No HBCI/FinTS**, per a DATEV service provider.
+
+**Assessment:** CSV import (M). XS2A would mean contracting a licensed
+aggregator - a third party, a contract and a cost for one household account -
+so it is not worth it. An older forum claim that C24 "has no API" is
+outdated but lands in the same place for us.
+
+### Scalable Capital
+
+- **No official public API.**
+- **Official CSV export** in the web app: Transactions -> select -> Export
+  CSV. It covers corporate actions, security transfers, interest, dividends
+  and buys/sells. Depot and account movements may need separate exports.
+- **Plan requirement is unresolved.** Scalable's own product-news post ties
+  exporting all broker transactions to PRIME/PRIME+; several third parties say
+  the free plan exports fine. **The user can settle this in one click on their
+  own account** - worth doing before any work is scheduled.
+- **Unofficial exporters exist and should not be copied:** a Tampermonkey
+  userscript, and LibreFolio's extension, which drives Scalable's *internal*
+  GraphQL operations. Both run in the browser session, grant no third-party
+  access, and can break without notice. **Do not build against undocumented
+  internal endpoints.**
+
+**Assessment:** CSV import only (M).
+
+### The real design questions these raise
+
+Recording these because they are bigger than the import code:
+
+1. **A second payload shape in the event log.** CLAUDE.md's contract is that
+   `finreport.transaction` payloads are *raw Comdirect JSON, byte-for-byte*,
+   with exactly one documented exception (the legacy backfill). A C24 CSV row
+   is not that. So either the envelope grows a per-source schema (headers
+   already carry schema version and origin, so this is the natural place), or
+   each source gets its own topic. `transaction.source`, `.external_id` and
+   `.origin` already exist, so the read model is ready; the **wire contract is
+   the part that needs a decision**.
+2. **Scalable is a depot, not a bank account.** The read model is
+   `account` / `account_balance` / `transaction` with an amount and a
+   currency. Securities positions, quantities, ISINs and corporate actions do
+   not fit it. So the question is not "import Scalable" but **"does finreport
+   report on investments at all?"** - a much larger scope than a CSV parser.
+   A narrow first answer: import only the **cash** movements (interest,
+   dividends, deposits), ignore the securities legs, and say so plainly in the
+   UI. That keeps the existing model honest and still gets the money flows
+   onto the dashboard.
+3. **The Amazon CSV pattern is reusable, but its semantics are not.**
+   `amazon-orders` is a clean precedent for "parse CSV as a pure function,
+   reject a bad file whole, never row by row". Reuse that shape. But Amazon
+   orders are *evidence about* transactions, deliberately never published as
+   transactions; C24 rows **are** transactions, so they go down a different
+   path. Do not generalise the two into one abstraction.
+
+**Recommendation:** decide 1 and 2 before writing any parser. Then C24 CSV
+first (it is a plain bank account, so it fits the model as-is and benefits
+immediately from the IBAN identity work), and Scalable only once the
+investment question has an answer.
+
+**Sources:** C24 - help centre on exporting transactions
+(hilfe.c24.de/hc/de/articles/8082169487250), the C24 AGB
+(api.c24.de/api/documents/agb_gesamt/download/), Copreo's C24 page
+(copreo.com/de/banken/c24/), a DATEV service provider (sbco.cloud/c24/), and
+the Hibiscus scripting forum thread quoting C24 support
+(scripting-forum.derrichter.de/viewtopic.php?t=1348). Scalable - its own
+product news (de.scalable.capital/en/product-news/transactions-export),
+Portseido's export guide (support.portseido.com/export-trades/scalable-capital/),
+the Portfolio Performance forum thread on CSV import
+(forum.portfolio-performance.info/t/csv-import-von-scalable-capital/30113),
+and the unofficial exporters (github.com/matthesvoss/Scalable-Capital-Transactions-Exporter,
+github.com/Librefolio/librefolio-exporter).
 
 ## Backlog
 
