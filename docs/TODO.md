@@ -125,9 +125,15 @@ against the tree on 2026-10-24, not from memory:
 5. Bank connections via UI: credentials, sync, TAN status. **Blocked on a user
     decision about credential storage** (security-critical).
 6. C24, PayPal and Scalable Capital integrations. **Access method researched
-    2026-10-25 - see "C24 and Scalable Capital: access methods" below.** Both
-    are CSV-only in practice. **PayPal is paused** by the user's own
-    instruction; C24 and Scalable are not.
+    2026-10-25, then corrected by the user - see "C24 and Scalable Capital:
+    access methods" below.** Both are reachable over XS2A, which needs a
+    licensed provider, so the real choice is CSV (manual, no new trust) vs. an
+    aggregator (automatic, a new third party) - and that choice is entangled
+    with item 5's blocked credential decision. **Next concrete step: ask
+    Scalable support for a FinTS server address for BLZ 70010588**; a yes
+    would allow a Comdirect-style import with no third party at all.
+    **PayPal is paused** by the user's own instruction; C24 and Scalable are
+    not.
 7. ~~Sankey cash-flow views.~~ **Shipped** - verified 2026-10-25.
     `CashflowSankey.svelte` is wired on the dashboard, fed by
     `cashflowGraph(filter, grouping)`, with a `?sankey=` toggle between two
