@@ -974,6 +974,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "c24-csv"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "csv",
+ "hex",
+ "rust_decimal",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tracing",
+]
+
+[[package]]
 name = "categorizer"
 version = "0.1.0"
 dependencies = [

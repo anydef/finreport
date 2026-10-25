@@ -446,6 +446,72 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
 
 ## Backlog
 
+- **Transfers between the user's own accounts are invisible, and make the
+  receiving account look like it is bleeding money** - M backend + S
+  frontend, **high value, and this is a correctness bug, not a missing
+  feature**, so by this file's own ordering principle it outranks the feature
+  items above it. Requested 2026-10-25. The user: *"I am getting my salary to
+  my one account. and from that account I transfer a portion of money to my
+  other comdirect account and to my c24 account for the different spending
+  buckets. 1. Technically this is a money transfer, but it is not being
+  displayed on the cashflow chart. 2. because it is not shown, my second
+  account shows a deficit, even tho the money were transferred there."*
+
+  **Diagnosed 2026-10-25. One cause, two opposite symptoms.**
+
+  The cause: `graphql/cashflow/mod.rs` applies one global rule (§4, "totals
+  exclude transfers") to *every* aggregation - both `cashflowSummary`
+  (`summary.rs:182`) and `cashflowGraph`/the Sankey (`mod.rs:214` and
+  `mod.rs:286-296`). A row is dropped when `transaction_insight.is_transfer`
+  is true **or** its resolved category `kind = 'transfer'`.
+
+  - **Comdirect -> Comdirect.** Both legs exist, so `detect::transfer`
+    pairs them (`detect/transfer.rs`: different accounts, opposite amounts,
+    within `APP_transfer_match_days`, IBAN-confirmed ranked first) and flags
+    **both** `is_transfer = true`. Both are therefore dropped. The money
+    vanishes from the chart, and - this is symptom 2 - the *receiving*
+    account's incoming leg is dropped too, so that account shows only its
+    outflows and reads as a deficit. The deficit is arithmetically honest
+    given the filter and completely wrong as a description of reality.
+  - **Comdirect -> C24.** The C24 leg does not exist (C24 is not imported
+    yet), so nothing pairs, so the outgoing leg is **not** flagged and shows
+    up as ordinary **spending**. The opposite failure: the money is counted as
+    consumed. Importing C24 (in progress) converts this case into the first
+    one - so it fixes the mislabelling and then immediately exposes the
+    deficit bug on the C24 account instead. **These two must be fixed
+    together or the C24 import will look like it made things worse.**
+
+  **The design flaw, stated plainly:** excluding transfers is correct at
+  **household** level, where the money genuinely did not leave, and wrong at
+  **per-account** level, where a transfer *is* that account's income. The code
+  has one rule and no notion of scope.
+
+  **The principled fix** - and there is already a precedent for it in this
+  repo: exclude a transfer leg only when its **counterpart is inside the
+  filtered scope**, and treat it as real income or spending when the
+  counterpart lies outside. That is exactly the rule
+  `savings/mod.rs:107` already applies (`if !m.is_transfer &&
+  m.counterpart_account_id.is_none()` - money that left for another of the
+  user's own accounts is not spending), generalised from "is it a savings
+  account" to "is it in the current filter". `transaction_insight` already
+  stores `transfer_counterpart_id`, so the data needed is present; this is a
+  SQL and semantics change, not a schema one.
+
+  With that rule, the whole-household view is unchanged (both legs inside
+  scope, both excluded, totals still exclude transfers) while a single-account
+  view stops showing a phantom deficit - and the Sankey's existing `ACCOUNT`
+  dimension would finally render what the user actually described: salary in,
+  then allocations out to each spending bucket. That is envelope budgeting
+  across accounts, and the chart is already shaped for it.
+
+  **Do not start without a decision on one thing:** whether the *default*
+  `cashflowSummary` for a multi-account scope should also change. Changing the
+  default silently alters every existing number the user has looked at;
+  keeping it and adding scope-awareness only where a single account is
+  selected is more conservative but leaves two accounts selected out of three
+  behaving oddly. Ask first.
+
+
 Recorded feature requests, not yet prioritised. The estimate is effort, the
 note is what makes it worth more or less than its cost. Pull one into "Next"
 by agreeing where it goes.

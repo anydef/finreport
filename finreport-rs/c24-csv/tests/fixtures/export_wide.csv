@@ -1,0 +1,15 @@
+Transaktionstyp,Buchungsdatum,Karteneinsatz,Betrag,Zahlungsempfänger,IBAN,BIC,Verwendungszweck,Beschreibung,Kontonummer,Kontoname,Kategorie,Unterkategorie,Bargeldabhebung
+Echtzeit-Überweisung,02.11.2026,,"2.000,00 €",Other Payer Example,DE00000000000000000003,BANKDEFFXXX,Rückzahlung,,1234567890,C24 Smartkonto,Einkommen,Sonstiges
+Kartenzahlung,28.10.2026,27.10.2026 17:04,"-45,00 €",Garden Centre Example,,,,,1234567890,C24 Smartkonto,Haus & Garten,Pflanzen
+Kartenzahlung,23.10.2026,22.10.2026 19:32,"-1,00 €",Rest Stop North,,,,,1234567890,C24 Smartkonto,Weitere Ausgaben,Weitere Ausgaben
+Kartenzahlung,23.10.2026,22.10.2026 19:32,"-1,00 €",Rest Stop North,,,,,1234567890,C24 Smartkonto,Weitere Ausgaben,Weitere Ausgaben
+Kartenzahlung,23.10.2026,22.10.2026 08:15,"-12,50 €",Corner Bakery,,,,,1234567890,C24 Smartkonto,Lebensmittel,Bäckerei
+Kartenzahlung,23.10.2026,22.10.2026 19:32,"-1,00 €",Rest Stop North,,,,,9876543210,C24 Tagesgeld,Weitere Ausgaben,Weitere Ausgaben
+Echtzeit-Überweisung,20.10.2026,,"1.234,56 €","Given Family, Other Family",DE00000000000000000002,BANKDEFFXXX,Gehalt,,9876543210,C24 Tagesgeld,Einkommen,Gehalt
+Bargeldabhebung,15.10.2026,14.10.2026 12:00,"-100,00 €",ATM Example Platz,,,,,1234567890,C24 Smartkonto,Bargeld,Bargeldabhebung,Ja
+Kartenzahlung,12.10.2026,11.10.2026 06:53,"-1,00 €",Wayside Inn South,,,,,1234567890,C24 Smartkonto,Reisen & Urlaub,Hotel & Urlaubswohnungen
+Kartenzahlung,12.10.2026,11.10.2026 06:53,"-1,00 €",Wayside Inn South,,,,,1234567890,C24 Smartkonto,Reisen & Urlaub,Hotel & Urlaubswohnungen
+Kartenzahlung,12.10.2026,11.10.2026 06:53,"-1,00 €",Wayside Inn South,,,,,1234567890,C24 Smartkonto,Reisen & Urlaub,Hotel & Urlaubswohnungen
+Online-Kartenzahlung,07.10.2026,06.10.2026 22:28,"-21,26 €",Example SaaS,,,,EXAMPLE SAAS,1234567890,C24 Smartkonto,Freizeit & Unterhaltung,Digitale Produkte & Dienste
+Kartenzahlung,29.09.2026,28.09.2026 11:00,"-3,99 €",Kiosk Example,,,,,1234567890,C24 Smartkonto,,
+Echtzeit-Überweisung,28.09.2026,,"150,00 €","Given Family, Other Family",DE00000000000000000001,BANKDEFFXXX,Sparkonto,,1234567890,C24 Smartkonto,Geldanlage,Sonstiges Sparen
