@@ -1392,3 +1392,44 @@ Open, deliberately not fixed in those slices:
 - **A rule with only a `direction` condition would match every item.** Harmless
   now that empty-condition rules are refused everywhere, but the same shape as
   the bug fixed in `41b4ad3`.
+
+## Decimal wire format: a feature flip silently changed it (found + fixed 2026-10-26)
+
+**Found while reviewing the C24 slice, fixed in the same branch.** Not a
+feature request and not something anyone reported - a latent silent-data-loss
+path, recorded here because the *shape* of the mistake will recur.
+
+`rust_decimal`'s `serde-str` feature makes a `Decimal` serialise as a JSON
+string **and makes its `Deserialize` reject a JSON number outright**
+(`invalid type: floating point 200.0, expected a Decimal type representing a
+fixed-point number`). Cargo unifies features across the build graph, so a
+dependency enabling it changes how *this* crate's unrelated types serialise.
+
+- **2026-10-07** - `GoalRecord::amount`, `RuleRecord::amount`/`amount_min`/
+  `amount_max` and `TransactionInsightRecord::recurring_median_amount` were
+  added. Nothing in `webapp`'s graph enabled `serde-str`, so they were
+  published as **JSON numbers**.
+- **2026-10-23** - `amazon-orders` (which enables it) became a `webapp`
+  dependency, in a commit about the purchase-order topic. Every `Decimal` in
+  `webapp` switched to strings, in both directions, with no test failing:
+  every fixture in the repo already used the string form.
+
+`finreport.goal`, `.rule` and `.transaction-insight` are compacted and
+`prevent_destroy`, so records from that 16-day window are still on the log,
+and `GoalRecord::amount` is not optional - every goal published then is
+affected. A projector replay that cannot parse a record **skips and logs it**
+rather than failing, so this would have surfaced as goals and rules quietly
+missing after a rebuild, not as an error.
+
+**Fixed** by `webapp/src/kafka/decimal_compat.rs`: `de_decimal` /
+`de_decimal_opt` accept either form, applied to those five fields.
+Serialization is untouched - new records stay strings, which is what the
+record specs call for. The change is strictly more permissive, so it cannot
+break a payload that already parsed.
+
+**Worth keeping in mind:** adding a dependency can change an existing wire
+format in this workspace, and the repo's fixtures will not catch it because
+they were written in whichever form was current. A record type that predates
+2026-10-23 and gains a `Decimal` field needs these deserializers;
+`amazon-orders`' own types and the new C24 records do not, having only ever
+been written as strings.

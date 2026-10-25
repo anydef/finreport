@@ -58,6 +58,7 @@ pub struct InsightRecord {
     pub recurring_series_id: Option<uuid::Uuid>,
     pub recurring_cadence: Option<RecurringCadence>,
     /// Signed, `NUMERIC(20,4)` (§3.2).
+    #[serde(default, deserialize_with = "crate::kafka::decimal_compat::de_decimal_opt")]
     pub recurring_median_amount: Option<Decimal>,
     pub detected_at: DateTime<Utc>,
     /// RFC 3339; last-writer-wins, same shape as every other human/detector

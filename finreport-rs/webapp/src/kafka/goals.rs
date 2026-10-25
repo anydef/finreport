@@ -100,6 +100,7 @@ pub struct GoalRecord {
     pub goal_type: GoalType,
     /// Positive magnitude, `NUMERIC(20,4)`; serialized as a string
     /// (`"200.0000"`) so no precision is lost on the wire.
+    #[serde(deserialize_with = "crate::kafka::decimal_compat::de_decimal")]
     pub amount: Decimal,
     pub currency: String,
     pub scope: GoalScope,
@@ -114,7 +115,7 @@ mod tests {
     use super::*;
     use std::str::FromStr;
 
-    fn spec_example_json() -> &'static str {
+    pub(super) fn spec_example_json() -> &'static str {
         r#"{
             "schema_version": 1,
             "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
@@ -189,5 +190,37 @@ mod tests {
         let json = spec_example_json().replace("spending_limit", "saving_target");
         let record: GoalRecord = serde_json::from_str(&json).unwrap();
         assert_eq!(record.goal_type, GoalType::SavingTarget);
+    }
+}
+
+#[cfg(test)]
+mod decimal_wire_tolerance {
+    //! `rust_decimal`'s `serde-str` feature is enabled for this crate (by
+    //! `amazon-orders` and `c24-csv`, and declared in `webapp/Cargo.toml` so
+    //! it is visible rather than accidental). It makes every `Decimal` field
+    //! *serialise* as a JSON string, which is what the record specs call for.
+    //!
+    //! The question this pins is the read direction: a record published
+    //! before that feature reached the build graph would carry a JSON
+    //! *number*, and the compacted `finreport.goal` / `finreport.rule` topics
+    //! keep records forever. If `serde-str` refused a number, replaying one
+    //! of those would skip the record — a silent loss, not a loud failure.
+
+    use super::tests::spec_example_json;
+    use super::GoalRecord;
+    use rust_decimal::Decimal;
+    use std::str::FromStr;
+
+    #[test]
+    fn a_numeric_amount_still_deserialises() {
+        let numeric = spec_example_json().replace(r#""amount": "200.0000""#, r#""amount": 200.0"#);
+        assert!(
+            numeric.contains(r#""amount": 200.0"#),
+            "the spec example's amount literal moved; this test is no longer substituting it"
+        );
+
+        let record: GoalRecord = serde_json::from_str(&numeric)
+            .expect("a pre-serde-str record carries a JSON number and must still parse");
+        assert_eq!(record.amount, Decimal::from_str("200").unwrap());
     }
 }

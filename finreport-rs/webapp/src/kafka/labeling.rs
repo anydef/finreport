@@ -180,6 +180,7 @@ pub struct CacheRecord {
 pub struct SplitPart {
     pub index: i32,
     /// `NUMERIC(20,4)`, same sign as the transaction, exact — no tolerance.
+    #[serde(deserialize_with = "crate::kafka::decimal_compat::de_decimal")]
     pub amount: Decimal,
     pub category_slug: String,
 }
@@ -255,7 +256,9 @@ pub struct RuleConditions {
     pub description_regex: Option<String>,
     pub description_contains: Option<String>,
     pub direction: Option<String>,
+    #[serde(default, deserialize_with = "crate::kafka::decimal_compat::de_decimal_opt")]
     pub amount_min: Option<Decimal>,
+    #[serde(default, deserialize_with = "crate::kafka::decimal_compat::de_decimal_opt")]
     pub amount_max: Option<Decimal>,
     pub account_ids: Option<Vec<Uuid>>,
 }
