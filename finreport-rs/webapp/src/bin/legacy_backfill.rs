@@ -28,7 +28,7 @@ use tracing_subscriber::EnvFilter;
 use utils::settings::Settings;
 use webapp::kafka::envelope::{
     CURRENT_SCHEMA_VERSION, HEADER_IMPORTED_AT, ORIGIN_LEGACY_BACKFILL, RecordMeta,
-    SOURCE_COMDIRECT,
+    SOURCE_COMDIRECT, SourceContext,
 };
 use webapp::kafka::producer::EventPublisher;
 use webapp::kafka::repair::{RepairReport, repair_headers};
@@ -397,8 +397,10 @@ fn account_record_meta(row: &legacy_account::Model) -> RecordMeta<'_> {
         origin: ORIGIN_LEGACY_BACKFILL,
         schema_version: CURRENT_SCHEMA_VERSION,
         imported_at: ACCOUNT_IMPORTED_AT_PLACEHOLDER,
-        comdirect_account_key: LEGACY_BACKFILL_ACCOUNT_KEY,
-        comdirect_account_name: row.account_name.as_deref(),
+        context: SourceContext::Comdirect {
+            account_key: LEGACY_BACKFILL_ACCOUNT_KEY,
+            account_name: row.account_name.as_deref(),
+        },
     }
 }
 
@@ -414,8 +416,10 @@ fn balance_record_meta(row: &legacy_account_balance::Model) -> RecordMeta<'_> {
         origin: ORIGIN_LEGACY_BACKFILL,
         schema_version: CURRENT_SCHEMA_VERSION,
         imported_at,
-        comdirect_account_key: LEGACY_BACKFILL_ACCOUNT_KEY,
-        comdirect_account_name: None,
+        context: SourceContext::Comdirect {
+            account_key: LEGACY_BACKFILL_ACCOUNT_KEY,
+            account_name: None,
+        },
     }
 }
 
@@ -428,8 +432,10 @@ fn transaction_record_meta(row: &legacy_account_transactions::Model) -> RecordMe
         origin: ORIGIN_LEGACY_BACKFILL,
         schema_version: CURRENT_SCHEMA_VERSION,
         imported_at,
-        comdirect_account_key: LEGACY_BACKFILL_ACCOUNT_KEY,
-        comdirect_account_name: None,
+        context: SourceContext::Comdirect {
+            account_key: LEGACY_BACKFILL_ACCOUNT_KEY,
+            account_name: None,
+        },
     }
 }
 

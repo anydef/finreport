@@ -405,14 +405,52 @@ guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
 
 ### Design questions that still stand, whichever route wins
 
-1. **A second payload shape in the event log.** CLAUDE.md's contract is that
-   `finreport.transaction` payloads are *raw bank JSON, byte-for-byte*, with
-   one documented exception (the legacy backfill). A C24 CSV row, or an
-   aggregator's normalised JSON, is not that. Either the envelope grows a
-   per-source schema (headers already carry schema version and origin, so that
-   is the natural home) or each source gets its own topic.
-   `transaction.source`, `.external_id` and `.origin` already exist, so the
-   read model is ready; **the wire contract is what needs a ruling.**
+1. ~~**A second payload shape in the event log.**~~ **Decided 2026-10-25**
+   (the user delegated it: *"do the most reasonable thing here"*). Three
+   rulings, all three deliberate:
+
+   **(a) Each non-Comdirect source gets its own topic**, not a new
+   `schema_version` on `finreport.transaction`. The byte-for-byte promise on
+   that topic is load-bearing, not decorative: the projector deserialises its
+   payloads *as Comdirect JSON*, with one documented exception. Mixing shapes
+   on one compacted topic makes every consumer branch on a header before it
+   can parse at all, and a replay that takes the wrong branch fails silently
+   rather than loudly. Separate topics keep each consumer's parse total.
+   So: `finreport.c24-transaction`, and later
+   `finreport.cash-transaction` — each compacted, `prevent_destroy`, mirrored
+   in `terraform/kafka/main.tf` and `docker-compose.local.yml`, keyed
+   `<source>:<external_id>`. They project into the **same** `transaction`
+   table: `transaction.source` / `.external_id` / `.origin` already exist and
+   `transaction_uuid(source, external_id)` already namespaces the ids, so the
+   read model needs no migration and no reporting code changes.
+
+   **(b) A translation layer, not `C24Row` on the wire.** CLAUDE.md records
+   `amazon_orders::Order` becoming a wire contract as a *trap*, not a
+   pattern — its serde shape *is* the payload, so renaming a parser field
+   silently breaks every stored record. The published record is therefore its
+   own explicit type in `webapp` with explicit serde names, built from
+   `C24Row`; the parser crate stays free to be refactored. The cost is one
+   small mapping function and one test that the mapping is total.
+
+   **(c) `RecordMeta` generalised — done 2026-10-25** (branch
+   `feat/envelope-source-context`). It carried `comdirect_account_key` +
+   `comdirect_account_name` as required fields, which no other source can
+   fill. They now live in a `SourceContext` enum (`Comdirect { .. }` /
+   `Unattributed`), so a file import or a typed-in row states that it has no
+   login behind it, at the type level, and a future source with its own
+   per-login identity is a new variant rather than two more `Option`s.
+   Comdirect records are byte-identical; `Envelope` already parsed both as
+   `Option`, so the read side was untouched. `docs/specs/iteration-1.md` §2.2
+   is amended with the same reasoning.
+
+   **Still open, and smaller than it was:** `graphql/events.rs` builds its own
+   two-header set (`origin`, `schema_version`) for the WP4 topics, bypassing
+   `RecordMeta` precisely because of the Comdirect shape that (c) just
+   removed. It can now go through `RecordMeta` with
+   `SourceContext::Unattributed`, which would also give those records the
+   `source` and `imported_at` headers they currently lack. Worth doing, but it
+   changes what is written to five live topics, so it is its own slice with
+   its own replay check — not a drive-by.
 2. **Securities, not just cash.** Scalable's export includes buys, sells and
    corporate actions, which do not fit `transaction` (an amount and a
    currency). A narrow first answer: import only the **cash** movements
@@ -525,16 +563,14 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
   from `transaction_uuid(source, external_id)` as usual. `account.iban` and
   `.raw_payload` are nullable, which a cash account needs.
 
-  **It hits the same wire-contract decision as the C24 import.** CLAUDE.md's
-  contract is that `finreport.transaction` payloads are *raw bank JSON,
-  byte-for-byte*, with one documented exception. A hand-entered cash
-  transaction is emphatically not that. **That decision now has two
-  independent callers (C24 CSV and cash accounts), so it is no longer
-  speculative - it should be made once, properly**, either as a per-source
-  schema in the envelope (headers already carry `schema_version` and
-  `origin`) or as separate topics. Note `RecordMeta` currently *requires*
-  `comdirect_account_key` and `comdirect_account_name`, so the header set is
-  Comdirect-shaped and has to be generalised either way.
+  **The wire-contract decision this shared with C24 is settled (2026-10-25)**
+  - see item 6's "Design questions" above. Cash transactions get their own
+  topic, `finreport.cash-transaction`, projected into the same `transaction`
+  table; the published record is an explicit type, not a re-exported internal
+  struct; and `RecordMeta`'s Comdirect-shaped header set has already been
+  generalised (`SourceContext::Unattributed` is exactly the shape a typed-in
+  row needs). So slice (1) of the rough slicing below is **done**, and the
+  C24 import will have exercised the pattern first.
 
   **Linking the funding transfer.** Two existing mechanisms, and the right
   answer is probably the first:
@@ -575,8 +611,9 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
   is the caller's own data, like a goal or a display alias, so it stays open
   to any authenticated user.
 
-  **Rough slicing** (each independently mergeable): (1) the envelope /
-  wire-contract generalisation, shared with C24; (2) topic + record + the
+  **Rough slicing** (each independently mergeable): ~~(1) the envelope /
+  wire-contract generalisation, shared with C24~~ **(done 2026-10-25)**;
+  (2) topic + record + the
   projection for cash accounts; (3) mutations for the account lifecycle;
   (4) mutations for its transactions; (5) the UI. Labelling comes free -
   manual rows flow through the labeler like any other, and the user can set a

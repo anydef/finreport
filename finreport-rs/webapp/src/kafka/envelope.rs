@@ -42,9 +42,11 @@ pub const HEADER_SCHEMA_VERSION: &str = "schema_version";
 /// RFC 3339, when the importer fetched the record. Required.
 pub const HEADER_IMPORTED_AT: &str = "imported_at";
 /// Config key of the importing login (`0`, `1`, ...). Predates the envelope.
+/// Comdirect-specific: emitted only for [`SourceContext::Comdirect`], so a
+/// record from another source has no such header at all.
 pub const HEADER_COMDIRECT_ACCOUNT_KEY: &str = "comdirect_account_key";
 /// That login's human-readable label, when configured. Predates the
-/// envelope, optional.
+/// envelope, optional. Comdirect-specific, as above.
 pub const HEADER_COMDIRECT_ACCOUNT_NAME: &str = "comdirect_account_name";
 
 // ---------------------------------------------------------------------------
@@ -110,9 +112,39 @@ fn uuid_v5_from_parts(kind: &str, parts: &[&str]) -> Uuid {
 // Write side
 // ---------------------------------------------------------------------------
 
+/// The source-specific part of the §2.2 header set.
+///
+/// Four headers (`source`, `origin`, `schema_version`, `imported_at`) are
+/// required of every record whatever produced it, and `source_account_id` of
+/// every record but `account`. Everything beyond that is specific to one
+/// source, so it lives here as a variant rather than as `Option` fields on
+/// [`RecordMeta`] that only one source would ever set.
+///
+/// This is the generalisation the second and third sources need (the C24 CSV
+/// import and hand-entered cash transactions): both are *files or typing*,
+/// with no login behind them, so they carry no source-specific headers at
+/// all. Adding a source whose records need their own is a new variant here,
+/// which makes every producer's choice explicit at the type level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceContext<'a> {
+    /// A Comdirect login: its config key, plus the optional human-readable
+    /// label. Both headers predate the envelope (§2.2), which is why they
+    /// keep their `comdirect_` prefix on the wire instead of being renamed
+    /// to something source-neutral — renaming them would orphan every record
+    /// already on the compacted topics.
+    Comdirect {
+        account_key: &'a str,
+        account_name: Option<&'a str>,
+    },
+    /// A source with no per-login identity: a user-uploaded file, or a row
+    /// the user typed. Adds no headers beyond the required ones.
+    Unattributed,
+}
+
 /// Full §2.2 header set for a record about to be published. All fields
 /// required by the contract; `source_account_id` is `None` only for the
-/// `account` topic, whose payload already names its own id.
+/// `account` topic, whose payload already names its own id. Anything
+/// source-specific goes in [`SourceContext`].
 pub struct RecordMeta<'a> {
     pub source: &'a str,
     pub source_account_id: Option<&'a str>,
@@ -120,8 +152,7 @@ pub struct RecordMeta<'a> {
     pub schema_version: u32,
     /// RFC 3339.
     pub imported_at: &'a str,
-    pub comdirect_account_key: &'a str,
-    pub comdirect_account_name: Option<&'a str>,
+    pub context: SourceContext<'a>,
 }
 
 impl<'a> RecordMeta<'a> {
@@ -144,10 +175,6 @@ impl<'a> RecordMeta<'a> {
             .insert(Header {
                 key: HEADER_IMPORTED_AT,
                 value: Some(self.imported_at),
-            })
-            .insert(Header {
-                key: HEADER_COMDIRECT_ACCOUNT_KEY,
-                value: Some(self.comdirect_account_key),
             });
 
         if let Some(source_account_id) = self.source_account_id {
@@ -156,11 +183,24 @@ impl<'a> RecordMeta<'a> {
                 value: Some(source_account_id),
             });
         }
-        if let Some(name) = self.comdirect_account_name {
-            headers = headers.insert(Header {
-                key: HEADER_COMDIRECT_ACCOUNT_NAME,
-                value: Some(name),
-            });
+
+        match self.context {
+            SourceContext::Comdirect {
+                account_key,
+                account_name,
+            } => {
+                headers = headers.insert(Header {
+                    key: HEADER_COMDIRECT_ACCOUNT_KEY,
+                    value: Some(account_key),
+                });
+                if let Some(name) = account_name {
+                    headers = headers.insert(Header {
+                        key: HEADER_COMDIRECT_ACCOUNT_NAME,
+                        value: Some(name),
+                    });
+                }
+            }
+            SourceContext::Unattributed => {}
         }
 
         headers
@@ -316,8 +356,10 @@ mod tests {
             origin: ORIGIN_SOURCE,
             schema_version: CURRENT_SCHEMA_VERSION,
             imported_at: "2024-06-15T08:30:00Z",
-            comdirect_account_key: "1",
-            comdirect_account_name: Some("Joint"),
+            context: SourceContext::Comdirect {
+                account_key: "1",
+                account_name: Some("Joint"),
+            },
         };
 
         let headers = meta.headers();
@@ -347,14 +389,43 @@ mod tests {
             origin: ORIGIN_SOURCE,
             schema_version: CURRENT_SCHEMA_VERSION,
             imported_at: "2024-06-15T08:30:00Z",
-            comdirect_account_key: "1",
-            comdirect_account_name: None,
+            context: SourceContext::Comdirect {
+                account_key: "1",
+                account_name: None,
+            },
         };
 
         let headers = meta.headers();
         let envelope = Envelope::parse(Some(&headers), Utc::now());
 
         assert_eq!(envelope.source_account_id, None);
+        assert_eq!(envelope.comdirect_account_name, None);
+    }
+
+    #[test]
+    fn an_unattributed_source_carries_no_comdirect_headers() {
+        // The shape the C24 CSV import and hand-entered cash transactions
+        // use: no login behind the record, so no `comdirect_*` header at all.
+        // `Envelope::parse` already defaults both to `None`, so the read side
+        // needs no change — this asserts the write side agrees.
+        let meta = RecordMeta {
+            source: "c24",
+            source_account_id: Some("8228670501"),
+            origin: ORIGIN_SOURCE,
+            schema_version: CURRENT_SCHEMA_VERSION,
+            imported_at: "2024-06-15T08:30:00Z",
+            context: SourceContext::Unattributed,
+        };
+
+        let headers = meta.headers();
+        let keys: Vec<&str> = (0..headers.count()).map(|i| headers.get(i).key).collect();
+        assert!(!keys.contains(&HEADER_COMDIRECT_ACCOUNT_KEY), "{keys:?}");
+        assert!(!keys.contains(&HEADER_COMDIRECT_ACCOUNT_NAME), "{keys:?}");
+
+        let envelope = Envelope::parse(Some(&headers), Utc::now());
+        assert_eq!(envelope.source, "c24");
+        assert_eq!(envelope.source_account_id.as_deref(), Some("8228670501"));
+        assert_eq!(envelope.comdirect_account_key, None);
         assert_eq!(envelope.comdirect_account_name, None);
     }
 

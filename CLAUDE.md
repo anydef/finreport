@@ -270,10 +270,18 @@ the excess of an over-reimbursement reported as `surplus`.
 ## C24 CSV import
 
 The `c24-csv` crate parses C24's CSV account export. **Parser only so far** —
-no Kafka topic, no migration, no projection, no upload mutation: the wire
-contract (topic, payload shape, whether `C24Row` itself is the payload) is an
-open decision, so nothing in the crate is frozen yet. Same shape and the same
-two binding properties as `amazon-orders`:
+no Kafka topic, no migration, no projection, no upload mutation. The wire
+contract was settled on 2026-10-25 (`docs/TODO.md`, item 6's "Design
+questions"): C24 records go on **their own topic**
+`finreport.c24-transaction`, not on `finreport.transaction` (whose
+byte-for-byte-Comdirect-JSON promise the projector relies on), and they
+project into the same `transaction` table, since
+`transaction_uuid(source, external_id)` already namespaces the ids.
+**`C24Row` is deliberately not the payload** — the published record is its own
+explicit type in `webapp`, so this does not repeat the
+`amazon_orders::Order` trap below. Nothing in the crate is frozen until that
+record exists. Same shape and the same two binding properties as
+`amazon-orders`:
 
 - **A bad file is rejected whole, never row by row.** A half-imported bank
   statement is worse than a rejected one — the user cannot tell which lines are
@@ -534,8 +542,9 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **645** Rust unit tests via `just test`, **731** frontend (35 files) via
-  `npm run test:unit` (both re-measured 2026-10-25). **These go stale within a
+  **653** Rust unit tests via `just test`, **738** integration via
+  `just test-integration`, **758** frontend (37 files) via
+  `npm run test:unit` (all re-measured 2026-10-25). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph
   explaining the mismatch, so refresh this line in the same commit that adds
   tests, and treat a small discrepancy as a stale baseline rather than as

@@ -101,8 +101,20 @@ and WP3 (consumer); neither side may change it unilaterally.
 | `origin` | yes | `source` (fetched from the provider) or `legacy-backfill` (reconstructed from the old Postgres tables, §2.8) |
 | `schema_version` | yes | `1` — bumped only if the *header* contract changes |
 | `imported_at` | yes | RFC 3339, when the importer fetched the record |
-| `comdirect_account_key` | existing | config key of the login (`0`, `1`, …) |
-| `comdirect_account_name` | existing, optional | login label |
+| `comdirect_account_key` | comdirect only | config key of the login (`0`, `1`, …) |
+| `comdirect_account_name` | comdirect only, optional | login label |
+
+**Amended 2026-10-25, for the second and third sources.** The first five
+headers are required of every record whatever produced it; the two
+`comdirect_*` ones are *source-specific* and are emitted only by a Comdirect
+producer. `RecordMeta` therefore carries a `SourceContext` —
+`Comdirect { account_key, account_name }` or `Unattributed` (a user-uploaded
+file, or a row the user typed) — instead of two fields only one source ever
+sets. Comdirect records are byte-identical to before; the read side needed no
+change at all, because `Envelope` already parsed both as `Option`. The header
+names keep their `comdirect_` prefix rather than being renamed to something
+source-neutral: renaming them would orphan every record already on the
+compacted topics, for no gain.
 
 `source_account_id` is new and necessary: `finreport.transaction` is keyed by
 the transaction `reference` alone, and a Comdirect transaction payload does not

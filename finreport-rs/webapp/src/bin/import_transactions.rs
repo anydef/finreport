@@ -23,7 +23,9 @@ use tracing::{debug, error, info, info_span, warn, Instrument};
 use tracing_subscriber::EnvFilter;
 use utils::settings::{ComdirectProfile, Settings};
 use webapp::cli::account_arg;
-use webapp::kafka::envelope::{RecordMeta, CURRENT_SCHEMA_VERSION, ORIGIN_SOURCE, SOURCE_COMDIRECT};
+use webapp::kafka::envelope::{
+    RecordMeta, SourceContext, CURRENT_SCHEMA_VERSION, ORIGIN_SOURCE, SOURCE_COMDIRECT,
+};
 use webapp::kafka::events::split_account_element;
 use webapp::kafka::producer::EventPublisher;
 use webapp::kafka::watermark::{load_watermarks, publish_watermark, Watermark};
@@ -291,8 +293,10 @@ async fn run_import(
             origin: ORIGIN_SOURCE,
             schema_version: CURRENT_SCHEMA_VERSION,
             imported_at: &imported_at,
-            comdirect_account_key: &profile.key,
-            comdirect_account_name: profile.name.as_deref(),
+            context: SourceContext::Comdirect {
+                account_key: &profile.key,
+                account_name: profile.name.as_deref(),
+            },
         };
 
         // Publish the bank's own bytes for this account and its balance. The
