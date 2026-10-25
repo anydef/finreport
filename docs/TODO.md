@@ -240,92 +240,133 @@ who is `[admin]`.
 
 ## C24 and Scalable Capital: access methods (researched 2026-10-25)
 
-Item 6's prerequisite. **Both are CSV-only in practice; neither offers an
-API worth building against.** Sources are listed at the end.
+Item 6's prerequisite. **Corrected after the user pointed out two errors in
+the first version of this entry:** Scalable is a bank and they hold a cash
+account there (not merely a depot), and WISO/finanzblick does connect to both
+Scalable and Comdirect, so a machine-readable path plainly exists. The first
+draft said "no API worth building against" and recommended CSV on the
+strength of a depot-shaped reading. Both corrections are the user's.
+
+### The distinction that actually decides this
+
+Not "API vs. CSV" but **what a client is legally allowed to speak**:
+
+- **Comdirect** publishes its own REST API with a `client_id`/`client_secret`
+  per application. No licence needed, which is exactly why `comdirect-rs`
+  works as a self-hosted client.
+- **FinTS/HBCI** needs no licence either: any client may connect with the
+  user's own credentials and a registered product ID. This is why Hibiscus,
+  StarMoney and ALF-BanCo work.
+- **XS2A (PSD2)** is different. The bank's API is open only to a
+  **registered TPP/AISP** holding a BaFin (or equivalent) registration and an
+  eIDAS QWAC certificate. **Buhl (WISO, finanzblick) is such a registered
+  provider.** That is why WISO reaches C24 and Scalable and a self-hosted tool
+  cannot do the same thing the same way. This is the point the first draft of
+  this entry missed.
 
 ### C24 Bank
 
-- **No publicly documented API.**
-- **Official CSV export** in online banking, and its columns are a good fit:
-  transaction type, booking date, amount, payee, IBAN, BIC, purpose,
-  description, category and subcategory. Note it carries the **counterparty
-  IBAN**, which the identity work finished today can use directly.
-- Statements are PDF, one per calendar month, in the app - not a useful feed.
-- An **XS2A (PSD2) interface exists**, per a C24 support reply in a forum
-  thread from around 2022, authenticated with phone number and app PIN. No
-  official documentation for it was findable. Third-party services that do
-  reach C24 (e.g. Copreo) go through **BANKSapi**, a BaFin-licensed payment
-  service provider, for account data only.
-- **No HBCI/FinTS**, per a DATEV service provider.
-
-**Assessment:** CSV import (M). XS2A would mean contracting a licensed
-aggregator - a third party, a contract and a cost for one household account -
-so it is not worth it. An older forum claim that C24 "has no API" is
-outdated but lands in the same place for us.
+- **XS2A (PSD2) confirmed**, and that is the route WISO uses: the Buhl forum
+  documents adding C24 with the phone number from the app plus the C24 PIN,
+  approved in the C24 app, and notes it was available only in WISO Mein Geld
+  365 / Professional 365. Sub-accounts ("Pockets") are not retrievable.
+- **No FinTS/HBCI.** C24 support called HBCI "in progress" around 2022 with no
+  date, and a DATEV service provider confirms there is none.
+- **No public API.**
+- **Official CSV export** exists in online banking, with a good column set:
+  transaction type, booking date, amount, payee, **IBAN**, BIC, purpose,
+  description, category, subcategory. The IBAN column feeds the counterparty
+  identity work finished today.
 
 ### Scalable Capital
 
-- **No official public API.**
-- **Official CSV export** in the web app: Transactions -> select -> Export
-  CSV. It covers corporate actions, security transfers, interest, dividends
-  and buys/sells. Depot and account movements may need separate exports.
-- **Plan requirement is unresolved.** Scalable's own product-news post ties
-  exporting all broker transactions to PRIME/PRIME+; several third parties say
-  the free plan exports fine. **The user can settle this in one click on their
-  own account** - worth doing before any work is scheduled.
-- **Unofficial exporters exist and should not be copied:** a Tampermonkey
-  userscript, and LibreFolio's extension, which drives Scalable's *internal*
-  GraphQL operations. Both run in the browser session, grant no third-party
-  access, and can break without notice. **Do not build against undocumented
-  internal endpoints.**
+- **It is a bank**: Scalable Capital Bank GmbH, full ECB banking licence
+  (2025), and the user holds a cash account there.
+- **WISO connects by bank code.** Buhl's guidance: for the new,
+  Scalable-run accounts use **BLZ 70010588** with Scalable credentials; for
+  older ones the Baader Bank (70033100) or ING (50010517) code, because the
+  account was carried by whichever bank held it.
+- **But Scalable's own help centre says they offer neither a direct FinTS
+  interface nor an alternative third-party API**, and a support reply from
+  March 2025 says the same. A StarMoney thread reports FinTS working for the
+  old Baader depot and *not* for the new Scalable-run one. **No FinTS server
+  URL for 70010588 was findable.**
+- The consistent reading: WISO reaches it **as a registered AISP over XS2A**,
+  routed by that bank code - not over plain FinTS. Unconfirmed, and worth
+  settling before committing to a route.
+- **Official CSV export** in the web app. Whether it needs PRIME/PRIME+ is
+  contradicted between Scalable's own post and third parties; **the user can
+  settle that in one click on their own account.**
+- **Unofficial exporters drive Scalable's internal GraphQL.** Do not copy
+  them: undocumented, breakable without notice.
 
-**Assessment:** CSV import only (M).
+### The three honest routes
 
-### The real design questions these raise
+1. **CSV import (M each, no licence, works today).** C24's export is
+   well-shaped and includes the IBAN. Scalable's covers interest, dividends,
+   transfers, buys and sells. Manual, so no automatic sync.
+2. **A licensed aggregator's API (needs evaluation + a security decision).**
+   Services such as BANKSapi (which Copreo uses for C24), finAPI, or
+   GoCardless Bank Account Data (formerly Nordigen) hold the AISP licence and
+   resell access, some with a free personal tier - **this was not verified
+   this session and must be checked before it is relied on.** This is the only
+   route that gives C24 and Scalable the same automatic sync Comdirect has.
+   It means account consent and data flow through a third party, so it is
+   **security-critical and belongs with item 5's blocked credential-storage
+   decision, not separate from it.**
+3. **Become a registered AISP.** Not sensible for a household tool. Recorded
+   only to close the option off.
 
-Recording these because they are bigger than the import code:
+### Recommendation
+
+**Ask Scalable support directly for a FinTS server address for BLZ
+70010588** before choosing. If one exists, Scalable can be imported like
+Comdirect with no licence and no third party, which would be the best outcome
+and would also settle how C24 should be handled later. If it does not, the
+choice is route 1 (CSV, manual, no new trust) or route 2 (aggregator,
+automatic, new third party) - and route 2 is the user's call because of what
+it implies about credentials, which is precisely item 5's open question.
+
+### Design questions that still stand, whichever route wins
 
 1. **A second payload shape in the event log.** CLAUDE.md's contract is that
-   `finreport.transaction` payloads are *raw Comdirect JSON, byte-for-byte*,
-   with exactly one documented exception (the legacy backfill). A C24 CSV row
-   is not that. So either the envelope grows a per-source schema (headers
-   already carry schema version and origin, so this is the natural place), or
-   each source gets its own topic. `transaction.source`, `.external_id` and
-   `.origin` already exist, so the read model is ready; the **wire contract is
-   the part that needs a decision**.
-2. **Scalable is a depot, not a bank account.** The read model is
-   `account` / `account_balance` / `transaction` with an amount and a
-   currency. Securities positions, quantities, ISINs and corporate actions do
-   not fit it. So the question is not "import Scalable" but **"does finreport
-   report on investments at all?"** - a much larger scope than a CSV parser.
-   A narrow first answer: import only the **cash** movements (interest,
-   dividends, deposits), ignore the securities legs, and say so plainly in the
-   UI. That keeps the existing model honest and still gets the money flows
-   onto the dashboard.
-3. **The Amazon CSV pattern is reusable, but its semantics are not.**
-   `amazon-orders` is a clean precedent for "parse CSV as a pure function,
-   reject a bad file whole, never row by row". Reuse that shape. But Amazon
-   orders are *evidence about* transactions, deliberately never published as
-   transactions; C24 rows **are** transactions, so they go down a different
-   path. Do not generalise the two into one abstraction.
+   `finreport.transaction` payloads are *raw bank JSON, byte-for-byte*, with
+   one documented exception (the legacy backfill). A C24 CSV row, or an
+   aggregator's normalised JSON, is not that. Either the envelope grows a
+   per-source schema (headers already carry schema version and origin, so that
+   is the natural home) or each source gets its own topic.
+   `transaction.source`, `.external_id` and `.origin` already exist, so the
+   read model is ready; **the wire contract is what needs a ruling.**
+2. **Securities, not just cash.** Scalable's export includes buys, sells and
+   corporate actions, which do not fit `transaction` (an amount and a
+   currency). A narrow first answer: import only the **cash** movements
+   (interest, dividends, deposits), ignore the securities legs, and say so in
+   the UI. Reporting on holdings is a much larger scope and a separate
+   decision.
+3. **Reuse the Amazon CSV shape, not its semantics.** `amazon-orders` is a
+   good precedent for "parse as a pure function, reject a bad file whole,
+   never row by row". But Amazon orders are *evidence about* transactions and
+   are deliberately never published as transactions; C24 and Scalable rows
+   **are** transactions. Do not merge the two into one abstraction.
 
-**Recommendation:** decide 1 and 2 before writing any parser. Then C24 CSV
-first (it is a plain bank account, so it fits the model as-is and benefits
-immediately from the IBAN identity work), and Scalable only once the
-investment question has an answer.
-
-**Sources:** C24 - help centre on exporting transactions
-(hilfe.c24.de/hc/de/articles/8082169487250), the C24 AGB
-(api.c24.de/api/documents/agb_gesamt/download/), Copreo's C24 page
-(copreo.com/de/banken/c24/), a DATEV service provider (sbco.cloud/c24/), and
-the Hibiscus scripting forum thread quoting C24 support
-(scripting-forum.derrichter.de/viewtopic.php?t=1348). Scalable - its own
-product news (de.scalable.capital/en/product-news/transactions-export),
-Portseido's export guide (support.portseido.com/export-trades/scalable-capital/),
-the Portfolio Performance forum thread on CSV import
-(forum.portfolio-performance.info/t/csv-import-von-scalable-capital/30113),
-and the unofficial exporters (github.com/matthesvoss/Scalable-Capital-Transactions-Exporter,
-github.com/Librefolio/librefolio-exporter).
+**Sources.** C24: [help centre on exporting
+transactions](https://hilfe.c24.de/hc/de/articles/8082169487250-Wie-kann-ich-meine-Transaktionen-exportieren),
+[multibanking
+setup](https://hilfe.c24.de/hc/de/articles/360012708639-Wie-kann-ich-eine-neue-Kontoverbindung-beim-Multibanking-hinzuf%C3%BCgen),
+[Buhl forum thread on adding
+C24](https://forum.buhl.de/forum/index.php?thread%2F98595-unterst%C3%BCtzung-neue-bank-c24%2F=),
+[Copreo](https://copreo.com/de/banken/c24/),
+[sbco.cloud on DATEV/HBCI](https://sbco.cloud/c24/), [Hibiscus forum quoting
+C24 support](https://scripting-forum.derrichter.de/viewtopic.php?t=1348).
+Scalable: [its own help centre on FinTS and third-party
+APIs](https://help.scalable.capital/kontoverwaltung-f3197dc7/kann-ich-scalable-mit-multibanking-programmen-nutzen-bzw-35784fe3),
+[Buhl FAQ on bank codes](https://faq.buhl.de/de_de/category/finanzblick/subcategory/banking),
+[StarMoney forum on the new
+depot](https://www.starmoney.de/forum/viewtopic.php?t=47121),
+[aktiengram on the parallel old/new
+accounts](https://aktiengram.de/scalable-capital-neu-und-alt-im-parallelbetrieb/),
+[product news on the CSV
+export](https://de.scalable.capital/en/product-news/transactions-export).
 
 ## Backlog
 
