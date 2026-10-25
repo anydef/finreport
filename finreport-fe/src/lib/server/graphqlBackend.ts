@@ -383,7 +383,21 @@ function mockHeldGroups(variables: Record<string, unknown> | undefined): unknown
 			proposedCategoryVotes: proposed.count
 		};
 	});
-	groups.sort((a, b) => b.heldCount - a.heldCount || a.displayName.localeCompare(b.displayName));
+	// The backend's full ORDER BY, tiebreakers included: `held DESC`, then the
+	// name, then `k`, then `iban`, both NULLS LAST (see `held_groups.rs`'s
+	// GROUPS_SQL). The last two matter for split groups and for the keyless
+	// bucket, where several groups share a count *and* a display name — without
+	// them the mock's order is whatever the fixture's row order happens to be,
+	// so a fixture edit could silently disagree with the real page.
+	const nullsLast = (x: string | null, y: string | null) =>
+		x === y ? 0 : x === null ? 1 : y === null ? -1 : x.localeCompare(y);
+	groups.sort(
+		(a, b) =>
+			b.heldCount - a.heldCount ||
+			a.displayName.localeCompare(b.displayName) ||
+			nullsLast(a.counterpartyKey, b.counterpartyKey) ||
+			nullsLast(a.counterpartyIban, b.counterpartyIban)
+	);
 	const offset = page?.offset ?? 0;
 	return {
 		heldMerchantGroups: {
