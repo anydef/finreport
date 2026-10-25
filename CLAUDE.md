@@ -11,6 +11,8 @@ Personal-finance reporting: a Rust Comdirect API client + GraphQL backend, feedi
   - `entity` — sea-orm generated entities (do not hand-edit; regenerate, see below)
   - `migration` — sea-orm migrations
   - `utils` — shared settings/config (`utils::settings::Settings`)
+  - `amazon-orders` — Amazon order CSV parser + order-to-charge matcher, pure functions (see "Amazon purchase orders" below)
+  - `c24-csv` — C24 bank CSV export parser, pure functions (see "C24 CSV import" below)
 - `finreport-fe/` — SvelteKit frontend, talks to the GraphQL backend. See `finreport-fe/CLAUDE.md` for frontend-specific commands.
 - `prompts/` — LLM categorization prompt (`categorize.txt`) + category taxonomy
   (`taxonomy.json`, what `category-seed` publishes). The taxonomy lives in
@@ -265,6 +267,64 @@ the excess of an over-reimbursement reported as `surplus`.
   projection, so a replay cannot fail on it).
 - The list resolvers prefetch `Transaction.link` per page (`graphql::links::prefetch_page`).
 
+## C24 CSV import
+
+The `c24-csv` crate parses C24's CSV account export. **Parser only so far** —
+no Kafka topic, no migration, no projection, no upload mutation: the wire
+contract (topic, payload shape, whether `C24Row` itself is the payload) is an
+open decision, so nothing in the crate is frozen yet. Same shape and the same
+two binding properties as `amazon-orders`:
+
+- **A bad file is rejected whole, never row by row.** A half-imported bank
+  statement is worse than a rejected one — the user cannot tell which lines are
+  missing, and the gap reads as money that never moved.
+- **No error message or log line carries a cell value.** Every cell is bank
+  data (amount, counterparty, IBAN, purpose), so `ParseError` holds a column, a
+  line and a *static* reason only. `csv::Error` is reduced to its class and
+  position, because its own `Display` quotes the record it choked on.
+
+Format facts, all verified against a real export (14-column header
+`Transaktionstyp,Buchungsdatum,Karteneinsatz,Betrag,Zahlungsempfänger,IBAN,BIC,Verwendungszweck,Beschreibung,Kontonummer,Kontoname,Kategorie,Unterkategorie,Bargeldabhebung`):
+
+- **The export is ragged**: data rows carry 13 fields, the trailing
+  `Bargeldabhebung` value simply absent. 13 and 14 are both accepted; any other
+  count, or any header that is not exactly the 14 above in order, rejects the
+  file.
+- Amounts are quoted and German-formatted with a currency symbol
+  (`"-1,00 €"`, `"150,00 €"`), parsed to `rust_decimal::Decimal`, never a float.
+  The thousands separator (`"1.234,56 €"`) is **inferred, not observed**.
+- `Karteneinsatz` (`dd.MM.yyyy HH:mm`) is empty on non-card rows;
+  `IBAN`/`BIC`/`Verwendungszweck`/`Beschreibung` are empty on card rows. All
+  optional. `Buchungsdatum` is `dd.MM.yyyy`.
+- `Transaktionstyp` stays a `String`, not an enum: an unknown type must never
+  reject the file.
+- `Kategorie`/`Unterkategorie` are **C24's own guess — evidence, not a
+  decision**. A later slice may feed them in as a hint at the bottom of the
+  precedence chain; they must never override a user override or a rule.
+- One file can carry several accounts (`Kontonummer` + `Kontoname`), so nothing
+  assumes one.
+
+**Identity, because the export has no transaction id.**
+`content_key = SHA-256(kontonummer, buchungsdatum, karteneinsatz, betrag,
+zahlungsempfaenger, iban, verwendungszweck, beschreibung, transaktionstyp)`
+(parts joined with `\0`, as `kafka::envelope::uuid_v5_from_parts` does), and
+`external_id = "<content_key>-<occurrence ordinal>"`.
+
+- The ordinal exists because the real export contains byte-identical rows that
+  are **genuinely distinct transactions** (one identical pair, and one identical
+  triple, same `Karteneinsatz` and all). A plain content hash would collapse
+  three into one and lose two.
+- **The ordinal is scoped to `(kontonummer, buchungsdatum, content_key)` — the
+  booking day, not the file.** C24 filters by whole days, so any export covering
+  a day covers all of it, and a triple gets 1, 2, 3 in *every* export including
+  that day. Scoping to the file would shift ordinals whenever the range changed
+  and duplicate everything on re-import.
+- Ordinals are assigned after a canonical sort, so row order in the file cannot
+  affect them.
+- **Accepted weakness, documented not hidden**: if C24 re-words a row's
+  description, purpose or payee, it re-imports as a new transaction. Leaving
+  the text out of the key instead would merge distinct transactions.
+
 ## Amazon purchase orders
 
 The `amazon-orders` crate holds the CSV parser and the order-to-charge matcher
@@ -474,7 +534,7 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **607** Rust unit tests via `just test`, **731** frontend (35 files) via
+  **645** Rust unit tests via `just test`, **731** frontend (35 files) via
   `npm run test:unit` (both re-measured 2026-10-25). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph
   explaining the mismatch, so refresh this line in the same commit that adds
