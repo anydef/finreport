@@ -13,7 +13,7 @@ mod common;
 use async_graphql::{Request, Response};
 use chrono::Utc;
 use entity::entities::{category, learning_exemption, rule};
-use sea_orm::{ActiveModelTrait, ConnectionTrait, DatabaseConnection, EntityTrait, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseConnection, EntityTrait, QueryFilter, Set};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -124,14 +124,26 @@ async fn seed_exemption(db: &DatabaseConnection) -> learning_exemption::Model {
     .expect("insert learning_exemption")
 }
 
+/// The names a refused attempt would have brought into existence, so the
+/// test can assert their *absence* instead of comparing whole tables.
+struct Attempted {
+    category_slug: String,
+    exemption_key: String,
+    rule_name: &'static str,
+}
+
 /// Every gated operation, with arguments that would succeed for an admin.
-fn gated_operations(cat: &category::Model, rule: &rule::Model, exemption_key: &str) -> Vec<(&'static str, String)> {
+fn gated_operations(
+    cat: &category::Model,
+    rule: &rule::Model,
+    exemption_key: &str,
+) -> (Vec<(&'static str, String)>, Attempted) {
     let new_slug = format!("gate_new_{}", Uuid::new_v4().simple());
     let rule_input = format!(
         r#"{{ name: "gate created", categorySlug: "{}", conditions: {{ description_contains: "gate" }}, priority: 1 }}"#,
         cat.slug
     );
-    vec![
+    let operations = vec![
         ("createCategory", format!(r#"mutation {{ createCategory(input: {{ slug: "{new_slug}", name: "N", kind: EXPENSE }}) {{ id }} }}"#)),
         ("renameCategory", format!(r#"mutation {{ renameCategory(id: "{}", name: "Renamed") {{ id }} }}"#, cat.id)),
         ("archiveCategory", format!(r#"mutation {{ archiveCategory(id: "{}") {{ id }} }}"#, cat.id)),
@@ -144,7 +156,13 @@ fn gated_operations(cat: &category::Model, rule: &rule::Model, exemption_key: &s
         ("rules", "{ rules { id } }".to_string()),
         ("recentlyAutoApprovedRules", "{ recentlyAutoApprovedRules { id } }".to_string()),
         ("learningExemptions", "{ learningExemptions { counterpartyKey } }".to_string()),
-    ]
+    ];
+    let attempted = Attempted {
+        category_slug: new_slug.clone(),
+        exemption_key: format!("gate-new-{new_slug}"),
+        rule_name: "gate created",
+    };
+    (operations, attempted)
 }
 
 #[tokio::test]
@@ -158,23 +176,66 @@ async fn a_non_admin_is_forbidden_on_every_gated_field_and_nothing_changes() {
     let rule = seed_rule(&db, cat_id).await;
     let exemption = seed_exemption(&db).await;
 
-    let categories_before = category::Entity::find().all(db.as_ref()).await.unwrap();
-    let rules_before = rule::Entity::find().all(db.as_ref()).await.unwrap();
-    let exemptions_before = learning_exemption::Entity::find().all(db.as_ref()).await.unwrap();
-
-    let operations = gated_operations(&cat, &rule, &exemption.counterparty_key);
+    // Only the rows this test owns are snapshotted. The test database is
+    // shared and sibling tests in this very binary create categories
+    // concurrently, so comparing whole tables made this fail about half the
+    // time under the default parallelism - a flaky security test, which is
+    // worse than none because it teaches the reader to rerun. Per-row
+    // assertions are also stronger: they pin that nothing was renamed,
+    // archived, revoked or deleted, not merely that a count held.
+    let (operations, attempted) = gated_operations(&cat, &rule, &exemption.counterparty_key);
     assert_eq!(operations.len(), 12, "all nine mutations and three queries");
     for (name, query) in &operations {
         let response = exec(&schema, Some(&nobody.user), query).await;
         assert_eq!(code(&response).as_deref(), Some("FORBIDDEN"), "{name}: {:?}", response.errors);
     }
 
-    assert_eq!(categories_before, category::Entity::find().all(db.as_ref()).await.unwrap(), "categories changed");
-    assert_eq!(rules_before, rule::Entity::find().all(db.as_ref()).await.unwrap(), "rules changed");
+    // Nothing the refusal touched changed.
     assert_eq!(
-        exemptions_before,
-        learning_exemption::Entity::find().all(db.as_ref()).await.unwrap(),
-        "exemptions changed"
+        Some(cat.clone()),
+        category::Entity::find_by_id(cat.id).one(db.as_ref()).await.unwrap(),
+        "the targeted category was renamed or archived"
+    );
+    assert_eq!(
+        Some(rule.clone()),
+        rule::Entity::find_by_id(rule.id).one(db.as_ref()).await.unwrap(),
+        "the targeted rule was updated or revoked"
+    );
+    assert!(
+        learning_exemption::Entity::find_by_id(exemption.counterparty_key.clone())
+            .one(db.as_ref())
+            .await
+            .unwrap()
+            .is_some(),
+        "the targeted exemption was deleted"
+    );
+
+    // And nothing the refusal would have created exists.
+    assert!(
+        category::Entity::find()
+            .filter(category::Column::Slug.eq(attempted.category_slug.clone()))
+            .one(db.as_ref())
+            .await
+            .unwrap()
+            .is_none(),
+        "createCategory wrote despite being refused"
+    );
+    assert!(
+        rule::Entity::find()
+            .filter(rule::Column::Name.eq(attempted.rule_name))
+            .one(db.as_ref())
+            .await
+            .unwrap()
+            .is_none(),
+        "createRule wrote despite being refused"
+    );
+    assert!(
+        learning_exemption::Entity::find_by_id(attempted.exemption_key.clone())
+            .one(db.as_ref())
+            .await
+            .unwrap()
+            .is_none(),
+        "exemptFromLearning wrote despite being refused"
     );
 }
 
@@ -185,7 +246,7 @@ async fn an_unauthenticated_caller_still_gets_unauthenticated_not_forbidden() {
     let (cat_id, _) = common::seed_category(&db, "gate_anon", "Anon", "EXPENSE").await;
     let cat = category::Entity::find_by_id(cat_id).one(db.as_ref()).await.unwrap().unwrap();
     let rule = seed_rule(&db, cat_id).await;
-    for (name, query) in gated_operations(&cat, &rule, "k") {
+    for (name, query) in gated_operations(&cat, &rule, "k").0 {
         let response = exec(&schema, None, &query).await;
         assert_eq!(code(&response).as_deref(), Some("UNAUTHENTICATED"), "{name}: {:?}", response.errors);
     }
