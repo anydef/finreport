@@ -22,6 +22,7 @@ use rdkafka::producer::{FutureProducer, FutureRecord};
 use rdkafka::ClientConfig;
 use sea_orm::EntityTrait;
 use support::{TestKafka, TestPostgres};
+use webapp::kafka::c24::{TOPIC_C24_ACCOUNT, TOPIC_C24_TRANSACTION};
 use webapp::projection::{run, ProjectorConfig, INGEST_TOPICS};
 
 /// Publishes every fixture record to the broker, each on its manifest topic
@@ -66,7 +67,18 @@ async fn replay_over_kafka_projects_the_whole_fixture_corpus() {
     // corpus covers the three Comdirect ones (§9), so this always holds. The
     // C24 topics are deliberately left empty: an empty topic is trivially
     // caught up, and leaving them so keeps that path exercised.
-    for topic in INGEST_TOPICS.into_iter().filter(|t| !t.contains("c24")) {
+    //
+    // The two are excluded by their own constants, not by a substring match on
+    // the name: a substring filter would also silently excuse a *future* topic
+    // that happened to contain "c24", and still leave this loop looking like
+    // it covered every ingest topic. Excluding them by identity keeps
+    // `INGEST_TOPICS` coupled, so adding a sixth topic fails here until the
+    // fixture corpus covers it or it is excluded on purpose.
+    const NO_FIXTURE: [&str; 2] = [TOPIC_C24_ACCOUNT, TOPIC_C24_TRANSACTION];
+    for topic in INGEST_TOPICS
+        .into_iter()
+        .filter(|t| !NO_FIXTURE.contains(t))
+    {
         assert!(
             entries.iter().any(|(t, ..)| t == topic),
             "fixture corpus must cover {topic} for --until-caught-up to have a watermark to reach"

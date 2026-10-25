@@ -564,7 +564,7 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **667** Rust unit tests via `just test`, **755** integration via
+  **672** Rust unit tests via `just test`, **760** integration via
   `just test-integration`, **758** frontend (37 files) via
   `npm run test:unit` (re-measured 2026-10-26; frontend unchanged). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph
