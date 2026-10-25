@@ -628,12 +628,33 @@ enum Granularity {
 
 type HeldMerchantGroup {
 	"""
-	The normalised merchant key (`transaction.counterparty_key`), the value
-	to pass in `TransactionFilter.counterpartyKeys`. `null` for the single
-	bucket of held transactions that have no key; no filter can address
-	that bucket, only individual transaction ids can.
+	The normalised merchant key (`transaction.counterparty_key`). It is
+	**not** sufficient on its own to address a group: several groups can
+	share one key and differ only by `counterpartyIban`, so a filter for
+	this group is `counterpartyKeys` plus the IBAN (see the module doc).
+	`null` for held transactions that have no key; no filter can address
+	those, only individual transaction ids can.
 	"""
 	counterpartyKey: String
+	"""
+	The counterparty IBAN shared by the group's rows, **raw and
+	unmasked** (as `Transaction.counterpartyIban` serves it; masking is a
+	display concern). `null` when the group's rows have none. An IBAN is
+	sensitive: never write it to a log line.
+	"""
+	counterpartyIban: String
+	"""
+	`true` when this group's `counterpartyKey` has more than one group
+	(distinct IBAN, or none) among the caller's held transactions, i.e.
+	the key alone would merge different accounts and the IBAN is what
+	tells them apart. Computed in SQL over **all** groups before paging,
+	so a sibling on another page still counts; this is deliberately
+	stronger than `counterpartyBreakdown`'s row-local version, which only
+	sees the rows it returns. It is also the flag that tells a client
+	whether the group's filter needs the IBAN (or `hasCounterpartyIban:
+	false`) beside the key.
+	"""
+	ibanDisambiguated: Boolean!
 	"""
 	What the caller sees for the merchant: their alias for
 	`counterpartyKey` when they set one, else `rawName`. The ungrouped

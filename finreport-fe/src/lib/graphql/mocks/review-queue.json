@@ -1,5 +1,5 @@
 {
-  "query": "query ReviewQueue($page: PageInput) {\n  reviewQueue(page: $page) {\n    transactions {\n      id\n      accountId\n      bookingDate\n      amount\n      currency\n      counterpartyName\n      counterpartyDisplayName\n      description\n      label {\n        source\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n        confidence\n      }\n    }\n    pendingRules {\n      id\n      name\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      conditions\n      priority\n      state\n      origin\n      autoApproved\n      confidence\n      evidenceCount\n      matchingTransactionCount\n      createdAt\n    }\n    totalCount\n  }\n}",
+  "query": "query ReviewQueue($page: PageInput) {\n  reviewQueue(page: $page) {\n    transactions {\n      id\n      accountId\n      bookingDate\n      amount\n      currency\n      counterpartyName\n      counterpartyDisplayName\n      counterpartyKey\n      counterpartyIban\n      description\n      label {\n        source\n        status\n        reviewReason\n        proposedCategoryPath\n        reasoning\n        confidence\n      }\n    }\n    pendingRules {\n      id\n      name\n      category {\n        id\n        slug\n        name\n        kind\n      }\n      conditions\n      priority\n      state\n      origin\n      autoApproved\n      confidence\n      evidenceCount\n      matchingTransactionCount\n      createdAt\n    }\n    totalCount\n  }\n}",
   "data": {
     "reviewQueue": {
       "transactions": [
@@ -12,6 +12,7 @@
           "counterpartyName": "Amazon",
           "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
+          "counterpartyIban": null,
           "description": "Online purchase",
           "label": {
             "source": "LLM",
@@ -31,6 +32,7 @@
           "counterpartyName": "Amazon",
           "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
+          "counterpartyIban": null,
           "description": "Marketplace order",
           "label": {
             "source": "LLM",
@@ -50,6 +52,7 @@
           "counterpartyName": "Amazon",
           "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
+          "counterpartyIban": null,
           "description": "Prime Video and books",
           "label": {
             "source": "LLM",
@@ -69,6 +72,7 @@
           "counterpartyName": "Amazon",
           "counterpartyDisplayName": "Online orders",
           "counterpartyKey": "amazon",
+          "counterpartyIban": null,
           "description": "Kindle book",
           "label": {
             "source": "LLM",
@@ -88,6 +92,7 @@
           "counterpartyName": "REWE Markt",
           "counterpartyDisplayName": "REWE Markt",
           "counterpartyKey": "rewe",
+          "counterpartyIban": null,
           "description": "Card payment",
           "label": {
             "source": "LLM",
@@ -107,6 +112,7 @@
           "counterpartyName": "REWE Markt",
           "counterpartyDisplayName": "REWE Markt",
           "counterpartyKey": "rewe",
+          "counterpartyIban": null,
           "description": "Card payment",
           "label": {
             "source": "LLM",
@@ -126,6 +132,7 @@
           "counterpartyName": "REWE Markt",
           "counterpartyDisplayName": "REWE Markt",
           "counterpartyKey": "rewe",
+          "counterpartyIban": null,
           "description": "Card payment",
           "label": {
             "source": "LLM",
@@ -145,6 +152,7 @@
           "counterpartyName": "Rewe Sagt Danke",
           "counterpartyDisplayName": "Rewe Sagt Danke",
           "counterpartyKey": "rewe",
+          "counterpartyIban": null,
           "description": "Refund deposit",
           "label": {
             "source": "LLM",
@@ -164,6 +172,7 @@
           "counterpartyName": "Lidl Filiale 112",
           "counterpartyDisplayName": "Lidl Filiale 112",
           "counterpartyKey": "lidl",
+          "counterpartyIban": "DE00 0000 0000 0000 0010 01",
           "description": "Card payment",
           "label": {
             "source": "LLM",
@@ -183,6 +192,7 @@
           "counterpartyName": "Lidl Filiale 112",
           "counterpartyDisplayName": "Lidl Filiale 112",
           "counterpartyKey": "lidl",
+          "counterpartyIban": "DE00 0000 0000 0000 0010 01",
           "description": "Card payment",
           "label": {
             "source": "LLM",
@@ -202,6 +212,7 @@
           "counterpartyName": "Acme Co-Working",
           "counterpartyDisplayName": "Acme Co-Working",
           "counterpartyKey": "acme co working",
+          "counterpartyIban": null,
           "description": "Monthly desk rental",
           "label": {
             "source": "LLM",
@@ -221,6 +232,7 @@
           "counterpartyName": "Kleinanbieter Meyer",
           "counterpartyDisplayName": "Kleinanbieter Meyer",
           "counterpartyKey": "kleinanbieter meyer",
+          "counterpartyIban": null,
           "description": "Card payment",
           "label": {
             "source": "LLM",
@@ -240,6 +252,7 @@
           "counterpartyName": "Unknown shop",
           "counterpartyDisplayName": "Unknown shop",
           "counterpartyKey": null,
+          "counterpartyIban": "DE00 0000 0000 0000 0010 03",
           "description": "POS purchase",
           "label": {
             "source": "LLM",
@@ -259,7 +272,28 @@
           "counterpartyName": null,
           "counterpartyDisplayName": null,
           "counterpartyKey": null,
+          "counterpartyIban": null,
           "description": "Card payment",
+          "label": {
+            "source": "LLM",
+            "status": "NEEDS_REVIEW",
+            "reviewReason": "AMBIGUOUS",
+            "proposedCategoryPath": null,
+            "reasoning": "fake provider: multiple plausible categories",
+            "confidence": 0.5
+          }
+        },
+        {
+          "id": "7c0d0000-0000-4a5b-8c9d-000000000015",
+          "accountId": "2b0fe9c2-2f4b-5753-95ad-133501e3bd5d",
+          "bookingDate": "2024-06-05",
+          "amount": "-12.10",
+          "currency": "EUR",
+          "counterpartyName": "Lidl Filiale 112",
+          "counterpartyDisplayName": "Lidl Filiale 112",
+          "counterpartyKey": "lidl",
+          "counterpartyIban": "DE00 0000 0000 0000 0010 02",
+          "description": "Standing order, other account",
           "label": {
             "source": "LLM",
             "status": "NEEDS_REVIEW",
@@ -293,7 +327,7 @@
           "createdAt": "2024-06-20T08:00:00Z"
         }
       ],
-      "totalCount": 14
+      "totalCount": 15
     }
   }
 }

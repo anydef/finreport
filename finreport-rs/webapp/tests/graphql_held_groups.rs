@@ -26,11 +26,26 @@ async fn tenant(db: &DatabaseConnection, name: &str) -> Tenant {
     Tenant { user: AuthenticatedUser { user_id, username, account_ids: vec![account] }, account }
 }
 
-/// One held transaction. `reason`/`proposed` land on its `needs_review` label.
+/// One held transaction with no IBAN. `reason`/`proposed` land on its `needs_review` label.
 async fn held(
     db: &DatabaseConnection,
     account: Uuid,
     key: Option<&str>,
+    name: Option<&str>,
+    amount: &str,
+    reason: &str,
+    proposed: Option<&str>,
+) -> Uuid {
+    held_iban(db, account, key, None, name, amount, reason, proposed).await
+}
+
+/// As `held`, with the counterparty IBAN set (synthetic placeholders only).
+#[allow(clippy::too_many_arguments)]
+async fn held_iban(
+    db: &DatabaseConnection,
+    account: Uuid,
+    key: Option<&str>,
+    iban: Option<&str>,
     name: Option<&str>,
     amount: &str,
     reason: &str,
@@ -41,6 +56,7 @@ async fn held(
         transaction::Entity::find_by_id(id).one(db).await.unwrap().unwrap().into();
     model.counterparty_key = Set(key.map(str::to_string));
     model.counterparty_name = Set(name.map(str::to_string));
+    model.counterparty_iban = Set(iban.map(str::to_string));
     model.update(db).await.unwrap();
     common::seed_transaction_label(db, id, None, "llm", "needs_review").await;
     let mut label: transaction_label::ActiveModel =
@@ -65,7 +81,7 @@ async fn run(schema: &webapp::graphql::AppSchema, user: &AuthenticatedUser, quer
 }
 
 const GROUPS: &str = "{ heldMerchantGroups { groupCount heldCount groups { counterpartyKey displayName rawName \
-    heldCount totalAmount currency reviewReasons proposedCategoryPath proposedCategoryVotes } } \
+    heldCount totalAmount currency reviewReasons proposedCategoryPath proposedCategoryVotes counterpartyIban ibanDisambiguated } } \
     reviewQueue { totalCount } }";
 
 #[tokio::test]
@@ -181,6 +197,24 @@ async fn a_group_shows_the_callers_alias_and_still_exposes_the_bank_name() {
     assert_eq!(bobs[0]["rawName"], "Amazon Payments");
 }
 
+const IBAN_A: &str = "DE00 0000 0000 0000 0000 01";
+const IBAN_B: &str = "DE00 0000 0000 0000 0000 02";
+const IBAN_C: &str = "DE00 0000 0000 0000 0000 03";
+
+/// The filter a client sends for a group: the three cases of the module doc.
+/// Mirrors `groupFilter` in `finreport-fe/src/lib/heldGroups.ts`.
+fn filter_for(group: &Value) -> String {
+    let key = group["counterpartyKey"].as_str().expect("keyed group");
+    let mut f = format!(r#"needsReview: true, counterpartyKeys: ["{key}"]"#);
+    if group["ibanDisambiguated"] == true {
+        match group["counterpartyIban"].as_str() {
+            Some(iban) => f.push_str(&format!(r#", counterpartyIbans: ["{iban}"]"#)),
+            None => f.push_str(", hasCounterpartyIban: false"),
+        }
+    }
+    f
+}
+
 #[tokio::test]
 async fn a_group_matches_the_rows_the_bulk_filter_would_assign() {
     let db = common::db().await;
@@ -188,16 +222,145 @@ async fn a_group_matches_the_rows_the_bulk_filter_would_assign() {
     held(&db, a.account, Some("aldi"), Some("Aldi"), "-4.00", "ambiguous", None).await;
     held(&db, a.account, Some("aldi"), Some("Aldi"), "-6.00", "ambiguous", None).await;
     held(&db, a.account, Some("dm"), Some("dm"), "-8.00", "ambiguous", None).await;
+    // A lone IBAN under its key: not split, key alone must address it.
+    held_iban(&db, a.account, Some("kiosk"), Some(IBAN_C), Some("Kiosk"), "-1.00", "ambiguous", None).await;
+    // A split key: same name, two accounts and a no-IBAN row (empty string
+    // counts as none). Counts differ so a mixed-up group cannot match by luck.
+    for amount in ["-100.00", "-200.00", "-300.00"] {
+        held_iban(&db, a.account, Some("owner"), Some(IBAN_A), Some("Max Muster"), amount, "ambiguous", None).await;
+    }
+    for amount in ["-10.00", "-20.00"] {
+        held_iban(&db, a.account, Some("owner"), Some(IBAN_B), Some("Max Muster"), amount, "ambiguous", None).await;
+    }
+    held_iban(&db, a.account, Some("owner"), Some(""), Some("Max Muster"), "-5.00", "ambiguous", None).await;
 
     let schema = create_schema(db.clone(), common::dummy_settings());
-    let groups = run(&schema, &a.user, "{ heldMerchantGroups { groups { counterpartyKey heldCount } } }").await;
-    for group in groups["heldMerchantGroups"]["groups"].as_array().unwrap() {
-        let key = group["counterpartyKey"].as_str().unwrap();
-        let q = format!(
-            r#"{{ transactions(filter: {{ needsReview: true, counterpartyKeys: ["{key}"] }}) {{ totalCount }} }}"#
-        );
+    let groups = run(
+        &schema,
+        &a.user,
+        "{ heldMerchantGroups { groups { counterpartyKey counterpartyIban ibanDisambiguated heldCount } } }",
+    )
+    .await;
+    let groups = groups["heldMerchantGroups"]["groups"].as_array().unwrap().clone();
+    assert_eq!(groups.len(), 6, "aldi, dm, kiosk and three owner groups");
+    for group in &groups {
+        let filter = filter_for(group);
+        let q = format!("{{ transactions(filter: {{ {filter} }}) {{ totalCount }} }}");
         let page = run(&schema, &a.user, &q).await;
-        assert_eq!(page["transactions"]["totalCount"], group["heldCount"], "group {key}");
+        assert_eq!(page["transactions"]["totalCount"], group["heldCount"], "group {group}");
+    }
+    // The filters of the split key are disjoint and cover its 6 rows.
+    let owner: Vec<&Value> = groups.iter().filter(|g| g["counterpartyKey"] == "owner").collect();
+    assert_eq!(owner.len(), 3);
+    assert_eq!(owner.iter().map(|g| g["heldCount"].as_i64().unwrap()).sum::<i64>(), 6);
+}
+
+#[tokio::test]
+async fn a_key_with_two_ibans_splits_and_a_key_with_one_does_not() {
+    let db = common::db().await;
+    let a = tenant(&db, "held-groups-split").await;
+    // "loan": the user's own name on two accounts, 2 + 1 rows, proposals differ per group.
+    held_iban(&db, a.account, Some("loan"), Some(IBAN_A), Some("Max Muster"), "-500.00", "ambiguous", Some("housing.mortgage")).await;
+    held_iban(&db, a.account, Some("loan"), Some(IBAN_A), Some("Max Muster"), "-500.00", "ambiguous", Some("housing.mortgage")).await;
+    held_iban(&db, a.account, Some("loan"), Some(IBAN_B), Some("Max Muster"), "250.00", "ambiguous", Some("income.other")).await;
+    // "kiosk": one IBAN across both rows: a single, unflagged group.
+    held_iban(&db, a.account, Some("kiosk"), Some(IBAN_C), Some("Kiosk"), "-2.00", "ambiguous", None).await;
+    held_iban(&db, a.account, Some("kiosk"), Some(IBAN_C), Some("Kiosk"), "-3.00", "ambiguous", None).await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let data = run(&schema, &a.user, GROUPS).await;
+    let result = &data["heldMerchantGroups"];
+    let groups = result["groups"].as_array().unwrap();
+
+    assert_eq!(result["groupCount"], 3, "the pairs, not the keys");
+    assert_eq!(result["heldCount"], 5);
+    assert_eq!(data["reviewQueue"]["totalCount"], 5);
+    assert_eq!(groups.iter().map(|g| g["heldCount"].as_i64().unwrap()).sum::<i64>(), 5);
+    assert_eq!(groups.len(), 3);
+
+    let find = |key: &str, iban: &str| {
+        groups
+            .iter()
+            .find(|g| g["counterpartyKey"] == key && g["counterpartyIban"] == iban)
+            .unwrap_or_else(|| panic!("no group {key}/{iban}: {groups:?}"))
+    };
+    let a_group = find("loan", IBAN_A);
+    let b_group = find("loan", IBAN_B);
+    assert_eq!((a_group["heldCount"].as_i64(), b_group["heldCount"].as_i64()), (Some(2), Some(1)));
+    assert_eq!(a_group["ibanDisambiguated"], true);
+    assert_eq!(b_group["ibanDisambiguated"], true);
+    // Votes follow the pair: A's two agree, B's one is its own.
+    assert_eq!(a_group["proposedCategoryPath"], "housing.mortgage");
+    assert_eq!(a_group["proposedCategoryVotes"], 2);
+    assert_eq!(b_group["proposedCategoryPath"], "income.other");
+    assert_eq!(b_group["proposedCategoryVotes"], 1);
+    assert_eq!(b_group["totalAmount"].as_str().unwrap().parse::<f64>().unwrap(), 250.0);
+
+    let kiosk = find("kiosk", IBAN_C);
+    assert_eq!(kiosk["heldCount"], 2);
+    assert_eq!(kiosk["ibanDisambiguated"], false, "one IBAN under the key is not a split");
+}
+
+#[tokio::test]
+async fn a_no_iban_group_with_null_votes_counts_and_is_flagged_beside_its_iban_sibling() {
+    let db = common::db().await;
+    let a = tenant(&db, "held-groups-noiban").await;
+    held_iban(&db, a.account, Some("loan"), Some(IBAN_A), Some("Max Muster"), "-1.00", "ambiguous", Some("x.y")).await;
+    held_iban(&db, a.account, Some("loan"), None, Some("Max Muster"), "-2.00", "ambiguous", Some("x.y")).await;
+    held_iban(&db, a.account, Some("loan"), None, Some("Max Muster"), "-3.00", "ambiguous", Some("x.y")).await;
+    // Two keyless rows with the same IBAN and one with none: two keyless groups.
+    held_iban(&db, a.account, None, Some(IBAN_B), Some("Mystery"), "-4.00", "ambiguous", None).await;
+    held_iban(&db, a.account, None, Some(IBAN_B), Some("Mystery"), "-5.00", "ambiguous", None).await;
+    held_iban(&db, a.account, None, None, Some("Mystery"), "-6.00", "ambiguous", None).await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    let data = run(&schema, &a.user, GROUPS).await;
+    let result = &data["heldMerchantGroups"];
+    let groups = result["groups"].as_array().unwrap();
+    assert_eq!(result["groupCount"], 4);
+    assert_eq!(result["heldCount"], 6);
+    assert_eq!(groups.len(), 4);
+    assert_eq!(groups.iter().map(|g| g["heldCount"].as_i64().unwrap()).sum::<i64>(), 6);
+
+    let no_iban = groups
+        .iter()
+        .find(|g| g["counterpartyKey"] == "loan" && g["counterpartyIban"].is_null())
+        .expect("the loan's no-IBAN group");
+    assert_eq!(no_iban["heldCount"], 2);
+    assert_eq!(no_iban["ibanDisambiguated"], true);
+    assert_eq!(
+        no_iban["proposedCategoryVotes"], 2,
+        "votes must still join on a NULL IBAN (IS NOT DISTINCT FROM), not drop to zero"
+    );
+    let keyless_iban = groups
+        .iter()
+        .find(|g| g["counterpartyKey"].is_null() && g["counterpartyIban"] == IBAN_B)
+        .expect("keyless group with an IBAN");
+    assert_eq!(keyless_iban["heldCount"], 2);
+    assert_eq!(keyless_iban["displayName"], "No merchant key");
+}
+
+#[tokio::test]
+async fn a_sibling_on_another_page_still_marks_the_group_disambiguated() {
+    let db = common::db().await;
+    let a = tenant(&db, "held-groups-sibling-page").await;
+    // Sorted by heldCount, the two groups of "loan" land on different pages of size 1.
+    held_iban(&db, a.account, Some("loan"), Some(IBAN_A), Some("Max Muster"), "-1.00", "ambiguous", None).await;
+    held_iban(&db, a.account, Some("loan"), Some(IBAN_A), Some("Max Muster"), "-2.00", "ambiguous", None).await;
+    held_iban(&db, a.account, Some("loan"), Some(IBAN_B), Some("Max Muster"), "-3.00", "ambiguous", None).await;
+
+    let schema = create_schema(db.clone(), common::dummy_settings());
+    for (offset, count, iban) in [(0, 2, IBAN_A), (1, 1, IBAN_B)] {
+        let q = format!(
+            "{{ heldMerchantGroups(page: {{ limit: 1, offset: {offset} }}) {{ groupCount groups {{ counterpartyIban ibanDisambiguated heldCount }} }} }}"
+        );
+        let data = run(&schema, &a.user, &q).await;
+        let groups = data["heldMerchantGroups"]["groups"].as_array().unwrap();
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0]["counterpartyIban"], iban);
+        assert_eq!(groups[0]["heldCount"], count);
+        assert_eq!(groups[0]["ibanDisambiguated"], true, "page offset {offset}");
+        assert_eq!(data["heldMerchantGroups"]["groupCount"], 2);
     }
 }
 

@@ -5,8 +5,7 @@ import {
 	REVIEW_HELD_TRANSACTIONS_QUERY,
 	REVIEW_QUEUE_WITH_SPLITS_QUERY
 } from '$lib/graphql/adminReviewQueries';
-import { reviewQueueFilter } from '$lib/bulkSelection';
-import { expandedKey, parseView } from '$lib/heldGroups';
+import { expandedIban, expandedKey, groupFilter, parseView } from '$lib/heldGroups';
 import type { Category, HeldMerchantGroups, ReviewQueue, Transaction } from '$lib/graphql/types';
 import type { PageLoad } from './$types';
 
@@ -25,6 +24,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const view = parseView(url.searchParams.get('view'));
 	const offset = Number(url.searchParams.get('offset') ?? '0') || 0;
 	const expand = view === 'groups' ? expandedKey(url.searchParams) : null;
+	const expandIban = expand ? expandedIban(url.searchParams) : undefined;
 	const client = createGraphqlClient(fetch);
 
 	const [queueResult, categoriesResult, groupsResult, expandedResult] = await Promise.all([
@@ -42,7 +42,11 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		expand
 			? client
 					.query(REVIEW_HELD_TRANSACTIONS_QUERY, {
-						filter: reviewQueueFilter(expand),
+						filter: groupFilter({
+							counterpartyKey: expand,
+							counterpartyIban: expandIban,
+							ibanDisambiguated: expandIban !== undefined
+						}),
 						page: { limit: GROUP_LIMIT, offset: 0 }
 					})
 					.toPromise()
@@ -54,6 +58,7 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		offset,
 		limit: PAGE_LIMIT,
 		expand,
+		expandIban,
 		error: Boolean(
 			queueResult.error || categoriesResult.error || groupsResult?.error || expandedResult?.error
 		),

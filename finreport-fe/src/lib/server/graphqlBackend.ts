@@ -166,6 +166,7 @@ function mockLogout(): GraphqlBackendResult {
 interface MockTransaction {
 	id: string;
 	counterpartyKey?: string | null;
+	counterpartyIban?: string | null;
 	accountId: string;
 	amount: string;
 	counterpartyName: string | null;
@@ -223,6 +224,8 @@ function applyInsightFilters(
 	const uncategorized = filter.uncategorized as boolean | undefined;
 	const counterpartyKeys = filter.counterpartyKeys as string[] | undefined;
 	const categorySlugsExact = filter.categorySlugsExact as string[] | undefined;
+	const counterpartyIbans = filter.counterpartyIbans as string[] | undefined;
+	const hasCounterpartyIban = filter.hasCounterpartyIban as boolean | undefined;
 	return items.filter((item) => {
 		if (
 			categorySlugsExact?.length &&
@@ -231,6 +234,12 @@ function applyInsightFilters(
 			return false;
 		}
 		if (counterpartyKeys?.length && !counterpartyKeys.includes(item.counterpartyKey ?? '')) {
+			return false;
+		}
+		if (counterpartyIbans?.length && !counterpartyIbans.includes(item.counterpartyIban ?? '')) {
+			return false;
+		}
+		if (isSet(hasCounterpartyIban) && Boolean(item.counterpartyIban) !== hasCounterpartyIban) {
 			return false;
 		}
 		if (accountIds?.length && !accountIds.includes(item.accountId)) return false;
@@ -330,16 +339,22 @@ function mockReviewQueue(variables: Record<string, unknown> | undefined): unknow
  * `HeldMerchantGroups`: derived from the held fixture the way the backend
  * aggregates it, so the groups always agree with `ReviewHeldTransactions`
  * and the bulk-edit mock: signed net total, most common name/proposal
- * (ties alphabetical), distinct reasons, the keyless rows as one bucket,
- * largest group first.
+ * (ties alphabetical), distinct reasons, largest group first. Grouped by
+ * (key, IBAN) like the backend: the keyless rows form one bucket per IBAN,
+ * and `ibanDisambiguated` is set when a key has more than one group.
  */
 function mockHeldGroups(variables: Record<string, unknown> | undefined): unknown {
 	const page = variables?.page as { limit?: number; offset?: number } | undefined;
 	const rows = mockReviewItems();
-	const byKey = new Map<string | null, MockTransaction[]>();
+	const byGroup = new Map<string, MockTransaction[]>();
 	for (const row of rows) {
-		const key = row.counterpartyKey || null;
-		byKey.set(key, [...(byKey.get(key) ?? []), row]);
+		const id = JSON.stringify([row.counterpartyKey || null, row.counterpartyIban || null]);
+		byGroup.set(id, [...(byGroup.get(id) ?? []), row]);
+	}
+	const groupsPerKey = new Map<string | null, number>();
+	for (const id of byGroup.keys()) {
+		const key = (JSON.parse(id) as [string | null, string | null])[0];
+		groupsPerKey.set(key, (groupsPerKey.get(key) ?? 0) + 1);
 	}
 	const mode = (values: (string | null | undefined)[]): { value: string | null; count: number } => {
 		const counts = new Map<string, number>();
@@ -347,16 +362,19 @@ function mockHeldGroups(variables: Record<string, unknown> | undefined): unknown
 		const best = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0];
 		return best ? { value: best[0], count: best[1] } : { value: null, count: 0 };
 	};
-	const groups = [...byKey.entries()].map(([key, items]) => {
+	const groups = [...byGroup.entries()].map(([id, items]) => {
+		const [key, iban] = JSON.parse(id) as [string | null, string | null];
 		const proposed = mode(items.map((i) => i.label?.proposedCategoryPath));
 		const total = items.reduce((sum, i) => sum + Math.round(Number(i.amount) * 100), 0);
 		const reasons = [...new Set(items.map((i) => i.label?.reviewReason).filter(Boolean))];
+		const name =
+			key === null ? 'No merchant key' : (mode(items.map((i) => i.counterpartyName)).value ?? key);
 		return {
 			counterpartyKey: key,
-			displayName:
-				key === null
-					? 'No merchant key'
-					: (mode(items.map((i) => i.counterpartyName)).value ?? key),
+			counterpartyIban: iban,
+			ibanDisambiguated: (groupsPerKey.get(key) ?? 0) > 1,
+			displayName: name,
+			rawName: name,
 			heldCount: items.length,
 			totalAmount: (total / 100).toFixed(2),
 			currency: 'EUR',

@@ -226,6 +226,15 @@ by agreeing where it goes.
   selecting exactly the rows the breakdown counted. `/transactions` names the
   narrowing in words, and clearing drops all three params.
 
+  `heldMerchantGroups` groups by (key, IBAN) too, with `counterpartyIban` and
+  `ibanDisambiguated` (a window function before paging, so a sibling on another
+  page still counts - stronger than the breakdown's row-local flag). A group's
+  bulk-assign filter must carry the IBAN (`groupFilter`), else it would write
+  onto the sibling. Keyless groups stay unassignable even with an IBAN: no
+  filter says "key is empty", and `counterpartyIbans` alone also selects keyed
+  rows. Deep link `?expand=key` on a split key opens every sibling; the card's
+  own link adds `expandIban`.
+
   **Privacy consequence, decided deliberately:** the drill-down carries the
   **raw** IBAN in the `/transactions` query string, because a masked value
   cannot be filtered on. It therefore reaches browser history and any request

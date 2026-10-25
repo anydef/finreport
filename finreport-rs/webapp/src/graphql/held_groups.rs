@@ -1,19 +1,45 @@
 //! `heldMerchantGroups`: the review queue grouped by merchant.
 //!
-//! One row per `transaction.counterparty_key` among the caller's held
-//! (`transaction_label.status = 'needs_review'`) transactions, computed by a
+//! One row per (`transaction.counterparty_key`, `counterparty_iban`) pair among
+//! the caller's held (`transaction_label.status = 'needs_review'`)
+//! transactions, computed by a
 //! single aggregate statement (`GROUP BY` + `mode()` + one join for the
 //! proposal votes), so there is no per-group follow-up query and the cost is
 //! one scan of the held rows, not a load of every transaction.
 //!
+//! # Grouped by (key, IBAN), not key alone
+//!
+//! `counterparty_key` is name-derived, so a loan account carrying the user's
+//! own name shares a key with the user. Grouping on the pair splits them
+//! without re-keying anything (rules, exemptions and aliases still point at
+//! the key; this is read-path only). NULL and empty IBANs are the same "no
+//! IBAN" value. As in `counterpartyBreakdown`, the display alias is per key,
+//! so siblings show the same name; `ibanDisambiguated` says when the IBAN is
+//! what tells them apart.
+//!
+//! # The invariant: a group is exactly its filter
+//!
 //! The held predicate is the one `TransactionFilter.needsReview` applies
-//! (`build_condition`), so assigning a group through `setTransactionsCategory`
-//! with `{ needsReview: true, counterpartyKeys: [key] }` touches exactly the
-//! rows a group counted. An integration test asserts that equality.
+//! (`build_condition`). Assigning a group through `setTransactionsCategory`
+//! must touch exactly the rows the group counted, in three cases:
+//!
+//! * key, not `ibanDisambiguated`: `{ needsReview: true, counterpartyKeys: [key] }`;
+//! * key + IBAN: the same plus `counterpartyIbans: [iban]`;
+//! * key, no IBAN, `ibanDisambiguated`: the same plus `hasCounterpartyIban: false`.
+//!
+//! Leaving the IBAN off the filter of a split group would write the user's
+//! category onto the sibling's transactions, so the frontend's `groupFilter`
+//! carries it. An integration test asserts the equality for a split key.
+//!
+//! The keyless bucket (below) has no filter: nothing expresses "key is NULL or
+//! empty" (`hasCounterparty` is about the *name*), and `counterpartyIbans`
+//! alone would also select keyed rows that share the IBAN. Its groups are
+//! therefore not assignable, even when they carry an IBAN.
 //!
 //! Transactions without a usable key (NULL or empty) cannot be grouped. They
 //! are collected into ONE bucket whose `counterpartyKey` is `null`, rather
-//! than dropped, so the group counts always sum to the held total.
+//! than dropped, so the group counts always sum to the held total. Grouping is
+//! on the pair, so that bucket is one group per distinct IBAN.
 
 use async_graphql::SimpleObject;
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, QueryResult, Statement};
@@ -29,11 +55,28 @@ pub const UNGROUPED_NAME: &str = "No merchant key";
 
 #[derive(SimpleObject, Debug)]
 pub struct HeldMerchantGroup {
-    /// The normalised merchant key (`transaction.counterparty_key`), the value
-    /// to pass in `TransactionFilter.counterpartyKeys`. `null` for the single
-    /// bucket of held transactions that have no key; no filter can address
-    /// that bucket, only individual transaction ids can.
+    /// The normalised merchant key (`transaction.counterparty_key`). It is
+    /// **not** sufficient on its own to address a group: several groups can
+    /// share one key and differ only by `counterpartyIban`, so a filter for
+    /// this group is `counterpartyKeys` plus the IBAN (see the module doc).
+    /// `null` for held transactions that have no key; no filter can address
+    /// those, only individual transaction ids can.
     pub counterparty_key: Option<String>,
+    /// The counterparty IBAN shared by the group's rows, **raw and
+    /// unmasked** (as `Transaction.counterpartyIban` serves it; masking is a
+    /// display concern). `null` when the group's rows have none. An IBAN is
+    /// sensitive: never write it to a log line.
+    pub counterparty_iban: Option<String>,
+    /// `true` when this group's `counterpartyKey` has more than one group
+    /// (distinct IBAN, or none) among the caller's held transactions, i.e.
+    /// the key alone would merge different accounts and the IBAN is what
+    /// tells them apart. Computed in SQL over **all** groups before paging,
+    /// so a sibling on another page still counts; this is deliberately
+    /// stronger than `counterpartyBreakdown`'s row-local version, which only
+    /// sees the rows it returns. It is also the flag that tells a client
+    /// whether the group's filter needs the IBAN (or `hasCounterpartyIban:
+    /// false`) beside the key.
+    pub iban_disambiguated: bool,
     /// What the caller sees for the merchant: their alias for
     /// `counterpartyKey` when they set one, else `rawName`. The ungrouped
     /// bucket is named "No merchant key" and is never aliased.
@@ -76,36 +119,43 @@ pub struct HeldMerchantGroups {
 
 const GROUPS_SQL: &str = "\
 WITH held AS ( \
-    SELECT NULLIF(t.counterparty_key, '') AS k, t.counterparty_name AS name, t.amount, \
+    SELECT NULLIF(t.counterparty_key, '') AS k, NULLIF(t.counterparty_iban, '') AS iban, \
+           t.counterparty_name AS name, t.amount, \
            t.currency, tl.review_reason AS reason, tl.proposed_category_path AS p \
     FROM transaction t \
     JOIN transaction_label tl ON tl.transaction_id = t.id \
     WHERE tl.status = 'needs_review' AND t.account_id = ANY($1) \
 ), g AS ( \
-    SELECT k, \
+    SELECT k, iban, \
+           count(*) OVER (PARTITION BY k) > 1 AS disambiguated, \
            mode() WITHIN GROUP (ORDER BY name) AS name, \
            mode() WITHIN GROUP (ORDER BY currency) AS currency, \
            count(*) AS held, \
            sum(amount) AS total, \
            array_remove(array_agg(DISTINCT reason), NULL) AS reasons, \
            mode() WITHIN GROUP (ORDER BY p) AS p \
-    FROM held GROUP BY k \
+    FROM held GROUP BY k, iban \
 ), votes AS ( \
-    SELECT k, p, count(*) AS votes FROM held WHERE p IS NOT NULL GROUP BY k, p \
+    SELECT k, iban, p, count(*) AS votes FROM held WHERE p IS NOT NULL GROUP BY k, iban, p \
 ) \
-SELECT g.k AS key, COALESCE(g.name, g.k, '') AS name, g.currency, g.held, g.total, \
+SELECT g.k AS key, g.iban AS iban, g.disambiguated, COALESCE(g.name, g.k, '') AS name, g.currency, g.held, g.total, \
        g.reasons, g.p AS proposed, COALESCE(v.votes, 0) AS votes \
-FROM g LEFT JOIN votes v ON v.k IS NOT DISTINCT FROM g.k AND v.p = g.p \
-ORDER BY g.held DESC, COALESCE(g.name, g.k, '') ASC, g.k ASC NULLS LAST \
+FROM g LEFT JOIN votes v ON v.k IS NOT DISTINCT FROM g.k AND v.iban IS NOT DISTINCT FROM g.iban AND v.p = g.p \
+ORDER BY g.held DESC, COALESCE(g.name, g.k, '') ASC, g.k ASC NULLS LAST, g.iban ASC NULLS LAST \
 LIMIT $2 OFFSET $3";
 
+// `groups` counts the rows of a `SELECT DISTINCT` over the pair, not
+// `count(DISTINCT (k, iban))`: DISTINCT treats NULLs as equal, so the no-key
+// and no-IBAN cases count once each, exactly as the GROUP BY above groups them.
 const TOTALS_SQL: &str = "\
-SELECT count(*) AS held, \
-       count(DISTINCT NULLIF(t.counterparty_key, '')) \
-         + CASE WHEN bool_or(NULLIF(t.counterparty_key, '') IS NULL) THEN 1 ELSE 0 END AS groups \
-FROM transaction t \
-JOIN transaction_label tl ON tl.transaction_id = t.id \
-WHERE tl.status = 'needs_review' AND t.account_id = ANY($1)";
+WITH held AS ( \
+    SELECT NULLIF(t.counterparty_key, '') AS k, NULLIF(t.counterparty_iban, '') AS iban \
+    FROM transaction t \
+    JOIN transaction_label tl ON tl.transaction_id = t.id \
+    WHERE tl.status = 'needs_review' AND t.account_id = ANY($1) \
+) \
+SELECT (SELECT count(*) FROM held) AS held, \
+       (SELECT count(*) FROM (SELECT DISTINCT k, iban FROM held) d) AS groups";
 
 fn review_reasons(raw: &[String]) -> Vec<ReviewReason> {
     let mut out = Vec::new();
@@ -134,6 +184,8 @@ fn group_from_row(row: &QueryResult, aliases: &AliasBook) -> Result<HeldMerchant
             .unwrap_or_else(|| raw_name.clone()),
         raw_name,
         counterparty_key: key,
+        counterparty_iban: row.try_get("", "iban")?,
+        iban_disambiguated: row.try_get("", "disambiguated")?,
         held_count: row.try_get::<i64>("", "held")? as i32,
         total_amount: GqlDecimal(row.try_get::<rust_decimal::Decimal>("", "total")?),
         currency: row.try_get("", "currency")?,

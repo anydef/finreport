@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+	expandedIban,
 	expandedKey,
+	groupId,
+	isExpanded,
 	groupFilter,
 	isAssignable,
 	needsCreating,
@@ -37,9 +40,66 @@ describe('group actions', () => {
 			counterpartyKeys: ['rewe']
 		});
 	});
-	it('refuses to build a filter for the keyless bucket', () => {
+	it('leaves the IBAN off a key that is not split, even when the group has one', () => {
+		expect(
+			groupFilter({ counterpartyKey: 'rewe', counterpartyIban: 'DE00 1', ibanDisambiguated: false })
+		).toEqual({ needsReview: true, counterpartyKeys: ['rewe'] });
+	});
+	it('adds the IBAN for a split key so a sibling group is not selected', () => {
+		expect(
+			groupFilter({ counterpartyKey: 'loan', counterpartyIban: 'DE00 1', ibanDisambiguated: true })
+		).toEqual({ needsReview: true, counterpartyKeys: ['loan'], counterpartyIbans: ['DE00 1'] });
+	});
+	it('uses hasCounterpartyIban=false, never a sentinel IBAN, for the split key without one', () => {
+		expect(
+			groupFilter({ counterpartyKey: 'loan', counterpartyIban: null, ibanDisambiguated: true })
+		).toEqual({ needsReview: true, counterpartyKeys: ['loan'], hasCounterpartyIban: false });
+	});
+	it('refuses to build a filter for a keyless group, with or without an IBAN', () => {
 		expect(isAssignable({ counterpartyKey: null })).toBe(false);
 		expect(() => groupFilter({ counterpartyKey: null })).toThrow();
+		expect(() =>
+			groupFilter({ counterpartyKey: null, counterpartyIban: 'DE00 1', ibanDisambiguated: true })
+		).toThrow();
+	});
+	it('stays unassignable for a keyless group carrying an IBAN: an IBAN-only filter would also hit keyed rows', () => {
+		expect(isAssignable({ counterpartyKey: null, counterpartyIban: 'DE00 1' } as never)).toBe(
+			false
+		);
+		expect(isAssignable({ counterpartyKey: 'loan' })).toBe(true);
+	});
+});
+
+describe('split groups in the URL', () => {
+	it('names one group of a split key with expandIban, and the no-IBAN one with an empty value', () => {
+		expect(reviewHref('groups', 'loan', 'DE00 1')).toBe('?expand=loan&expandIban=DE00+1');
+		expect(reviewHref('groups', 'loan', null)).toBe('?expand=loan&expandIban=');
+		expect(reviewHref('groups', 'loan')).toBe('?expand=loan');
+		expect(reviewHref('groups', null, 'DE00 1')).toBe('?');
+	});
+	it('reads expandIban back as absent / none / a value', () => {
+		expect(expandedIban(new URLSearchParams('expand=loan'))).toBeUndefined();
+		expect(expandedIban(new URLSearchParams('expand=loan&expandIban='))).toBeNull();
+		expect(expandedIban(new URLSearchParams('expand=loan&expandIban=DE00+1'))).toBe('DE00 1');
+	});
+	it('opens only the named group of a split key', () => {
+		const a = { counterpartyKey: 'loan', counterpartyIban: 'DE00 1' };
+		const none = { counterpartyKey: 'loan', counterpartyIban: null };
+		expect(isExpanded(a, 'loan', 'DE00 1')).toBe(true);
+		expect(isExpanded(none, 'loan', 'DE00 1')).toBe(false);
+		expect(isExpanded(none, 'loan', null)).toBe(true);
+		expect(isExpanded(a, 'loan', undefined)).toBe(true);
+		expect(isExpanded(a, 'other', undefined)).toBe(false);
+		expect(isExpanded({ counterpartyKey: null }, null, undefined)).toBe(false);
+	});
+	it('gives sibling groups distinct list keys', () => {
+		const ids = [
+			groupId({ counterpartyKey: 'loan', counterpartyIban: 'DE00 1' }),
+			groupId({ counterpartyKey: 'loan', counterpartyIban: null }),
+			groupId({ counterpartyKey: null, counterpartyIban: null }),
+			groupId({ counterpartyKey: null, counterpartyIban: 'DE00 1' })
+		];
+		expect(new Set(ids).size).toBe(4);
 	});
 });
 

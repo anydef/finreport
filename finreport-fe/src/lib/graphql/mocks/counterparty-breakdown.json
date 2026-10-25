@@ -74,6 +74,14 @@
           "transactionCount": 4,
           "counterpartyIban": null,
           "ibanDisambiguated": false
+        },
+        {
+          "counterpartyKey": null,
+          "displayName": "No merchant key",
+          "amount": "-18.90",
+          "transactionCount": 2,
+          "counterpartyIban": "DE00 0000 0000 0000 0004 44",
+          "ibanDisambiguated": true
         }
       ],
       "other": {
