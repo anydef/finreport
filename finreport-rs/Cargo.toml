@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["webapp", "comdirect-rs", "utils", "categorizer", "migration", "entity", "amazon-orders"]
+members = ["webapp", "comdirect-rs", "utils", "categorizer", "migration", "entity", "amazon-orders", "c24-csv"]
 
 # Debug symbols were ~90% of the shared CARGO_TARGET_DIR, which reached 58 GB in
 # a single day of parallel work and filled the disk twice. Panics and test
