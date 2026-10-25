@@ -215,9 +215,29 @@ by agreeing where it goes.
   `TransactionFilter` gained `counterpartyIbans` and `hasCounterpartyIban`
   (both SQL paths), and `counterpartyBreakdown` now groups by (key, IBAN) with
   `CounterpartyBreakdownRow.counterpartyIban` and `.ibanDisambiguated`
-  (computed over the returned rows). Nothing is re-keyed. The UI half is still
-  open: show the IBAN (masked) when `ibanDisambiguated`, drill down via the
-  new filter fields, and cover `heldMerchantGroups`. Option 2 is untouched.
+  (computed over the returned rows). Nothing is re-keyed.
+
+  The UI half is done too: the Counterparty tab shows the IBAN masked to its
+  last 4 under the name, but **only** when `ibanDisambiguated` - a lone row
+  under its key shows nothing, since the field answers "which of these two is
+  which" and is clutter otherwise. A row drills down on a key *or* an IBAN, so
+  a "No merchant key" row carrying an IBAN is now clickable, and the three
+  cases (key only / key + IBAN / key + no IBAN) each produce a filter
+  selecting exactly the rows the breakdown counted. `/transactions` names the
+  narrowing in words, and clearing drops all three params.
+
+  **Privacy consequence, decided deliberately:** the drill-down carries the
+  **raw** IBAN in the `/transactions` query string, because a masked value
+  cannot be filtered on. It therefore reaches browser history and any request
+  log of the deployed adapter-node frontend. Nothing in our own code logs it,
+  and the SDL already served full IBANs on `Transaction.counterpartyIban`, so
+  the data is not newly exposed - only newly placed in a URL. Do not "fix"
+  this by masking the param; that silently breaks the filter. The alternative,
+  if the user objects, is dropping the drill-down for disambiguated rows.
+
+  **Still open:** `heldMerchantGroups` groups by `counterparty_key` alone, so
+  the held-merchant surface still merges a loan account with its namesake.
+  Option 2 (an optional `counterparty_iban` rule condition) is untouched.
 
 - **Display nicknames for merchants and for own accounts** — S–M, needs a
   decision on scope first. The user: "I want to be able to give some merchants
