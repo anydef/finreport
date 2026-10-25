@@ -333,6 +333,76 @@ choice is route 1 (CSV, manual, no new trust) or route 2 (aggregator,
 automatic, new third party) - and route 2 is the user's call because of what
 it implies about credentials, which is precisely item 5's open question.
 
+### Route 2 in detail: piggybacking on someone else's XS2A licence (2026-10-25)
+
+The user asked whether services let you ride their XS2A integrations. They
+do - that is what an AISP-as-a-service sells: their BaFin registration and
+eIDAS QWAC certificate, so the caller needs neither. **But the free option
+everyone used has just gone away, so the obvious answer is now wrong.**
+
+- **GoCardless Bank Account Data (formerly Nordigen)** was *the* free
+  personal-use tier and the one self-hosted finance tools standardised on.
+  It is **closed to new signups and being wound down.** Firefly III's own
+  importer documentation still describes the free tier *and* states that
+  GoCardless is sunsetting it and registration is closed - so that page reads
+  as available when it is not. **Do not plan on this.**
+- **Enable Banking** is the current self-serve route. Its free
+  **"Restricted Production"** tier returns real production data but **only
+  for accounts you link yourself**, which is exactly the household case here.
+  Firefly III has an open issue (#10753) to add it as a GoCardless
+  alternative, so the self-hosted ecosystem is already moving this way -
+  useful precedent, since Firefly III is the closest analogue to finreport.
+- **Everyone else is contract-gated**, not self-serve: finAPI (Schufa),
+  BANKSapi (what Copreo uses for C24), Tink (Visa), Salt Edge, Yapily,
+  Klarna Kosma. Each needs KYB and a signed contract - disproportionate for
+  one household.
+
+**Unverified, and each one could sink it. Check before committing:**
+
+1. **Does Enable Banking cover C24 Bank and Scalable Capital Bank?** Their
+   ASPSP list did not surface in search; their changelogs name German
+   integrations (DKB, Sparkasse, Vivid, Aachener Bank) but neither of ours.
+   **Check the ASPSP list / control panel directly.** If C24 and Scalable are
+   not covered, this whole route is moot for us.
+2. **Does Restricted Production really need no eIDAS certificate?** Sources
+   disagree - one comparison marks Enable Banking as requiring one, another
+   says the restricted tier works without a contract. Note the comparison
+   articles are written by a competitor, so their framing is not neutral.
+3. **Is a self-hosted instance permitted under the restricted terms?** One
+   public spike judged a hosted multi-user instance probably not allowed.
+   finreport is effectively single-user (the user said so on 2026-10-25),
+   which helps, but the terms need reading rather than assuming.
+
+**The operational consequence nobody mentions up front:** PSD2 consent
+expires - typically 90 days - and renewal needs the human to re-authenticate
+with SCA. So an aggregator does **not** give unattended sync forever the way
+Comdirect's own API does; it gives sync until the consent lapses, then it
+stops until someone taps a phone. That is a recurring chore, and it is
+exactly the "TAN status" surface item 5 was meant to build. **Item 5 and this
+route are the same piece of work**, not two.
+
+**Next concrete steps, cheapest first:**
+
+1. Ask Scalable support for a FinTS server address for BLZ 70010588 (already
+   recorded above). A yes removes the need for any of this for Scalable.
+2. Search Enable Banking's ASPSP list for "C24" and "Scalable". If either is
+   missing, stop here and use CSV for that one.
+3. Only if both look good: read the Restricted Production terms for
+   single-user self-hosted use, then bring it back as an item 5 decision,
+   since it is a credential-and-consent question.
+
+**Sources:** [Firefly III's GoCardless
+docs](https://docs.firefly-iii.org/how-to/data-importer/import/gocardless/)
+(which state the sunset), [the Firefly III issue asking for Enable
+Banking](https://github.com/firefly-iii/firefly-iii/issues/10753), [a public
+spike evaluating Enable Banking's free tier for own
+accounts](https://github.com/hugiFreezy0815/TrackMyWealth/issues/263),
+[Enable Banking's knowledge base](https://enablebanking.com/knowledge-base),
+[its country specifics](https://enablebanking.com/docs/markets/) and
+[sandbox page](https://enablebanking.com/docs/api/sandbox/), and
+[openbankingtracker's free-API
+guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
+
 ### Design questions that still stand, whichever route wins
 
 1. **A second payload shape in the event log.** CLAUDE.md's contract is that
