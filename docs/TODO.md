@@ -446,6 +446,94 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
 
 ## Backlog
 
+- **User-created cash accounts, with manually entered transactions** - L,
+  high value, requested 2026-10-25. The user: *"I need an option to create an
+  ephemeral Cash account(s), so that I can track my spendings in cash. I
+  should be able to add/remove update transactions on these \"accounts\"
+  anually. I should be able to link \"transfer\" transactions from my normal
+  account to my cash account."*
+
+  **Ambiguity to settle before starting:** "anually" is almost certainly
+  **manually** (it follows "add/remove update transactions", and the whole
+  request is about hand-entered cash spending). If it really means
+  *annually* - a yearly bulk edit or cleanup - the UI is a different shape.
+  Ask.
+
+  **Why this is architecturally new.** Every `transaction` row today is
+  projected from a bank-sourced event; Kafka is the source of truth and the
+  read model is derived. A cash account is **user-authored fact**, not
+  bank-sourced fact. That is a new write path, not a new parser.
+
+  The repo already has the right pattern for user-authored data, used three
+  times: a user decision becomes a record on its own compacted topic
+  (`prevent_destroy`, mirrored in `terraform/kafka/main.tf` **and**
+  `docker-compose.local.yml` by hand) with a projection module - see
+  `display_alias`, `learning_exemption` and especially `transaction_link`
+  (`projection::links`). Follow that, not a direct Postgres write.
+
+  The read model is readier than it looks: `account.source` / `.origin` and
+  `transaction.source` / `.external_id` / `.origin` already exist, so
+  `source = "cash"`, `origin = "user"` fits without a migration, and ids come
+  from `transaction_uuid(source, external_id)` as usual. `account.iban` and
+  `.raw_payload` are nullable, which a cash account needs.
+
+  **It hits the same wire-contract decision as the C24 import.** CLAUDE.md's
+  contract is that `finreport.transaction` payloads are *raw bank JSON,
+  byte-for-byte*, with one documented exception. A hand-entered cash
+  transaction is emphatically not that. **That decision now has two
+  independent callers (C24 CSV and cash accounts), so it is no longer
+  speculative - it should be made once, properly**, either as a per-source
+  schema in the envelope (headers already carry `schema_version` and
+  `origin`) or as separate topics. Note `RecordMeta` currently *requires*
+  `comdirect_account_key` and `comdirect_account_name`, so the header set is
+  Comdirect-shaped and has to be generalised either way.
+
+  **Linking the funding transfer.** Two existing mechanisms, and the right
+  answer is probably the first:
+  1. **Let the transfer detector do it.** `detect::transfer` pairs opposite
+     amounts across two of the user's accounts within
+     `APP_transfer_match_days`. If the user enters the cash account's inbound
+     leg for an ATM withdrawal, the detector would pair it with the bank's
+     outbound leg automatically, with no new concept at all. Caveat: the
+     detector ranks IBAN-confirmed matches first and a cash row has no IBAN,
+     so it would match on amount+date only - fine for this, but it means an
+     ambiguous pairing is possible and the greedy 1:1 walk decides.
+  2. **An explicit user-declared link.** `transaction_link` exists but its
+     `kind` is only `REIMBURSEMENT`, and CLAUDE.md is explicit that the link
+     is deliberately **not** the transfer flag. Adding a transfer kind there
+     would blur a boundary that was drawn on purpose. Prefer 1.
+
+  **Hard dependency: the transfer-scope fix.** A cash account's income is
+  *entirely* inbound transfers. Under today's rule every one of them is
+  dropped from the cashflow aggregations, so a cash account would show a
+  **100% deficit** - the same bug as the phantom-deficit entry, in its most
+  extreme form. **Do not start this until that fix has landed**, or the
+  feature will look broken on arrival.
+
+  **"Ephemeral" needs a definition.** Compacted topics with
+  `prevent_destroy` are the opposite of ephemeral; deletion is a tombstone,
+  as with purchase orders. So "ephemeral" presumably means the user can
+  delete a cash account and its transactions at will. That needs a rule for
+  the case where a cash transaction is **paired as a transfer** with a real
+  bank transaction: deleting it must not leave the bank leg flagged as a
+  transfer pointing at a row that no longer exists. Decide this deliberately.
+
+  **Also to decide:** the cash account's balance. There is no bank to report
+  one, so it is either absent or a running sum of its own transactions
+  (`account_balance` is projected from bank events today).
+
+  **Not admin-gated**, per the boundary settled on 2026-10-25: a cash account
+  is the caller's own data, like a goal or a display alias, so it stays open
+  to any authenticated user.
+
+  **Rough slicing** (each independently mergeable): (1) the envelope /
+  wire-contract generalisation, shared with C24; (2) topic + record + the
+  projection for cash accounts; (3) mutations for the account lifecycle;
+  (4) mutations for its transactions; (5) the UI. Labelling comes free -
+  manual rows flow through the labeler like any other, and the user can set a
+  category directly via the existing user-override precedence.
+
+
 - **Transfers between the user's own accounts are invisible, and make the
   receiving account look like it is bleeding money** - M backend + S
   frontend, **high value, and this is a correctness bug, not a missing
