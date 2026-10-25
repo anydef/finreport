@@ -17,7 +17,7 @@ use entity::entities::app_user;
 
 use super::error::AuthError;
 use super::password::{hash_password_async, verify_password_async};
-use super::user::{create_user, link_all_accounts};
+use super::user::{create_user, link_all_accounts, set_admin};
 
 /// Entry point called from `webapp::main` right after the DB connection is
 /// established. A `None` password is a deliberate no-op — local dev
@@ -82,17 +82,9 @@ pub async fn bootstrap_admin(
 /// Sets `is_admin = true` on a freshly created row. Split out of
 /// `create_user` (shared with `user-admin create-user`, which must never
 /// create an admin implicitly) rather than threading an `is_admin` flag
-/// through it.
+/// through it. Delegates to `user::set_admin`, which `user-admin` also uses.
 async fn promote_to_admin(db: &DatabaseConnection, username: &str) -> Result<(), AuthError> {
-    let user = app_user::Entity::find()
-        .filter(app_user::Column::Username.eq(username))
-        .one(db)
-        .await?
-        .ok_or_else(|| AuthError::UnknownUser(username.to_string()))?;
-    let mut active: app_user::ActiveModel = user.into();
-    active.is_admin = Set(true);
-    active.update(db).await?;
-    Ok(())
+    set_admin(db, username, true).await.map(|_| ())
 }
 
 #[cfg(all(test, feature = "integration"))]

@@ -212,6 +212,22 @@ Until 1 is settled, the users page stays mock-only and inert. The
 `user-admin` CLI remains the only way to change users, which is itself the
 safe answer, since it needs shell access to the host.
 
+**Follow-up (2026-10-25): enforcement locked out non-admin users.** `create_user`
+always inserts `is_admin = false`, and local dev never runs `auth::bootstrap`,
+so the `dev` user from `just seed-user` was closed out of Rules and Categories.
+Fixed: `just seed-user` now creates `dev` with `user-admin create-user --admin`,
+and `user-admin promote|demote --username <u>` (idempotent, no last-admin guard
+- `demote` may leave zero admins, deliberately, since decision 3 above is
+deferred) repairs an existing install. `list-users` marks admins `[admin]`.
+
+**Deployment consequence - read before the next deploy.** In the deployed stack
+`auth::bootstrap` creates and promotes only the `APP_admin_username` user
+(default `admin`). **Any other user on a live instance is non-admin and is now
+locked out of Rules and Categories** (`rules` fails, so the Rules page cannot
+load). Fix from a shell with DB access:
+`user-admin promote --username <u>`. Run `user-admin list-users` first to see
+who is `[admin]`.
+
 ## Backlog
 
 Recorded feature requests, not yet prioritised. The estimate is effort, the

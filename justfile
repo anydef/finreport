@@ -164,11 +164,15 @@ seed-categories:
 # Create (or no-op onto) the `dev` user with a known password, so the seeded
 # stack has something to log in with. Password from $FINREPORT_PASSWORD,
 # defaulting to `dev` for local use only — never set that default outside
-# this recipe.
+# this recipe. Created with --admin: local dev never sets APP_admin_password,
+# so nothing else would promote it, and the server-side isAdmin gate would
+# close the Rules and Categories pages to the only local user. On an existing
+# non-admin `dev`, run `user-admin promote --username dev` (create-user
+# reports the username as taken).
 seed-user:
     cd finreport-rs && \
         {{local_env}} FINREPORT_PASSWORD="${FINREPORT_PASSWORD:-dev}" \
-        cargo run -p webapp --bin user-admin -- create-user --username dev --display-name "Local Dev"
+        cargo run -p webapp --bin user-admin -- create-user --username dev --display-name "Local Dev" --admin
 
 # Publish the WP0 fixture corpus (finreport-rs/webapp/fixtures) onto the
 # ingest topics, so `dev-projector` has something to build the read model
