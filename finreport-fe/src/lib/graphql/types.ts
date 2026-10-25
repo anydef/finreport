@@ -205,6 +205,10 @@ export interface TransactionFilter {
 	transactionIds?: UUID[] | null;
 	/** Normalised counterparty keys (`Transaction.counterpartyKey`), OR-ed. */
 	counterpartyKeys?: string[] | null;
+	/** Exact `counterpartyIban` values, OR-ed; empty = unconstrained. */
+	counterpartyIbans?: string[] | null;
+	/** `false` = only rows with no IBAN. */
+	hasCounterpartyIban?: boolean | null;
 	/** Whether the offsetting side of reimbursement links is counted. Omitted = `INCLUDE`. */
 	reimbursements?: ReimbursementFilter | null;
 }
@@ -776,6 +780,10 @@ export interface CounterpartyBreakdownRow {
 	/** Signed net: refunds cancel charges, income is positive. There is no share. */
 	amount: Decimal;
 	transactionCount: number;
+	/** Raw, unmasked; `null` when the group has none. */
+	counterpartyIban: string | null;
+	/** `true` only when this row's key appears under more than one IBAN among the rows. */
+	ibanDisambiguated: boolean;
 }
 
 export interface CounterpartyBreakdown {

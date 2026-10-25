@@ -2,8 +2,10 @@
 	/**
 	 * Dashboard "Counterparty" breakdown: a flat list of signed net amounts per
 	 * merchant. No share/percentage (rows mix income and spending) and no
-	 * hierarchy. A merchant row links to `/transactions` for that merchant; the
-	 * no-key bucket and the tail `Other` row are plain, non-clickable rows.
+	 * hierarchy. A merchant row (or a no-key row with an IBAN) links to `/transactions`
+	 * for exactly that row; a no-key row without an IBAN and the tail `Other` row
+	 * are plain, non-clickable rows. A masked IBAN shows only when it tells
+	 * sibling rows of one merchant apart.
 	 * All decisions live in `counterpartyView.ts`.
 	 */
 	import {
@@ -54,6 +56,9 @@
 								<span class="text-xs font-normal text-slate-400">(everything beyond the top)</span>
 							{/if}
 						</span>
+						{#if row.ibanMasked}
+							<span class="text-xs text-slate-400">{row.ibanMasked}</span>
+						{/if}
 						<span class="text-xs text-slate-400">{transactionCountLabel(row.transactionCount)}</span
 						>
 					</span>

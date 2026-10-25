@@ -760,12 +760,16 @@ query CounterpartyBreakdown($filter: TransactionFilter!, $limit: Int! = 20) {
 			displayName
 			amount
 			transactionCount
+			counterpartyIban
+			ibanDisambiguated
 		}
 		other {
 			counterpartyKey
 			displayName
 			amount
 			transactionCount
+			counterpartyIban
+			ibanDisambiguated
 		}
 		currency
 	}

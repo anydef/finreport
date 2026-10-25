@@ -17,7 +17,12 @@
 		writePanelFilters,
 		type PanelFilters
 	} from '$lib/transactionFilters';
-	import { COUNTERPARTY_KEYS_PARAM } from '$lib/counterpartyView';
+	import {
+		COUNTERPARTY_IBANS_PARAM,
+		COUNTERPARTY_KEYS_PARAM,
+		HAS_COUNTERPARTY_IBAN_PARAM,
+		narrowedToLabel
+	} from '$lib/counterpartyView';
 	import { writeSort } from '$lib/transactionSort';
 	import type { TransactionSort } from '$lib/graphql/types';
 	import type { PageData } from './$types';
@@ -61,6 +66,8 @@
 	function clearMerchant() {
 		const params = new URLSearchParams(page.url.searchParams);
 		params.delete(COUNTERPARTY_KEYS_PARAM);
+		params.delete(COUNTERPARTY_IBANS_PARAM);
+		params.delete(HAS_COUNTERPARTY_IBAN_PARAM);
 		params.delete('offset');
 		go(params);
 	}
@@ -69,11 +76,18 @@
 	function onClearAll() {
 		const params = writePanelFilters(clearedFilters(), page.url.searchParams);
 		params.delete(COUNTERPARTY_KEYS_PARAM);
+		params.delete(COUNTERPARTY_IBANS_PARAM);
+		params.delete(HAS_COUNTERPARTY_IBAN_PARAM);
 		params.delete('offset');
 		go(params);
 	}
 
-	const filtered = $derived(hasActiveFilters(data.panel) || data.counterpartyKeys.length > 0);
+	const merchantNarrowed = $derived(
+		data.counterpartyKeys.length > 0 ||
+			data.counterpartyIbans.length > 0 ||
+			data.hasCounterpartyIban !== undefined
+	);
+	const filtered = $derived(hasActiveFilters(data.panel) || merchantNarrowed);
 </script>
 
 <svelte:head>
@@ -104,9 +118,15 @@
 		{/snippet}
 	</TransactionFilters>
 
-	{#if data.counterpartyKeys.length}
+	{#if merchantNarrowed}
 		<div class="flex items-center justify-between gap-2 text-sm text-slate-600">
-			<p>Narrowed to merchant: {data.counterpartyKeys.join(', ')}</p>
+			<p>
+				Narrowed to merchant: {narrowedToLabel(
+					data.counterpartyKeys,
+					data.counterpartyIbans,
+					data.hasCounterpartyIban
+				)}
+			</p>
 			<Button variant="ghost" onclick={clearMerchant}>Clear merchant</Button>
 		</div>
 	{/if}
