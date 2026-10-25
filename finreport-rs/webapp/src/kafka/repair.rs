@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 use super::envelope::{
     CURRENT_SCHEMA_VERSION, HEADER_COMDIRECT_ACCOUNT_KEY, HEADER_COMDIRECT_ACCOUNT_NAME,
     HEADER_IMPORTED_AT, HEADER_SOURCE_ACCOUNT_ID, ORIGIN_SOURCE, RecordMeta, SOURCE_COMDIRECT,
+    SourceContext,
     TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION,
 };
 use super::producer::EventPublisher;
@@ -58,8 +59,10 @@ impl RepairedMeta {
             origin: ORIGIN_SOURCE,
             schema_version: CURRENT_SCHEMA_VERSION,
             imported_at: &self.imported_at,
-            comdirect_account_key: &self.comdirect_account_key,
-            comdirect_account_name: self.comdirect_account_name.as_deref(),
+            context: SourceContext::Comdirect {
+                account_key: &self.comdirect_account_key,
+                account_name: self.comdirect_account_name.as_deref(),
+            },
         }
     }
 

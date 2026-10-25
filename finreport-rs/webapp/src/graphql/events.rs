@@ -4,9 +4,14 @@
 //! Every mutation publishes to Kafka (awaiting the broker ack — a publish
 //! failure fails the mutation) and applies the identical upsert to its own
 //! projection table in the same request, both carrying the same `revision`.
-//! `envelope::RecordMeta` (§2.2) is comdirect-shaped (it requires a
-//! `comdirect_account_key`) and does not fit these generic topics, so this
-//! builds the §2.2 header set directly instead of going through it —
+//! This builds the §2.2 header set directly rather than going through
+//! `envelope::RecordMeta`, which used to be comdirect-shaped (it *required* a
+//! `comdirect_account_key`). That is no longer true — `RecordMeta` now takes a
+//! `SourceContext`, and `Unattributed` is exactly this case — so these topics
+//! could go through it and would then also carry the `source` and
+//! `imported_at` headers they currently lack. Deliberately not done here: it
+//! changes what is written to five live compacted topics, so it is its own
+//! slice with its own replay check (tracked in `docs/TODO.md`).
 //! `origin` is always [`ORIGIN_USER`] here, since every WP4-published record
 //! is human-edited, never labeler output.
 
