@@ -19,6 +19,8 @@ pub mod password;
 pub mod session;
 #[cfg(all(test, feature = "integration"))]
 mod session_integration_tests;
+#[cfg(all(test, feature = "integration"))]
+mod set_admin_integration_tests;
 pub mod token;
 pub mod user;
 
@@ -29,5 +31,5 @@ pub use session::{create_session, prune_expired_sessions, revoke_session, verify
 pub use token::{generate_token, hash_token};
 pub use user::{
     AuthenticatedUser, authenticate, create_user, link_account, link_all_accounts, list_accounts,
-    list_users, load_authenticated_user, set_password, unlink_account,
+    list_users, load_authenticated_user, set_admin, set_password, unlink_account,
 };

@@ -1,13 +1,20 @@
 //! Admin CLI for creating users and granting account access (§4).
 //!
 //! ```text
-//! user-admin create-user --username <u> [--display-name <n>]
+//! user-admin create-user --username <u> [--display-name <n>] [--admin]
+//! user-admin promote --username <u>
+//! user-admin demote --username <u>
 //! user-admin set-password --username <u>
 //! user-admin list-users
 //! user-admin list-accounts
 //! user-admin link --username <u> --account <source>:<external-id>|--all
 //! user-admin unlink --username <u> --account <source>:<external-id>
 //! ```
+//!
+//! `create-user` is unprivileged unless `--admin` is given. `promote`/`demote`
+//! set and clear `is_admin` on an existing user and are idempotent. There is
+//! deliberately **no last-admin guard**: `demote` may leave zero admins
+//! (admin-relationship rules are deferred; `promote` restores one).
 //!
 //! Passwords come from `$FINREPORT_PASSWORD` or, failing that, a line read
 //! from stdin — either way wrapped in a `SecretString` as soon as it is read,
@@ -27,7 +34,9 @@ use webapp::db::seaql::init_db;
 
 const USAGE: &str = "\
 usage:
-  user-admin create-user --username <u> [--display-name <n>]
+  user-admin create-user --username <u> [--display-name <n>] [--admin]
+  user-admin promote --username <u>
+  user-admin demote --username <u>   (may leave zero admins; no last-admin guard)
   user-admin set-password --username <u>
   user-admin list-users
   user-admin list-accounts
@@ -41,6 +50,11 @@ enum Command {
     CreateUser {
         username: String,
         display_name: Option<String>,
+        admin: bool,
+    },
+    SetAdmin {
+        username: String,
+        is_admin: bool,
     },
     SetPassword {
         username: String,
@@ -101,11 +115,29 @@ async fn run(command: Command) -> Result<(), Box<dyn Error>> {
         Command::CreateUser {
             username,
             display_name,
+            admin,
         } => {
             let password = read_password()?;
             let user =
                 auth::create_user(&db, &username, &password, display_name.as_deref()).await?;
-            println!("created user {} ({})", user.username, user.id);
+            if admin {
+                auth::set_admin(&db, &user.username, true).await?;
+            }
+            println!(
+                "created {} {} ({})",
+                if admin { "admin user" } else { "user" },
+                user.username,
+                user.id
+            );
+        }
+        Command::SetAdmin { username, is_admin } => {
+            let changed = auth::set_admin(&db, &username, is_admin).await?;
+            let state = if is_admin { "an admin" } else { "not an admin" };
+            if changed {
+                println!("{username} is now {state}");
+            } else {
+                println!("{username} is already {state}; nothing changed");
+            }
         }
         Command::SetPassword { username } => {
             let password = read_password()?;
@@ -119,10 +151,11 @@ async fn run(command: Command) -> Result<(), Box<dyn Error>> {
             }
             for user in users {
                 println!(
-                    "{}\t{}\t{}{}",
+                    "{}\t{}\t{}{}{}",
                     user.id,
                     user.username,
                     user.display_name.as_deref().unwrap_or(""),
+                    if user.is_admin { "\t[admin]" } else { "" },
                     if user.disabled { "\t[disabled]" } else { "" }
                 );
             }
@@ -191,12 +224,24 @@ fn parse_command(args: &[String]) -> Result<Command, String> {
 
     match name.as_str() {
         "create-user" => {
-            let flags = parse_flags(rest, &["--username", "--display-name"])?;
+            // `--admin` is a bare switch; strip it before the key/value parse.
+            let admin = rest.iter().any(|a| a == "--admin");
+            let rest: Vec<String> = rest.iter().filter(|a| *a != "--admin").cloned().collect();
+            let flags = parse_flags(&rest, &["--username", "--display-name"])?;
             let username = require(&flags, "--username")?;
             let display_name = flags.get("--display-name").cloned();
             Ok(Command::CreateUser {
                 username,
                 display_name,
+                admin,
+            })
+        }
+        name @ ("promote" | "demote") => {
+            let flags = parse_flags(rest, &["--username"])?;
+            let username = require(&flags, "--username")?;
+            Ok(Command::SetAdmin {
+                username,
+                is_admin: name == "promote",
             })
         }
         "set-password" => {
@@ -316,12 +361,49 @@ mod tests {
             Command::CreateUser {
                 username,
                 display_name,
+                admin,
             } => {
+                assert!(!admin, "create-user must default to unprivileged");
                 assert_eq!(username, "alice");
                 assert_eq!(display_name.as_deref(), Some("Alice A."));
             }
             _ => panic!("expected CreateUser"),
         }
+    }
+
+    #[test]
+    fn create_user_admin_switch_sets_flag() {
+        let args = ["create-user", "--admin", "--username", "dev"].map(String::from);
+        match parse_command(&args).unwrap() {
+            Command::CreateUser {
+                username, admin, ..
+            } => {
+                assert_eq!(username, "dev");
+                assert!(admin);
+            }
+            _ => panic!("expected CreateUser"),
+        }
+    }
+
+    #[test]
+    fn promote_and_demote_parse() {
+        for (name, expect) in [("promote", true), ("demote", false)] {
+            let args = [name, "--username", "alice"].map(String::from);
+            match parse_command(&args).unwrap() {
+                Command::SetAdmin { username, is_admin } => {
+                    assert_eq!(username, "alice");
+                    assert_eq!(is_admin, expect);
+                }
+                _ => panic!("expected SetAdmin"),
+            }
+        }
+    }
+
+    #[test]
+    fn promote_requires_username_and_rejects_admin_switch() {
+        assert!(parse_command(&["promote".to_string()]).is_err());
+        let args = ["link", "--username", "a", "--admin"].map(String::from);
+        assert!(parse_command(&args).is_err());
     }
 
     #[test]

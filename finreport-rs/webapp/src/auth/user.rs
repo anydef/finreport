@@ -124,6 +124,32 @@ pub async fn create_user(
     Ok(model.insert(db).await?)
 }
 
+/// Sets or clears `is_admin` on an existing user. Returns `true` if the flag
+/// changed, `false` if it already had that value (idempotent, not an error).
+///
+/// Deliberately no "last admin" guard: demoting may leave zero admins. That
+/// is a chosen behaviour (admin-relationship rules are deferred; this is a
+/// single-user tool), and `user-admin promote` is the way back.
+pub async fn set_admin(
+    db: &DatabaseConnection,
+    username: &str,
+    is_admin: bool,
+) -> Result<bool, AuthError> {
+    let username = normalize_username(username);
+    let user = app_user::Entity::find()
+        .filter(app_user::Column::Username.eq(&username))
+        .one(db)
+        .await?
+        .ok_or_else(|| AuthError::UnknownUser(username.clone()))?;
+    if user.is_admin == is_admin {
+        return Ok(false);
+    }
+    let mut active: app_user::ActiveModel = user.into();
+    active.is_admin = Set(is_admin);
+    active.update(db).await?;
+    Ok(true)
+}
+
 /// `user-admin set-password`: re-hashes and overwrites `password_hash` for an
 /// existing user.
 pub async fn set_password(
