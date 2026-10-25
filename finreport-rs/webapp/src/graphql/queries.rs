@@ -8,7 +8,7 @@ use sea_orm::{DatabaseConnection, EntityTrait};
 use std::sync::Arc;
 
 use crate::graphql::cashflow;
-use crate::graphql::current_user::{current_user, scoped_account_ids, AuthenticatedUser};
+use crate::graphql::current_user::{current_user, AdminOnly, scoped_account_ids, AuthenticatedUser};
 use crate::graphql::labels::LabelSplitCache;
 use crate::graphql::types::{
     Account, CashflowGraph, CashflowGraphInput, CashflowSummary, Category,
@@ -196,7 +196,9 @@ impl QueryRoot {
     }
 
     /// `rules` (§5): like `categories`, not tenant-scoped — rules apply to
-    /// every account the labeler sees.
+    /// every account the labeler sees. Administrators only (`FORBIDDEN`
+    /// otherwise): rules are shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn rules(&self, ctx: &Context<'_>, state: Option<RuleState>) -> GqlResult<Vec<Rule>> {
         current_user(ctx)?;
         let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
@@ -206,6 +208,8 @@ impl QueryRoot {
     /// `learningExemptions`: merchants the user has told the learner to
     /// leave alone. Like `rules`, the list itself is not tenant-scoped; the
     /// per-merchant name and count are computed over the caller's accounts.
+    /// Administrators only (`FORBIDDEN` otherwise): exemptions are shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn learning_exemptions(
         &self,
         ctx: &Context<'_>,
@@ -225,6 +229,9 @@ impl QueryRoot {
         crate::graphql::display_aliases::list(ctx).await
     }
 
+    /// Rules the learner approved on its own, newest first. Administrators
+    /// only (`FORBIDDEN` otherwise): rules are shared state.
+    #[graphql(guard = "AdminOnly")]
     async fn recently_auto_approved_rules(
         &self,
         ctx: &Context<'_>,

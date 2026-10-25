@@ -11,6 +11,7 @@
 	 * invisible. Exempting is confirmed in a dialog because it also removes
 	 * the merchant's learned rules.
 	 */
+	import { FORBIDDEN_MESSAGE, adminErrorMessage } from '$lib/adminAccess';
 	import { invalidateAll } from '$app/navigation';
 	import { page } from '$app/state';
 	import { highlightedRuleId } from '$lib/ruleLink';
@@ -107,7 +108,7 @@
 				.mutation(EXEMPT_FROM_LEARNING_MUTATION, { counterpartyKey: pendingExemption.key })
 				.toPromise();
 			if (result.error) {
-				exemptError = 'Could not exempt this merchant. Try again.';
+				exemptError = adminErrorMessage(result.error, 'Could not exempt this merchant. Try again.');
 				return;
 			}
 			statusMessage = `No more rules will be learned for "${pendingExemption.label}". Any rules learned for it were removed.`;
@@ -143,7 +144,9 @@
 	</div>
 
 	{#if data.error}
-		<p class="text-sm text-red-600">Failed to load rules.</p>
+		<p class="text-sm text-red-600" role="alert">
+			{data.forbidden ? FORBIDDEN_MESSAGE : 'Failed to load rules.'}
+		</p>
 	{/if}
 
 	{#if statusMessage}

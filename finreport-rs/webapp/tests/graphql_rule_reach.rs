@@ -20,7 +20,8 @@ struct Tenant {
 }
 
 async fn tenant(db: &DatabaseConnection, name: &str) -> Tenant {
-    let (user_id, username) = common::seed_user(db, name, "pw").await;
+    // `rules` is admin-only, and this suite reads it as each tenant.
+    let (user_id, username) = common::seed_admin(db, name, "pw").await;
     let account = common::seed_account(db, "EUR", name).await;
     common::link(db, user_id, account).await;
     Tenant {
@@ -143,7 +144,7 @@ async fn the_count_covers_only_the_callers_accounts() {
 async fn a_caller_with_no_accounts_sees_zero_reach() {
     let db = common::db().await;
     let schema = create_schema(db.clone(), common::dummy_settings());
-    let (user_id, username) = common::seed_user(&db, "reach-nobody", "pw").await;
+    let (user_id, username) = common::seed_admin(&db, "reach-nobody", "pw").await;
     let nobody = AuthenticatedUser { user_id, username, account_ids: vec![] };
     let (category, _) = common::seed_category(&db, "reach", "Reach", "EXPENSE").await;
     let everything = seed_rule(&db, category, "ACTIVE", serde_json::json!({})).await;

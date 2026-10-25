@@ -4,6 +4,7 @@
 	 * create/rename/archive. There's no `Modal.svelte` here (owned
 	 * elsewhere) — the create/rename dialog is a plain native `<dialog>`.
 	 */
+	import { FORBIDDEN_MESSAGE, isForbidden, type ErrorLike } from '$lib/adminAccess';
 	import { invalidateAll } from '$app/navigation';
 	import Button from '$lib/components/Button.svelte';
 	import Card from '$lib/components/Card.svelte';
@@ -71,8 +72,12 @@
 	/** A mutation's error must never read as success: the list then refetches
 	 * correctly without the category, which looks like "creating it did
 	 * nothing" rather than "the server rejected it". */
-	function errorOf(result: { error?: { message?: string } | null }): string | null {
-		return result.error ? (result.error.message ?? 'The server rejected the change.') : null;
+	function errorOf(result: { error?: ErrorLike | null }): string | null {
+		return result.error
+			? isForbidden(result.error)
+				? FORBIDDEN_MESSAGE
+				: (result.error.message ?? 'The server rejected the change.')
+			: null;
 	}
 
 	async function archive(node: CategoryNode) {
@@ -137,7 +142,9 @@
 	</div>
 
 	{#if data.error}
-		<p class="text-sm text-red-600">Failed to load categories.</p>
+		<p class="text-sm text-red-600" role="alert">
+			{data.forbidden ? FORBIDDEN_MESSAGE : 'Failed to load categories.'}
+		</p>
 	{/if}
 
 	{#if statusMessage}

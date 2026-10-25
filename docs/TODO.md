@@ -181,8 +181,21 @@ ordinary user promote themselves.
 
 **Decisions needed from the user before the backend slice:**
 
-1. Should `/admin/*` require `is_admin`, enforced **server-side** on every
-   resolver and mutation (a client-side route guard alone is decoration)?
+1. ~~Should `/admin/*` require `is_admin`, enforced server-side?~~ **Settled
+   by the user (2026-10-25) and implemented.** The boundary is *shared state
+   versus the caller's own data*. `AdminOnly` (`graphql/current_user.rs`, a
+   field guard reading `app_user.is_admin` from the database on every call)
+   gates: `createCategory`, `renameCategory`, `archiveCategory`, `createRule`,
+   `updateRule`, `setRuleState`, `reapplyRule`, `exemptFromLearning`,
+   `removeLearningExemption`, and the queries `rules`,
+   `recentlyAutoApprovedRules`, `learningExemptions`. Everything keyed to the
+   caller stays open (accounts, savings flags, display aliases, goals, Amazon
+   orders, every transaction edit). **`ensureCategory` is deliberately open**:
+   the review flow and `CategoryCreate` call it for every user, so a non-admin
+   can still bring a new category into the shared taxonomy (never rename or
+   archive one) - a known, accepted tension, commented at the resolver. The
+   frontend hides the Rules/Categories/Users tabs and redirects those routes
+   for non-admins; that is cosmetic, the server gate is the control.
 2. Is there a password policy, or is any non-empty password acceptable?
    `auth/password.rs::hash_password` accepts any `SecretString` today,
    including an empty one - Argon2 with defaults, which is fine, but there is

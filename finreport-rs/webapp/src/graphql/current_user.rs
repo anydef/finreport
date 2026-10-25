@@ -2,7 +2,10 @@
 //! resolver touching `account`/`account_balance`/`transaction` goes through —
 //! no unscoped query path (§4/§5).
 
-use async_graphql::{Context, ErrorExtensions, Result as GqlResult};
+use async_graphql::{Context, ErrorExtensions, Guard, Result as GqlResult};
+use entity::entities::app_user;
+use sea_orm::{DatabaseConnection, EntityTrait};
+use std::sync::Arc;
 use uuid::Uuid;
 
 pub use crate::auth::AuthenticatedUser;
@@ -21,6 +24,59 @@ pub fn current_user<'ctx>(ctx: &Context<'ctx>) -> GqlResult<&'ctx AuthenticatedU
         .ok()
         .and_then(|maybe| maybe.as_ref())
         .ok_or_else(unauthenticated_error)
+}
+
+/// `extensions.code = "FORBIDDEN"`: the caller is signed in but not allowed
+/// to do this. Distinct from `UNAUTHENTICATED` so the frontend can show
+/// "admin only" instead of bouncing the user to the login page.
+pub fn forbidden_error() -> async_graphql::Error {
+    async_graphql::Error::new("administrator access required")
+        .extend_with(|_, e| e.set("code", "FORBIDDEN"))
+}
+
+/// Resolves the request's user and requires `app_user.is_admin`.
+///
+/// Authentication is exactly [`current_user`] (so an unauthenticated caller
+/// still gets `UNAUTHENTICATED`, never `FORBIDDEN`). The flag is read from
+/// the database on every call, never from the request and never from a
+/// value cached on the session, so a demotion takes effect immediately. It
+/// fails closed: a missing row, or a database error, is a refusal.
+pub async fn require_admin<'ctx>(ctx: &Context<'ctx>) -> GqlResult<&'ctx AuthenticatedUser> {
+    let user = current_user(ctx)?;
+    let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+    let is_admin = match app_user::Entity::find_by_id(user.user_id).one(db).await {
+        Ok(row) => row.is_some_and(|row| row.is_admin && !row.disabled),
+        Err(e) => {
+            tracing::error!(error = %e, "could not read is_admin; refusing");
+            return Err(async_graphql::Error::new("could not verify permissions"));
+        }
+    };
+    if is_admin { Ok(user) } else { Err(forbidden_error()) }
+}
+
+/// Field guard for admin-only resolvers: put
+/// `#[graphql(guard = "AdminOnly")]` on the field. It runs before the
+/// resolver body, so the body cannot do any work (or start any write) for a
+/// non-admin, and the requirement is visible on the field itself.
+///
+/// **The boundary rule - extend it the same way.** Shared state is
+/// admin-only; the caller's own data is not.
+/// - Admin: anything that changes (or exposes the configuration of) state
+///   that every user's data is labelled by. Today that is the category
+///   taxonomy (`category` has no effective owner), rules and learning
+///   exemptions (neither has a `user_id`).
+/// - Not admin: anything keyed or scoped to the caller - their accounts,
+///   transactions, goals, savings flags, display aliases, Amazon orders.
+///
+/// A resolver that is both (say, a per-user view of a shared table) should
+/// stay open and scope by the caller's accounts instead. Document the
+/// requirement in the field's doc comment so it reaches the SDL.
+pub struct AdminOnly;
+
+impl Guard for AdminOnly {
+    async fn check(&self, ctx: &Context<'_>) -> GqlResult<()> {
+        require_admin(ctx).await.map(|_| ())
+    }
 }
 
 /// Pure, DB-free helper that scopes a request down to the account ids the
@@ -55,6 +111,20 @@ pub fn scoped_account_ids(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn code_of(e: &async_graphql::Error) -> String {
+        e.extensions
+            .as_ref()
+            .and_then(|x| x.get("code"))
+            .map(|c| c.to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn forbidden_and_unauthenticated_are_distinct_classified_errors() {
+        assert_eq!(code_of(&forbidden_error()), "\"FORBIDDEN\"");
+        assert_eq!(code_of(&unauthenticated_error()), "\"UNAUTHENTICATED\"");
+    }
 
     fn uuid(n: u8) -> Uuid {
         Uuid::from_bytes([n; 16])

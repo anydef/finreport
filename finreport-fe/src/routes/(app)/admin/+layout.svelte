@@ -1,7 +1,9 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { visibleAdminTabs } from '$lib/adminAccess';
+	import type { LayoutData } from './$types';
 
-	let { children }: { children: import('svelte').Snippet } = $props();
+	let { data, children }: { data: LayoutData; children: import('svelte').Snippet } = $props();
 
 	const subTabs = [
 		{ label: 'Rules', href: '/admin/rules' },
@@ -11,11 +13,14 @@
 		{ label: 'Users', href: '/admin/users' },
 		{ label: 'Amazon', href: '/admin/amazon' }
 	];
+
+	// Cosmetic: the server-side gate is the control (see `$lib/adminAccess`).
+	const shownTabs = $derived(visibleAdminTabs(subTabs, data.isAdmin));
 </script>
 
 <div class="flex flex-col gap-6">
 	<nav class="flex gap-1 border-b border-slate-200" aria-label="Admin navigation">
-		{#each subTabs as tab (tab.href)}
+		{#each shownTabs as tab (tab.href)}
 			<a
 				href={tab.href}
 				aria-current={page.url.pathname.startsWith(tab.href) ? 'page' : undefined}

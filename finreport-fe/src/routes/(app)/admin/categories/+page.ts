@@ -1,5 +1,6 @@
 import { createGraphqlClient } from '$lib/graphqlClient';
 import { CATEGORIES_QUERY } from '$lib/graphql/adminRulesQueries';
+import { isForbidden } from '$lib/adminAccess';
 import type { Category } from '$lib/graphql/types';
 import type { PageLoad } from './$types';
 
@@ -9,6 +10,7 @@ export const load: PageLoad = async ({ fetch }) => {
 
 	return {
 		error: Boolean(result.error),
+		forbidden: isForbidden(result.error),
 		categories: (result.data?.categories ?? []) as Category[]
 	};
 };
