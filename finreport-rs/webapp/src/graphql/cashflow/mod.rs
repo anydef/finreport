@@ -22,32 +22,121 @@ use crate::graphql::types::{
 use graph::{AggregatedFlow, FlowDirection};
 use summary::SparseBucket;
 
-/// §4 "Totals exclude transfers": every aggregation query drops a row whose
-/// effective transfer flag is true, unless the caller explicitly passed
-/// `filter.transfer = true` (then only transfers are wanted). Transfers have
-/// no user-override layer (§2.2), so this reads `transaction_insight`
-/// directly. `id_expr` is the (possibly aliased) `transaction.id` column
-/// reference in the query this is spliced into.
+/// §4 "Totals exclude transfers": household-level form of the rule — every
+/// flagged row is dropped, whatever its counterpart. Transfers have no
+/// user-override layer (§2.2), so this reads `transaction_insight` directly.
+/// `id_expr` is the (possibly aliased) `transaction.id` column reference in
+/// the query this is spliced into.
+///
+/// The cashflow aggregations use the *scope-aware* variant
+/// ([`scoped_transfer_exclusion_sql`]) instead; this one stays for callers
+/// that genuinely aggregate the whole household and have no selection of
+/// their own (goal evaluation, `goals::rows`).
 pub(crate) fn transfer_exclusion_sql(id_expr: &str) -> String {
     format!(
         " AND COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = {id_expr}), false) = false"
     )
 }
 
-/// Same rule, inverted: only transfers, for `filter.transfer = true`.
+/// The account set a flagged transfer's counterpart is tested against.
+///
+/// **Two different account sets are in play and confusing them silently
+/// reverts this fix:**
+///
+/// - `scoped_ids` is the *authorisation* scope — every account the caller may
+///   see. It is not the selection.
+/// - `filter.account_ids` (`TransactionFilter.accountIds`) is the *selected
+///   subset*.
+///
+/// The effective scope is the selection when there is one, else the whole
+/// authorisation scope. Writing the transfer rule against `scoped_ids` alone
+/// would be a no-op for the very case this fix exists for: when the user
+/// drills into one of their two accounts, both accounts are still in
+/// `scoped_ids`, so both legs would still look "inside scope" and still be
+/// dropped — the phantom deficit. Do not "simplify" this away.
+///
+/// (`cashflowSummary`/`cashflowGraph` happen to pre-narrow `scoped_ids`
+/// through `scoped_account_ids`, so today the two agree there; this helper
+/// makes the aggregation correct regardless of what a caller passes, and is
+/// the single place the choice is made.)
+pub(crate) fn effective_scope_ids(scoped_ids: &[Uuid], filter: &TransactionFilter) -> Vec<Uuid> {
+    match filter.account_ids.as_ref() {
+        Some(ids) if !ids.is_empty() => ids.iter().map(|id| id.0).collect(),
+        _ => scoped_ids.to_vec(),
+    }
+}
+
+/// Renders an account-id list as a SQL `uuid[]` literal.
+///
+/// Inlined rather than bound as a parameter because this predicate is spliced
+/// into four queries whose positional-parameter indices are tracked
+/// independently (and one of which repeats the fragment twice). The values are
+/// already-parsed [`Uuid`]s, whose `Display` is hex-and-dashes only, so there
+/// is nothing to escape.
+fn uuid_array_literal(ids: &[Uuid]) -> String {
+    let items: Vec<String> = ids.iter().map(|id| format!("'{id}'::uuid")).collect();
+    format!("ARRAY[{}]::uuid[]", items.join(", "))
+}
+
+/// §4, scope-aware: drop a flagged transfer leg **unless its counterpart is
+/// provably outside `scope_ids`**.
+///
+/// Excluding transfers is right at household level — the money did not leave —
+/// and wrong per account, where an inbound transfer *is* that account's
+/// income. `detect::transfer` flags **both** legs, so the unscoped rule
+/// dropped the receiving account's income too and the account read as a
+/// deficit although the money had arrived.
+///
+/// A leg is therefore included only when we can *prove* the other side lies
+/// outside the scope: `transfer_counterpart_id IS NOT NULL` **and** that
+/// transaction's `account_id` is not in `scope_ids`. A NULL
+/// `transfer_counterpart_id` proves nothing, so such a row stays excluded —
+/// a deliberate conservative choice, not an oversight: unknown data must not
+/// flip a figure the user has already looked at.
+///
+/// With every account selected (the dashboard default) both legs are inside
+/// the scope, so both are still dropped and every existing figure is
+/// unchanged by construction.
+///
+/// `transfer_counterpart_id` is a *transaction* id, so the counterpart's
+/// account needs a join back to `transaction`.
+pub(crate) fn scoped_transfer_exclusion_sql(id_expr: &str, scope_ids: &[Uuid]) -> String {
+    // No scope at all: nothing can be proven outside it, so fall back to the
+    // household rule rather than letting `= ANY(ARRAY[]::uuid[])` (always
+    // false) include every flagged leg.
+    if scope_ids.is_empty() {
+        return transfer_exclusion_sql(id_expr);
+    }
+    let scope = uuid_array_literal(scope_ids);
+    format!(
+        " AND (COALESCE((SELECT ti.is_transfer FROM transaction_insight ti \
+           WHERE ti.transaction_id = {id_expr}), false) = false \
+         OR EXISTS (SELECT 1 FROM transaction_insight ti \
+           JOIN transaction ct ON ct.id = ti.transfer_counterpart_id \
+           WHERE ti.transaction_id = {id_expr} AND ti.is_transfer = true \
+             AND NOT (ct.account_id = ANY({scope}))))"
+    )
+}
+
+/// Same rule, inverted: only transfers, for `filter.transfer = true`. Not
+/// scope-aware — "show me only transfers" means the same thing it always did.
 pub(crate) fn transfer_inclusion_sql(id_expr: &str) -> String {
     format!(
         " AND COALESCE((SELECT ti.is_transfer FROM transaction_insight ti WHERE ti.transaction_id = {id_expr}), false) = true"
     )
 }
 
-/// Picks [`transfer_exclusion_sql`] or [`transfer_inclusion_sql`] per §4's
-/// rule (default/explicit-false excludes, explicit-true includes only).
-pub(crate) fn transfer_filter_sql(id_expr: &str, filter: &TransactionFilter) -> String {
+/// Picks [`transfer_inclusion_sql`] or [`scoped_transfer_exclusion_sql`] per
+/// §4's rule (default/explicit-false excludes, explicit-true includes only).
+pub(crate) fn transfer_filter_sql(
+    id_expr: &str,
+    filter: &TransactionFilter,
+    scoped_ids: &[Uuid],
+) -> String {
     if filter.transfer == Some(true) {
         transfer_inclusion_sql(id_expr)
     } else {
-        transfer_exclusion_sql(id_expr)
+        scoped_transfer_exclusion_sql(id_expr, &effective_scope_ids(scoped_ids, filter))
     }
 }
 
@@ -211,7 +300,7 @@ fn build_graph_sql(
         Some(false) => sql.push_str(" AND counterparty_name IS NULL"),
         None => {}
     }
-    sql.push_str(&transfer_filter_sql("id", filter));
+    sql.push_str(&transfer_filter_sql("id", filter, scoped_ids));
 
     sql.push_str(" GROUP BY account_id, counterparty_name, is_income");
     (sql, params)
