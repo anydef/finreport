@@ -3,11 +3,13 @@
 	 * One merchant's held transactions: the decision is made per merchant here
 	 * (assign a category to the whole group, or accept the LLM's proposal when
 	 * it is unanimous); the individual transactions open underneath for the
-	 * odd one out. The keyless bucket cannot be addressed by any filter, so it
-	 * offers no group action, only a way to the flat list.
+	 * odd one out. The keyless buckets cannot be addressed by any filter, so they
+	 * offer no group action, only a way to the flat list. When a key has several
+	 * groups (same name, different accounts) each shows its masked IBAN.
 	 */
 	import type { Snippet } from 'svelte';
 	import { formatAmount } from '$lib/format';
+	import { maskIban } from '$lib/counterpartyView';
 	import { isAssignable, proposalOf, reasonLabels } from '$lib/heldGroups';
 	import type { HeldMerchantGroup } from '$lib/graphql/types';
 
@@ -36,6 +38,7 @@
 	}: Props = $props();
 
 	const proposal = $derived(proposalOf(group));
+	const ibanMasked = $derived(group.ibanDisambiguated ? maskIban(group.counterpartyIban) : null);
 	const assignable = $derived(isAssignable(group));
 	const btn =
 		'focus-visible:outline-brand cursor-pointer rounded-md px-3 py-1 text-xs font-medium focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50';
@@ -44,11 +47,15 @@
 <div
 	data-testid="held-group"
 	data-group-key={group.counterpartyKey ?? ''}
+	data-group-iban={group.counterpartyIban ?? ''}
 	class="rounded-md border border-slate-200 bg-white"
 >
 	<div class="flex flex-wrap items-center justify-between gap-3 p-3">
 		<div class="min-w-0">
 			<p class="truncate text-sm font-medium text-slate-900">{group.displayName}</p>
+			{#if ibanMasked}
+				<p class="truncate text-xs text-slate-400" data-testid="group-iban">{ibanMasked}</p>
+			{/if}
 			{#if group.rawName !== group.displayName}
 				<p class="truncate text-xs text-slate-400" data-testid="group-raw-name">{group.rawName}</p>
 			{/if}

@@ -129,6 +129,8 @@ query HeldMerchantGroups($page: PageInput) {
 	heldMerchantGroups(page: $page) {
 		groups {
 			counterpartyKey
+			counterpartyIban
+			ibanDisambiguated
 			displayName
 			rawName
 			heldCount

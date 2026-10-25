@@ -29,7 +29,14 @@
 		SET_TRANSACTIONS_CATEGORY_MUTATION,
 		SET_TRANSACTIONS_TAGS_MUTATION
 	} from '$lib/graphql/queries';
-	import { groupFilter, needsCreating, proposedCategoryInput, reviewHref } from '$lib/heldGroups';
+	import {
+		groupFilter,
+		groupId,
+		isExpanded,
+		needsCreating,
+		proposedCategoryInput,
+		reviewHref
+	} from '$lib/heldGroups';
 	import { summarizeConditions } from '$lib/rulesView';
 	import type { BulkEditResult, HeldMerchantGroup, Rule, Transaction } from '$lib/graphql/types';
 	import BulkEditDialog from '$lib/components/BulkEditDialog.svelte';
@@ -59,9 +66,9 @@
 	const baseFilter = reviewQueueFilter();
 
 	// --- Grouped view ----------------------------------------------------
-	// A group is assigned with `{ needsReview: true, counterpartyKeys: [key] }`,
-	// the same filter the flat view's bulk bar uses, so it cannot reach anything
-	// outside the queue. The outcome is shown as the server reported it, and the
+	// A group is assigned with `groupFilter`: `{ needsReview: true,
+	// counterpartyKeys: [key] }` plus the IBAN when the key is split across
+	// accounts, so it cannot reach a sibling group or anything outside the queue. The outcome is shown as the server reported it, and the
 	// page reloads rather than hiding the group optimistically.
 	let groupDialog = $state<HeldMerchantGroup | null>(null);
 	let groupBusyKey = $state<string | null>(null);
@@ -81,7 +88,7 @@
 
 	/** Accept the LLM's unanimous proposal for the whole group, creating the category if it is new. */
 	async function acceptProposal(group: HeldMerchantGroup, path: string) {
-		groupBusyKey = group.counterpartyKey;
+		groupBusyKey = groupId(group);
 		notice = null;
 		try {
 			if (needsCreating(path, data.categories)) {
@@ -269,15 +276,18 @@
 					<p class="text-sm text-slate-500">Nothing needs review right now.</p>
 				{:else}
 					<div class="flex flex-col gap-3">
-						{#each data.groups.groups as group (group.counterpartyKey ?? '\u0000ungrouped')}
-							{@const open =
-								group.counterpartyKey !== null && group.counterpartyKey === data.expand}
+						{#each data.groups.groups as group (groupId(group))}
+							{@const open = isExpanded(group, data.expand, data.expandIban)}
 							<HeldGroupCard
 								{group}
 								expanded={open}
-								toggleHref={reviewHref('groups', open ? null : group.counterpartyKey)}
+								toggleHref={reviewHref(
+									'groups',
+									open ? null : group.counterpartyKey,
+									group.ibanDisambiguated ? group.counterpartyIban : undefined
+								)}
 								flatHref={reviewHref('flat')}
-								busy={groupBusyKey === group.counterpartyKey}
+								busy={groupBusyKey === groupId(group)}
 								onAssign={() => (groupDialog = group)}
 								onAccept={(path) => acceptProposal(group, path)}
 							>

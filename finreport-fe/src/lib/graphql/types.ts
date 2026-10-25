@@ -538,6 +538,13 @@ export interface AttentionSummary {
 export interface HeldMerchantGroup {
 	/** `null` for the single bucket of held transactions that have no merchant key. */
 	counterpartyKey: string | null;
+	/** Raw, unmasked IBAN shared by the group's rows (`null` = none). Mask it for display; never log it. */
+	counterpartyIban: string | null;
+	/**
+	 * The key has more than one group among the held rows (counted across all
+	 * pages), so the key alone no longer names this group: its filter needs the IBAN.
+	 */
+	ibanDisambiguated: boolean;
 	displayName: string;
 	/** The bank's own name; differs from `displayName` when the user nicknamed the merchant. */
 	rawName: string;
