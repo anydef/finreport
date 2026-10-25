@@ -8,6 +8,7 @@
 		{ label: 'Categories', href: '/admin/categories' },
 		{ label: 'Nicknames', href: '/admin/aliases' },
 		{ label: 'Accounts', href: '/admin/accounts' },
+		{ label: 'Users', href: '/admin/users' },
 		{ label: 'Amazon', href: '/admin/amazon' }
 	];
 </script>
