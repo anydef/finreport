@@ -1,5 +1,5 @@
 {
-  "query": "query CounterpartyBreakdown($filter: TransactionFilter!, $limit: Int! = 20) {\n\tcounterpartyBreakdown(filter: $filter, limit: $limit) {\n\t\trows {\n\t\t\tcounterpartyKey\n\t\t\tdisplayName\n\t\t\tamount\n\t\t\ttransactionCount\n\t\t}\n\t\tother {\n\t\t\tcounterpartyKey\n\t\t\tdisplayName\n\t\t\tamount\n\t\t\ttransactionCount\n\t\t}\n\t\tcurrency\n\t}\n}",
+  "query": "query CounterpartyBreakdown($filter: TransactionFilter!, $limit: Int! = 20) {\n\tcounterpartyBreakdown(filter: $filter, limit: $limit) {\n\t\trows {\n\t\t\tcounterpartyKey\n\t\t\tdisplayName\n\t\t\tamount\n\t\t\ttransactionCount\n\t\t\tcounterpartyIban\n\t\t\tibanDisambiguated\n\t\t}\n\t\tother {\n\t\t\tcounterpartyKey\n\t\t\tdisplayName\n\t\t\tamount\n\t\t\ttransactionCount\n\t\t\tcounterpartyIban\n\t\t\tibanDisambiguated\n\t\t}\n\t\tcurrency\n\t}\n}",
   "data": {
     "counterpartyBreakdown": {
       "rows": [
@@ -7,56 +7,82 @@
           "counterpartyKey": "acme-payroll",
           "displayName": "Acme Payroll",
           "amount": "3200.00",
-          "transactionCount": 1
+          "transactionCount": 1,
+          "counterpartyIban": null,
+          "ibanDisambiguated": false
         },
         {
           "counterpartyKey": "example-landlord",
           "displayName": "Example Landlord",
           "amount": "-1150.00",
-          "transactionCount": 1
+          "transactionCount": 1,
+          "counterpartyIban": "DE00 0000 0000 0000 0002 22",
+          "ibanDisambiguated": true
+        },
+        {
+          "counterpartyKey": "example-landlord",
+          "displayName": "Example Landlord",
+          "amount": "-640.00",
+          "transactionCount": 12,
+          "counterpartyIban": "DE00 0000 0000 0000 0001 11",
+          "ibanDisambiguated": true
         },
         {
           "counterpartyKey": "sample-market",
           "displayName": "Sample Market",
           "amount": "-286.40",
-          "transactionCount": 9
+          "transactionCount": 9,
+          "counterpartyIban": null,
+          "ibanDisambiguated": false
         },
         {
           "counterpartyKey": "demo-electronics",
           "displayName": "Demo Electronics",
           "amount": "-79.00",
-          "transactionCount": 2
+          "transactionCount": 2,
+          "counterpartyIban": "DE00 0000 0000 0000 0003 33",
+          "ibanDisambiguated": false
         },
         {
           "counterpartyKey": "test-rail",
           "displayName": "Test Rail",
           "amount": "-62.50",
-          "transactionCount": 1
+          "transactionCount": 1,
+          "counterpartyIban": null,
+          "ibanDisambiguated": false
         },
         {
           "counterpartyKey": "mock-pharmacy",
           "displayName": "Mock Pharmacy",
           "amount": "0.00",
-          "transactionCount": 2
+          "transactionCount": 2,
+          "counterpartyIban": null,
+          "ibanDisambiguated": false
         },
         {
           "counterpartyKey": "fake-friend",
           "displayName": "Fake Friend",
           "amount": "41.00",
-          "transactionCount": 3
+          "transactionCount": 3,
+          "counterpartyIban": null,
+          "ibanDisambiguated": false
         },
         {
           "counterpartyKey": null,
           "displayName": "No merchant key",
           "amount": "-33.20",
-          "transactionCount": 4
+          "transactionCount": 4,
+          "counterpartyIban": null,
+          "ibanDisambiguated": false
         }
       ],
       "other": {
         "counterpartyKey": null,
         "displayName": "Other",
         "amount": "-0.80",
-        "transactionCount": 17
+        "transactionCount": 17,
+        "counterpartyIban": null,
+        "ibanDisambiguated": false
       },
       "currency": "EUR"
     }

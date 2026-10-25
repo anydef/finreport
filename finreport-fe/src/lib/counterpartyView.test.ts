@@ -4,6 +4,10 @@ import {
 	amountTone,
 	counterpartyHref,
 	isDrillable,
+	maskIban,
+	narrowedToLabel,
+	parseCounterpartyIbans,
+	parseHasCounterpartyIban,
 	parseBreakdownDimension,
 	parseCounterpartyKeys,
 	shapeCounterpartyBreakdown,
@@ -24,12 +28,47 @@ const scope: DrillScope = {
 function breakdown(overrides: Partial<CounterpartyBreakdown> = {}): CounterpartyBreakdown {
 	return {
 		rows: [
-			{ counterpartyKey: 'pay', displayName: 'Pay Co', amount: '100.00', transactionCount: 1 },
-			{ counterpartyKey: 'shop', displayName: 'Shop', amount: '-45.5', transactionCount: 3 },
-			{ counterpartyKey: 'net', displayName: 'Net Zero', amount: '0.00', transactionCount: 2 },
-			{ counterpartyKey: null, displayName: 'No merchant key', amount: '-5', transactionCount: 4 }
+			{
+				counterpartyKey: 'pay',
+				displayName: 'Pay Co',
+				amount: '100.00',
+				transactionCount: 1,
+				counterpartyIban: null,
+				ibanDisambiguated: false
+			},
+			{
+				counterpartyKey: 'shop',
+				displayName: 'Shop',
+				amount: '-45.5',
+				transactionCount: 3,
+				counterpartyIban: null,
+				ibanDisambiguated: false
+			},
+			{
+				counterpartyKey: 'net',
+				displayName: 'Net Zero',
+				amount: '0.00',
+				transactionCount: 2,
+				counterpartyIban: null,
+				ibanDisambiguated: false
+			},
+			{
+				counterpartyKey: null,
+				displayName: 'No merchant key',
+				amount: '-5',
+				transactionCount: 4,
+				counterpartyIban: null,
+				ibanDisambiguated: false
+			}
 		],
-		other: { counterpartyKey: null, displayName: 'Other', amount: '-0.80', transactionCount: 17 },
+		other: {
+			counterpartyKey: null,
+			displayName: 'Other',
+			amount: '-0.80',
+			transactionCount: 17,
+			counterpartyIban: null,
+			ibanDisambiguated: false
+		},
 		currency: 'EUR',
 		...overrides
 	};
@@ -177,5 +216,116 @@ describe('transactionCountLabel', () => {
 		expect(transactionCountLabel(1)).toBe('1 transaction');
 		expect(transactionCountLabel(0)).toBe('0 transactions');
 		expect(transactionCountLabel(17)).toBe('17 transactions');
+	});
+});
+
+describe('maskIban', () => {
+	it('returns null for null, undefined and empty/blank input', () => {
+		expect(maskIban(null)).toBeNull();
+		expect(maskIban(undefined)).toBeNull();
+		expect(maskIban('')).toBeNull();
+		expect(maskIban('   ')).toBeNull();
+	});
+	it('keeps only the last 4 characters', () => {
+		expect(maskIban('DE00000000000000000042')).toBe('•••• 0042');
+	});
+	it('strips whitespace first', () => {
+		expect(maskIban('DE00 0000 0000 0000 0000 42')).toBe('•••• 0042');
+	});
+	it('returns short values as-is', () => {
+		expect(maskIban('1234')).toBe('1234');
+		expect(maskIban(' 12 3 ')).toBe('123');
+	});
+});
+
+describe('IBAN display and drill-down', () => {
+	const iban = 'DE00 0000 0000 0000 0000 42';
+	const loan = {
+		counterpartyKey: 'landlord',
+		displayName: 'Landlord',
+		amount: '-1',
+		transactionCount: 1
+	};
+	const shaped = shapeCounterpartyBreakdown(
+		breakdown({
+			rows: [
+				{ ...loan, counterpartyIban: iban, ibanDisambiguated: true },
+				{ ...loan, counterpartyIban: null, ibanDisambiguated: true },
+				{ ...loan, counterpartyKey: 'solo', counterpartyIban: iban, ibanDisambiguated: false },
+				{ ...loan, counterpartyKey: null, counterpartyIban: iban, ibanDisambiguated: false },
+				{ ...loan, counterpartyKey: null, counterpartyIban: null, ibanDisambiguated: false }
+			]
+		})
+	);
+	const [withIban, withoutIban, solo, noKeyIban, noKeyBare, other] = shaped;
+	const q = (r: (typeof shaped)[number]) =>
+		new URL(counterpartyHref(r, scope)!, 'http://x').searchParams;
+
+	it('shows the masked IBAN only when it disambiguates', () => {
+		expect(withIban.ibanMasked).toBe('•••• 0042');
+		expect(withoutIban.ibanMasked).toBeNull();
+		expect(solo.ibanMasked).toBeNull();
+		expect(solo.counterpartyIban).toBe(iban);
+	});
+
+	it('keys rows of one counterpartyKey distinctly', () => {
+		expect(new Set(shaped.map((r) => r.key)).size).toBe(shaped.length);
+	});
+
+	it('key alone when not disambiguated', () => {
+		const p = q(solo);
+		expect(p.get('counterpartyKeys')).toBe('solo');
+		expect(p.has('counterpartyIbans')).toBe(false);
+		expect(p.has('hasCounterpartyIban')).toBe(false);
+	});
+
+	it('key + IBAN when disambiguated and present', () => {
+		const p = q(withIban);
+		expect(p.get('counterpartyKeys')).toBe('landlord');
+		expect(parseCounterpartyIbans(p)).toEqual([iban]);
+		expect(p.has('hasCounterpartyIban')).toBe(false);
+	});
+
+	it('key + hasCounterpartyIban=false when disambiguated and absent', () => {
+		const p = q(withoutIban);
+		expect(p.get('counterpartyKeys')).toBe('landlord');
+		expect(p.get('hasCounterpartyIban')).toBe('false');
+		expect(p.has('counterpartyIbans')).toBe(false);
+	});
+
+	it('IBAN alone for a no-key row', () => {
+		const p = q(noKeyIban);
+		expect(p.has('counterpartyKeys')).toBe(false);
+		expect(parseCounterpartyIbans(p)).toEqual([iban]);
+		expect(p.has('hasCounterpartyIban')).toBe(false);
+	});
+
+	it('isDrillable: no-key with IBAN yes, bare no-key and other no', () => {
+		expect(noKeyIban.drillable).toBe(true);
+		expect(noKeyBare.drillable).toBe(false);
+		expect(other.kind).toBe('other');
+		expect(other.drillable).toBe(false);
+		expect(isDrillable({ kind: 'other', counterpartyKey: null, counterpartyIban: iban })).toBe(
+			false
+		);
+		expect(counterpartyHref(other, scope)).toBeNull();
+	});
+});
+
+describe('parseHasCounterpartyIban', () => {
+	it('parses true/false and leaves anything else unconstrained', () => {
+		expect(parseHasCounterpartyIban(new URLSearchParams('hasCounterpartyIban=false'))).toBe(false);
+		expect(parseHasCounterpartyIban(new URLSearchParams('hasCounterpartyIban=true'))).toBe(true);
+		expect(parseHasCounterpartyIban(new URLSearchParams())).toBeUndefined();
+		expect(parseHasCounterpartyIban(new URLSearchParams('hasCounterpartyIban=0'))).toBeUndefined();
+		expect(parseHasCounterpartyIban(new URLSearchParams('hasCounterpartyIban='))).toBeUndefined();
+	});
+});
+
+describe('narrowedToLabel', () => {
+	it('shows the key, masked IBANs, or no-IBAN', () => {
+		expect(narrowedToLabel(['a'], [], undefined)).toBe('a');
+		expect(narrowedToLabel(['a'], ['DE00 0000 0042'], undefined)).toBe('a (•••• 0042)');
+		expect(narrowedToLabel(['a'], [], false)).toBe('a (no IBAN)');
 	});
 });

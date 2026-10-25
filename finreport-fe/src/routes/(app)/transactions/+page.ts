@@ -19,7 +19,11 @@ import {
 	rangeFromParams,
 	toDateInputValue
 } from '$lib/period';
-import { parseCounterpartyKeys } from '$lib/counterpartyView';
+import {
+	parseCounterpartyIbans,
+	parseCounterpartyKeys,
+	parseHasCounterpartyIban
+} from '$lib/counterpartyView';
 import { parsePanelFilters, toTransactionFilter } from '$lib/transactionFilters';
 import { parseSort, sortVariable } from '$lib/transactionSort';
 import type { PageLoad } from './$types';
@@ -35,6 +39,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 	const sort = parseSort(url.searchParams);
 	// Set by the dashboard's Counterparty tab; not part of the filter panel.
 	const counterpartyKeys = parseCounterpartyKeys(url.searchParams);
+	const counterpartyIbans = parseCounterpartyIbans(url.searchParams);
+	const hasCounterpartyIban = parseHasCounterpartyIban(url.searchParams);
 
 	const client = createGraphqlClient(fetch);
 
@@ -49,7 +55,9 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		startDate: range.start,
 		endDate: range.end,
 		...toTransactionFilter(panel, categories),
-		...(counterpartyKeys.length ? { counterpartyKeys } : {})
+		...(counterpartyKeys.length ? { counterpartyKeys } : {}),
+		...(counterpartyIbans.length ? { counterpartyIbans } : {}),
+		...(hasCounterpartyIban === undefined ? {} : { hasCounterpartyIban })
 	};
 
 	const [transactionsResult, reimbursementResult] = await Promise.all([
@@ -71,6 +79,8 @@ export const load: PageLoad = async ({ fetch, url }) => {
 		granularity: defaultGranularity(range),
 		panel,
 		counterpartyKeys,
+		counterpartyIbans,
+		hasCounterpartyIban,
 		sort,
 		offset,
 		error: Boolean(
