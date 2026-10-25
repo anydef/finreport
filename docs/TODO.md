@@ -132,8 +132,8 @@ against the tree on 2026-10-24, not from memory:
     with item 5's blocked credential decision. **Next concrete step: ask
     Scalable support for a FinTS server address for BLZ 70010588**; a yes
     would allow a Comdirect-style import with no third party at all.
-    **PayPal is paused** by the user's own instruction; C24 and Scalable are
-    not.
+    **PayPal was unpaused 2026-10-25** and is now scheduled directly after
+    C24 and ahead of cash accounts - see the PayPal section below.
 7. ~~Sankey cash-flow views.~~ **Shipped** - verified 2026-10-25.
     `CashflowSankey.svelte` is wired on the dashboard, fed by
     `cashflowGraph(filter, grouping)`, with a `?sankey=` toggle between two
@@ -891,11 +891,57 @@ the semantics, which the user decided and which should not be re-litigated.
   locally that topic was created **without compaction**, diverging from
   Terraform. Fixed in slice 1; worth a sweep for others like it.
 
-## PayPal: paused 2026-10-23
+## PayPal: UNPAUSED 2026-10-25, scheduled after C24
 
-Paused by the user in favour of finishing the Amazon ingest, where the data is
-real and already in hand. The spec `docs/specs/iteration-5-paypal.md` stands;
-nothing about it was found wrong.
+**The user lifted the pause on 2026-10-25**: *"after c24 lets do the paypal
+first and then do the cash-accounts"*. Order is therefore: finish the C24 CSV
+import -> PayPal -> user-created cash accounts. The earlier "PayPal is
+paused" instruction no longer applies; the C24/Scalable entry above still
+records it and should be read as superseded.
+
+**One decision gates the shape of the work** (the three resume options below
+are unchanged, but the landscape around them moved today):
+
+- **Option 2 (CSV) got considerably cheaper.** The C24 CSV import being built
+  now establishes the whole manual-import path: a pure parser crate, a
+  whole-file-or-nothing rejection rule, and an upload mutation modelled on
+  `uploadPurchaseOrders`. PayPal CSV would reuse all of it. Better still,
+  **PayPal's export carries a Transaction ID**, so it avoids the one genuinely
+  hard problem C24 has - C24's export has no identifier, forcing a
+  content-hash plus an occurrence ordinal scoped to the booking date. PayPal
+  would just key on its own id, like Amazon keys on `order_id`.
+- **Option 1 (API) is still the only route to automatic sync**, and the spec's
+  own §4 testing requirement still needs sandbox credentials, which a free
+  developer app at developer.paypal.com provides in minutes.
+- **A third route now exists:** PayPal is on **FinTS/Connect**'s supported
+  institution list (Subsembly + BANKSapi, EUR 80/year - see the C24/Scalable
+  entry). If that subscription is ever bought for C24, PayPal comes with it
+  and needs no PayPal credentials at all. It still needs a FinTS client,
+  which this repo does not have.
+
+**Recommendation: CSV first.** It reuses machinery that will already exist,
+needs no credentials, no OAuth, no windowing, no watermark and no deployed
+service, and it gives the user real PayPal data in their own reports sooner.
+Keep the API path as the follow-up for unattended sync, by which time the
+spec's open questions can be answered against real exported data rather than
+guessed.
+
+**The partial work is a liability, not an asset.** Commit `7ad6e7e` on branch
+`worktree-agent-a079872cd80f0ce44` (verified present 2026-10-25): 572 lines
+across `paypal-rs/{lib,error,token,watermark,window}.rs` plus the workspace
+member entry, **never compiled, never tested**. It is API-path code, so the
+CSV route does not need it at all. If the API path is taken later, review it
+line by line rather than trusting it - an unverified skeleton that compiles
+is more dangerous than a blank page. Do not merge it as-is.
+
+**Credential rule, unchanged and binding:** PayPal credentials must never be
+pasted into chat. They reach the stack the same way the Anthropic key does -
+one `op://` reference per value in `.env.tpl`, a `sensitive = true` terraform
+variable, and `extra_env` into the container. The CSV route needs none of
+this, which is part of its appeal.
+
+The spec `docs/specs/iteration-5-paypal.md` stands; nothing about it was found
+wrong.
 
 - **Why it stopped, not just that it did.** §4 of the spec asks for a recorded
   sandbox payload, on the reasoning that "the mapper is where a provider's
