@@ -297,10 +297,18 @@ because the export has no balance column. They project into the same
   `iban` is `None` on purpose: the export's `IBAN` column is the
   *counterparty's*. C24's own `Kategorie`/`Unterkategorie` live in
   `raw_payload` only.
-- **Not wired yet:** the labeler consumes `finreport.transaction` only
-  (`LABELER_INPUT_TOPICS`), so projected C24 rows get no category until it also
-  reads `finreport.c24-transaction`; its projector-lag guard checks only the
-  three Comdirect ingest topics.
+- **Labelling works, but only via the sweep.** `LABELER_INPUT_TOPICS` lists
+  `finreport.transaction` and not `finreport.c24-transaction`, so a C24 row
+  arriving does not *trigger* label resolution. It still gets one:
+  `projection::labeling::sweep_candidates` selects any `transaction` with no
+  `transaction_label` and **filters on no source at all**, and the labeler runs
+  that sweep at startup and after every caught-up pass — so
+  `just dev-labeler --until-caught-up` labels C24 rows too. What is missing is
+  the event-driven path (a C24 row waits for the next sweep,
+  `APP_labeler_sweep_interval_secs`, instead of being labelled on arrival) and
+  lag-guard coverage: `check_projection_lag` hardcodes the three Comdirect
+  ingest topics rather than deriving from `INGEST_TOPICS`, so it will not hold
+  the labeler back when the projector trails on a C24 topic.
 
 Same shape and the same two binding properties as
 `amazon-orders`:

@@ -457,9 +457,19 @@ guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
    counts as updated, a bad file is rejected whole by position, and an account
    already owned by another user refuses the upload. **Remaining:** the
    frontend (upload page; the SDL already serves the mutation, no operation
-   exists yet); teaching the labeler to read `finreport.c24-transaction` (until
-   then C24 rows are projected but never categorised) and its lag guard the
-   two new topics; `terraform apply` for the two topics on the central broker.
+   exists yet); teaching the labeler to read `finreport.c24-transaction` and its
+   lag guard the two new topics; `terraform apply` for the two topics on the
+   central broker.
+
+   **Not** "C24 rows are never categorised" - that was the first reading and it
+   is wrong. `sweep_candidates` filters on no source, so the labeler's sweep
+   picks up any unlabelled `transaction` row whatever wrote it, and the sweep
+   runs at startup and after every caught-up pass. The gap is narrower:
+   labelling is not event-driven for C24 (a row waits for the next sweep rather
+   than being labelled on arrival), and `check_projection_lag` hardcodes the
+   three Comdirect topics instead of deriving from `INGEST_TOPICS`, so it will
+   not hold the labeler back when the projector trails on a C24 topic. Worth
+   its own small slice; it does not block the import from being usable.
 
    **Still open, and smaller than it was:** `graphql/events.rs` builds its own
    two-header set (`origin`, `schema_version`) for the WP4 topics, bypassing
