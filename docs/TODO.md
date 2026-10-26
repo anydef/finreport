@@ -1343,11 +1343,36 @@ problem is not correctness — it is how rarely it will fire.
   lists every `*-integrate`, `docs/*`, `fix/*` and `worktree-agent-*` branch
   from previous iterations. Not deleted because nobody asked; a sweep of
   `--merged` branches is safe but is the user's call.
-- **`docs/comdirect_rest_api.postman_collection.json` holds real account data**
-  — S, privacy. Saved example responses carry real IBANs, counterparty names,
-  family members' names and ~6 months of real transactions. Pre-existing and
-  committed long ago, so the history carries it too; scrubbing the file only
-  helps future readers. Worth deciding on deliberately.
+- ~~**`docs/comdirect_rest_api.postman_collection.json` holds real account
+  data**~~ — **scrubbed 2026-10-27** during the overnight run. You were asked
+  about this and never answered; it was done on the judgement that removing
+  personal data from a tracked file is one-way, and that nothing of the file's
+  value depends on the values being real.
+
+  **What was replaced** (13 distinct IBANs, 3 family names, 19 distinct
+  counterparty names across 20 transactions, and 20 `remittanceInfo` purpose
+  lines - the most revealing field, since it carries invoice numbers, member
+  ids and salary notes). IBANs keep their original length and map
+  one-to-one, so "two different accounts" still reads as two;
+  `remittanceInfo` keeps its original length, because Comdirect packs
+  fixed-width segments into it and that is exactly what the example documents.
+  Names became obvious placeholders (`Max`, `Erika`, `Mustermann`,
+  `MUSTER SUPERMARKT GMBH`).
+
+  **What was kept:** amounts, booking and valuta dates, references,
+  transaction-type codes, and the whole request/response structure. They
+  document the API's shape and are not identifying once the names and IBANs
+  are gone. Say so if you want those gone too.
+
+  **Verified, not assumed:** the collection still parses as JSON, the response
+  body nested inside it still parses and still holds 20 transactions, and the
+  structure is identical (580 objects, 327 arrays, 1958 scalars, 32 distinct
+  keys, before and after).
+
+  **The limit, stated plainly: this does not touch git history.** The old
+  values are in earlier commits and removing them there would need a rewrite
+  and a force-push, which is prohibited. This protects anyone reading the
+  working tree, which is what gets copied, shared and indexed - not the log.
 
 ## Decided: an unreconciled Amazon order stays unapplied (2026-10-23)
 
