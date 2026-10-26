@@ -1266,9 +1266,16 @@ problem is not correctness — it is how rarely it will fire.
 - **No integration test covers a multi-charge `Apply` order** — S. The
   per-charge code path is shared, so it is covered by construction rather than
   directly.
-- **A stale third SDL copy** exists at `webapp/graphql/schema.graphql` — XS. Two
-  copies are kept in step by `sdl_drift`; this one is not and was left alone.
-  Delete it or bring it under the drift test.
+- ~~**A stale third SDL copy** at `webapp/graphql/schema.graphql`~~ —
+  **deleted 2026-10-27.** It existed only because `graphql/graphql.config.yml`
+  (IDE tooling) pointed at it relatively; that now points at
+  `../schema.graphql`, the live copy `sdl_drift` guards. Verifying the change
+  turned up two stale claims it had been hiding: `graphql/test.graphql`
+  queried a `reports(month:, year:)` field the schema has not served in ages,
+  and `CLAUDE.md` described the importer's `__name` as `account.account_name`
+  exposed as `Account.accountName` — the column lives on `legacy_account`
+  since the §2.8 reshape, the current table has `label`, and the SDL has never
+  served `accountName`. Both corrected.
 - **Spec §2.4's "route item titles through the labeling chain" is unbuilt** — M.
   A split part today carries an amount and a user-chosen category. Item titles
   are kept in `purchase_order_split` for display only, and nothing categorises
