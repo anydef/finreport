@@ -321,6 +321,91 @@ impl MutationRoot {
         crate::graphql::c24_upload::upload_c24_transactions(db, publisher(ctx), user, files).await
     }
 
+    /// `createCashAccount`: a wallet, cash tin or other hand-kept account.
+    /// The id is generated (never derived from the label), so two users can
+    /// each have a "Wallet". The account is the caller's own. Open to any
+    /// authenticated user: it is their own data, not shared state.
+    async fn create_cash_account(
+        &self,
+        ctx: &Context<'_>,
+        label: String,
+        currency: String,
+    ) -> GqlResult<crate::graphql::types::Account> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::cash::create_cash_account(db, publisher(ctx), user, label, currency).await
+    }
+
+    /// `renameCashAccount`: change a cash account's label. Refused as
+    /// `NOT_FOUND` (indistinguishable from an unknown id) for a bank account
+    /// or any account that is not the caller's own cash account.
+    async fn rename_cash_account(
+        &self,
+        ctx: &Context<'_>,
+        account_id: crate::graphql::scalars::Uuid,
+        label: String,
+    ) -> GqlResult<crate::graphql::types::Account> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::cash::rename_cash_account(db, publisher(ctx), user, account_id.0, label).await
+    }
+
+    /// `deleteCashAccount`: permanently deletes a cash account **and every
+    /// transaction on it**, with their labels, tags, splits and links. Any
+    /// transfer pairing a bank transaction had with one of them is undone.
+    /// Cannot be undone. Refused (`NOT_FOUND`) for a bank account, so it can
+    /// never delete imported data. Returns `true`.
+    async fn delete_cash_account(
+        &self,
+        ctx: &Context<'_>,
+        account_id: crate::graphql::scalars::Uuid,
+    ) -> GqlResult<bool> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::cash::delete_cash_account(db, publisher(ctx), user, account_id.0).await
+    }
+
+    /// `createCashTransaction`: add a hand-typed transaction to one of the
+    /// caller's cash accounts. The currency must equal the account's.
+    async fn create_cash_transaction(
+        &self,
+        ctx: &Context<'_>,
+        account_id: crate::graphql::scalars::Uuid,
+        input: crate::graphql::cash::CashTransactionInput,
+    ) -> GqlResult<Transaction> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::cash::create_cash_transaction(db, publisher(ctx), user, account_id.0, input).await
+    }
+
+    /// `updateCashTransaction`: **replaces** the date, amount, currency,
+    /// description and counterparty of a cash transaction (omitting
+    /// `description` or `counterpartyName` clears it). The transaction cannot
+    /// move to another account. Labels, tags, splits and links are kept.
+    async fn update_cash_transaction(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+        input: crate::graphql::cash::CashTransactionInput,
+    ) -> GqlResult<Transaction> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::cash::update_cash_transaction(db, publisher(ctx), user, transaction_id.0, input).await
+    }
+
+    /// `deleteCashTransaction`: permanently deletes one cash transaction. If
+    /// it was paired as a transfer with a bank transaction, that bank
+    /// transaction stops being a transfer. Returns `true`.
+    async fn delete_cash_transaction(
+        &self,
+        ctx: &Context<'_>,
+        transaction_id: crate::graphql::scalars::Uuid,
+    ) -> GqlResult<bool> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::cash::delete_cash_transaction(db, publisher(ctx), user, transaction_id.0).await
+    }
+
     /// `applyPurchaseOrderSplit`: **changes transactions.** Splits each bank
     /// charge of an order the matcher still reports as `APPLY` into one part
     /// per item (plus a shipping-and-adjustments part), in the categories the
