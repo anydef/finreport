@@ -28,3 +28,13 @@
 /.idea/dataSources.xml
 /.idea/db-forest-config.xml
 /.claude/worktrees/
+
+# Real bank/marketplace exports, for testing an importer against actual data.
+# Ignored wholesale, including anything nested, because the contents are
+# unredacted personal data: a C24 or Comdirect CSV carries IBANs, counterparty
+# names and payment purposes, and an Amazon order export carries recipient
+# addresses. Repo fixtures are synthetic by rule — put a real export here, not
+# next to the tests. `.gitkeep` is the one tracked file, so the directory
+# exists in a fresh clone and nobody has to guess the path.
+/local-data/**
+!/local-data/.gitkeep

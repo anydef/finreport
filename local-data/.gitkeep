@@ -1,0 +1,7 @@
+Put real, unredacted exports in this directory — C24 or Comdirect CSVs, Amazon
+order history, PayPal statements. Everything here except this file is
+gitignored.
+
+Test fixtures in the repo are synthetic by rule, so a real export must never be
+copied into `finreport-rs/*/tests/fixtures/` or any other tracked path. Point a
+tool at a file here instead.
