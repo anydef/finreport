@@ -169,6 +169,22 @@ seed-categories:
 # close the Rules and Categories pages to the only local user. On an existing
 # non-admin `dev`, run `user-admin promote --username dev` (create-user
 # reports the username as taken).
+# Describe a real export's *shape* without disclosing its contents: header
+# names, delimiter, encoding, raggedness, and a per-column classification of
+# every cell (empty / integer / decimal in several notations / date / datetime
+# / IBAN-shaped / email-shaped / text with a length range) — counts only,
+# never a value. Column names are a format description, not data, so they are
+# printed verbatim; nothing else is.
+#
+# This exists so a parser can be written against a real bank, PayPal or
+# marketplace export while the file itself never leaves the machine it was
+# downloaded to. The output is safe to paste into a chat or an issue; a sample
+# row is not. Put the export in the gitignored `local-data/`.
+#
+#   just csv-shape local-data/paypal-export.csv
+csv-shape FILE:
+    python3 scripts/csv_shape.py {{FILE}}
+
 seed-user:
     cd finreport-rs && \
         {{local_env}} FINREPORT_PASSWORD="${FINREPORT_PASSWORD:-dev}" \
