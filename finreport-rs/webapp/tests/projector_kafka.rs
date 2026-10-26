@@ -23,6 +23,7 @@ use rdkafka::ClientConfig;
 use sea_orm::EntityTrait;
 use support::{TestKafka, TestPostgres};
 use webapp::kafka::c24::{TOPIC_C24_ACCOUNT, TOPIC_C24_TRANSACTION};
+use webapp::kafka::cash::{TOPIC_CASH_ACCOUNT, TOPIC_CASH_TRANSACTION};
 use webapp::projection::{run, ProjectorConfig, INGEST_TOPICS};
 
 /// Publishes every fixture record to the broker, each on its manifest topic
@@ -74,7 +75,12 @@ async fn replay_over_kafka_projects_the_whole_fixture_corpus() {
     // it covered every ingest topic. Excluding them by identity keeps
     // `INGEST_TOPICS` coupled, so adding a sixth topic fails here until the
     // fixture corpus covers it or it is excluded on purpose.
-    const NO_FIXTURE: [&str; 2] = [TOPIC_C24_ACCOUNT, TOPIC_C24_TRANSACTION];
+    const NO_FIXTURE: [&str; 4] = [
+        TOPIC_C24_ACCOUNT,
+        TOPIC_C24_TRANSACTION,
+        TOPIC_CASH_ACCOUNT,
+        TOPIC_CASH_TRANSACTION,
+    ];
     for topic in INGEST_TOPICS
         .into_iter()
         .filter(|t| !NO_FIXTURE.contains(t))

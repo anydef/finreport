@@ -378,6 +378,57 @@ zahlungsempfaenger, iban, verwendungszweck, beschreibung, transaktionstyp)`
   description, purpose or payee, it re-imports as a new transaction. Leaving
   the text out of the key instead would merge distinct transactions.
 
+## Cash accounts
+
+User-created accounts for cash spending, with hand-entered transactions.
+**Storage only so far** (topics, wire records, mapper, projection incl.
+tombstones): no GraphQL mutation, query or UI yet - those are later slices
+(`docs/TODO.md`).
+
+- Two compacted `prevent_destroy` topics, `finreport.cash-account` and
+  `finreport.cash-transaction`, in `terraform/kafka/main.tf` **and**
+  `docker-compose.local.yml` (kept in step by hand). `source = "cash"`,
+  `origin = "user"`; the mapper is `CashMapper` at `("cash", "user")`.
+- **`kafka::cash::CashAccountRecord` / `CashTransactionRecord` are a wire
+  contract**: their serde shape is the stored payload, so a rename needs a
+  `schema_version` bump and a migration path (frozen-shape tests guard it).
+- **No balance topic.** A wallet has no bank to report one; the balance is the
+  running sum of its own transactions, derived on read in a later slice.
+- **`external_id` is a generated UUID**, never the account's name: two users
+  may each have a "Wallet" and they are different accounts. Nothing derives
+  from it, so unlike C24 there is no cross-user ownership trap in the id.
+- **The account record carries `user_id` and the projection links
+  `user_account` from it** (idempotent). A cash account is user-authored, so
+  the log alone must rebuild it; this deliberately differs from C24, whose
+  link is made by the upload mutation. An unknown `user_id` logs and projects
+  the account unlinked rather than wedging on the foreign key. Cash records
+  **never** go to `APP_projector_default_owner` (that would hand every user's
+  wallet to the deployment's owner), which is why `process_batch` routes them
+  to `projection::cash` instead of the generic apply path.
+- **Deletion is a tombstone** (null payload) on either topic. A transaction
+  tombstone removes the row plus its insight, label, user label, tags, splits
+  and link memberships (a memberless link goes too); an account tombstone
+  does that for every transaction it owns, then its savings flag, its
+  `user_account` links and the row. Tombstones carry no headers, so the id is
+  derived from the topic and key, not the envelope.
+- **A tombstone un-pairs the bank leg.** The detector flags **both** rows of a
+  transfer via `transaction_insight.transfer_counterpart_id`; leaving the bank
+  leg flagged would make the cashflow aggregations drop it. Only the three
+  transfer columns are cleared (`is_transfer`, `transfer_counterpart_id`,
+  `transfer_match`), not the whole row: the recurring columns describe the bank
+  leg on its own history and stay true; `revision` is untouched. Residual
+  limit: the old insight *record* remains on its compacted topic, so a full
+  replay can briefly re-project the pairing until the detector's next run; and
+  the delete mutation (later slice) should tombstone an account's transactions
+  too, since a compacted topic keeps them and a replay would otherwise project
+  them under a stub account.
+- Errors are value-free (`InvalidPayload` with a static string): amount and
+  description are the user's own financial data.
+- The labeler consumes `finreport.cash-transaction` like any transaction topic
+  (`source` from the header) and ignores tombstones; the projector subscribes
+  to both via `INGEST_TOPICS`.
+- Not admin-gated (later slices): a cash account is the caller's own data.
+
 ## Amazon purchase orders
 
 The `amazon-orders` crate holds the CSV parser and the order-to-charge matcher
@@ -587,7 +638,7 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **685** Rust unit tests via `just test`, **779** integration via
+  **697** Rust unit tests via `just test`, **799** integration via
   `just test-integration`, **773** frontend (38 files) via
   `npm run test:unit` (all re-measured 2026-10-27). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph

@@ -57,7 +57,10 @@ impl MapperRegistry {
     pub fn with_default_mappers() -> Self {
         use crate::kafka::envelope::{ORIGIN_LEGACY_BACKFILL, ORIGIN_SOURCE, SOURCE_COMDIRECT};
         use crate::kafka::c24::SOURCE_C24;
+        use crate::kafka::cash::SOURCE_CASH;
+        use crate::kafka::labeling::ORIGIN_USER;
         use crate::projection::c24::C24Mapper;
+        use crate::projection::cash::CashMapper;
         use crate::projection::comdirect::ComdirectMapper;
         use crate::projection::legacy::LegacyMapper;
 
@@ -69,6 +72,7 @@ impl MapperRegistry {
             Box::new(LegacyMapper),
         );
         registry.register(SOURCE_C24, ORIGIN_SOURCE, Box::new(C24Mapper));
+        registry.register(SOURCE_CASH, ORIGIN_USER, Box::new(CashMapper));
         registry
     }
 

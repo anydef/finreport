@@ -27,6 +27,7 @@ use uuid::Uuid;
 use categorizer::provider::{CategoryCatalog, LabelProvider, LabelRequest};
 
 use crate::kafka::c24::TOPIC_C24_TRANSACTION;
+use crate::kafka::cash::TOPIC_CASH_TRANSACTION;
 use crate::kafka::envelope::{Envelope, TOPIC_TRANSACTION};
 use crate::kafka::labeling::{
     learned_narrow_rule_uuid, learned_rule_uuid, CacheRecord, LabelRecord, LabelSource, LabelStatus, LabelRequestRecord,
@@ -46,12 +47,13 @@ use crate::projection::offsets;
 /// The topics the labeler consumes (§2.3) — distinct from
 /// `projection::INGEST_TOPICS`, which the main `projector` binary owns.
 ///
-/// Both transaction topics are here: a C24 row needs a label exactly as a
-/// Comdirect one does, and nothing in this module is source-specific — the
-/// `source` header tells the two apart where it matters.
-pub const LABELER_INPUT_TOPICS: [&str; 5] = [
+/// Every transaction topic is here: a C24 or hand-entered cash row needs a
+/// label exactly as a Comdirect one does, and nothing in this module is
+/// source-specific — the `source` header tells them apart where it matters.
+pub const LABELER_INPUT_TOPICS: [&str; 6] = [
     TOPIC_TRANSACTION,
     TOPIC_C24_TRANSACTION,
+    TOPIC_CASH_TRANSACTION,
     TOPIC_USER_LABEL,
     TOPIC_RULE,
     TOPIC_LABEL_REQUEST,
@@ -1464,7 +1466,12 @@ fn record_kind(topic: &str) -> Option<RecordKind> {
     // Both transaction topics share a handler: the record's `source` header,
     // not its topic, is what distinguishes them downstream.
     match topic {
-        t if t == TOPIC_TRANSACTION || t == TOPIC_C24_TRANSACTION => Some(RecordKind::Transaction),
+        t if t == TOPIC_TRANSACTION
+            || t == TOPIC_C24_TRANSACTION
+            || t == TOPIC_CASH_TRANSACTION =>
+        {
+            Some(RecordKind::Transaction)
+        }
         t if t == TOPIC_USER_LABEL => Some(RecordKind::UserLabel),
         t if t == TOPIC_RULE => Some(RecordKind::Rule),
         t if t == TOPIC_LABEL_REQUEST => Some(RecordKind::LabelRequest),
@@ -1547,6 +1554,12 @@ async fn handle_transaction_record(
     // second source without per-source code here: `Envelope::parse` defaults
     // a header-less phase-1 record to `comdirect` (§2.2) and a C24 record
     // says `c24` for itself.
+    // A tombstone (a deleted cash transaction) has no payload and no headers,
+    // so its `source` would default to `comdirect`; there is nothing to label
+    // either way, and the projector has already removed the row.
+    if record.payload.is_empty() {
+        return Ok(());
+    }
     let Some((source, external_id)) = transaction_identity(record) else {
         warn!("labeler: transaction record with no key, skipped");
         return Ok(());
