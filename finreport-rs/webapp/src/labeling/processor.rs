@@ -1109,6 +1109,22 @@ pub struct ProjectionLag {
 /// broker high watermark. `Ok(())` only when every topic is within
 /// `max_lag` records of caught up; otherwise the labeler must refuse to
 /// start (§2.3) — calling this is the caller's job, not this function's.
+/// Does this `fetch_watermarks` failure mean "the topic is not there" rather
+/// than "the broker could not tell us"? Only the former is safe to skip in
+/// [`check_projection_lag`]; see the comment at its call site.
+fn topic_absent(e: &rdkafka::error::KafkaError) -> bool {
+    use rdkafka::error::KafkaError;
+    use rdkafka::types::RDKafkaErrorCode::{
+        UnknownPartition, UnknownTopic, UnknownTopicOrPartition,
+    };
+    matches!(
+        e,
+        KafkaError::MetadataFetch(
+            UnknownTopic | UnknownTopicOrPartition | UnknownPartition
+        )
+    )
+}
+
 pub async fn check_projection_lag(
     db: &DatabaseConnection,
     group_id: &str,
@@ -1155,6 +1171,19 @@ pub async fn check_projection_lag(
     for (topic, offset_key) in ingest_checks.into_iter().chain(own_checks) {
         let (_, high) = match consumer.fetch_watermarks(&topic, LABELER_PARTITION, Duration::from_secs(10)) {
             Ok(w) => w,
+            // A topic that does not exist yet is **not** lag: it holds no
+            // records, so there is nothing for the projector to be behind on.
+            // Blocking here would be a deployment-order trap — this list is
+            // derived from `INGEST_TOPICS`, so a newly added topic exists in
+            // the code before `terraform apply` creates it on the broker, and
+            // treating that as lag would crash-loop the labeler until someone
+            // noticed. Any *other* error still blocks: if we cannot reach the
+            // broker we cannot know the lag, and guessing "fine" is the one
+            // answer that loses data.
+            Err(e) if topic_absent(&e) => {
+                info!(%topic, "labeler: topic does not exist yet, nothing to lag behind");
+                continue;
+            }
             Err(e) => {
                 lagging.push(ProjectionLag { topic: topic.clone(), committed: -1, high_watermark: -1 });
                 warn!(%topic, error = %e, "labeler: could not fetch watermark for lag check");
@@ -1802,6 +1831,41 @@ mod dispatch_tests {
                 comdirect_account_name: None,
             },
         }
+    }
+
+    #[test]
+    fn a_missing_topic_is_not_treated_as_lag_but_a_broker_problem_is() {
+        use rdkafka::error::KafkaError;
+        use rdkafka::types::RDKafkaErrorCode;
+
+        // Skippable: the topic genuinely is not there. This is the
+        // deployment-order case — the topic list comes from `INGEST_TOPICS`,
+        // so a new topic exists in code before `terraform apply` creates it.
+        for code in [
+            RDKafkaErrorCode::UnknownTopic,
+            RDKafkaErrorCode::UnknownTopicOrPartition,
+            RDKafkaErrorCode::UnknownPartition,
+        ] {
+            assert!(
+                topic_absent(&KafkaError::MetadataFetch(code)),
+                "{code:?} should read as an absent topic"
+            );
+        }
+
+        // Not skippable: these mean we could not find out, and assuming the
+        // projector is caught up is the one answer that loses data.
+        for code in [
+            RDKafkaErrorCode::BrokerTransportFailure,
+            RDKafkaErrorCode::AllBrokersDown,
+            RDKafkaErrorCode::OperationTimedOut,
+            RDKafkaErrorCode::Authentication,
+        ] {
+            assert!(
+                !topic_absent(&KafkaError::MetadataFetch(code)),
+                "{code:?} must still block the labeler"
+            );
+        }
+        assert!(!topic_absent(&KafkaError::NoMessageReceived));
     }
 
     #[test]
