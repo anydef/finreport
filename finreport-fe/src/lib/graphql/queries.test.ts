@@ -15,6 +15,7 @@ import * as queries from './queries';
 import * as adminReviewQueries from './adminReviewQueries';
 import * as adminRulesQueries from './adminRulesQueries';
 import * as adminAmazonQueries from './adminAmazonQueries';
+import * as adminC24Queries from './adminC24Queries';
 
 /**
  * Validates every operation the app sends against the frozen SDL, plus one
@@ -30,7 +31,8 @@ const exported: Record<string, unknown> = {
 	...queries,
 	...adminReviewQueries,
 	...adminRulesQueries,
-	...adminAmazonQueries
+	...adminAmazonQueries,
+	...adminC24Queries
 };
 const documents = Object.entries(exported)
 	.filter((entry): entry is [string, string] => typeof entry[1] === 'string')
