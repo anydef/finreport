@@ -455,11 +455,18 @@ guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
    `graphql/c24_upload.rs` - parse, merge, publish through `RecordMeta`,
    project, link to the caller; idempotent against stored rows, a changed row
    counts as updated, a bad file is rejected whole by position, and an account
-   already owned by another user refuses the upload. **Remaining:** the
-   frontend (upload page; the SDL already serves the mutation, no operation
-   exists yet); `terraform apply` for the two topics on the central broker. The
-   labeler wiring is **done** (2026-10-27), and fixing it uncovered a bug of
-   its own - see "The labeler's event-driven path never worked" below.
+   already owned by another user refuses the upload.
+
+   **The frontend landed 2026-10-27**: `/admin/c24`, deliberately not
+   admin-only, mirroring the resolver's own boundary (importing your own bank
+   statement is your own data). Shaping in `c24UploadView.ts`, operation in
+   `graphql/adminC24Queries.ts`, mock in `graphql/c24Mock.ts`. The labeler
+   wiring is **done** too, and fixing it uncovered a bug of its own - see "The
+   labeler's event-driven path never worked" below.
+
+   **Remaining: `terraform apply` for the two topics on the central broker**,
+   which is the user's to run. Nothing else - the import is end-to-end
+   otherwise.
 
    (An earlier note here said C24 rows would "never be categorised". That was
    wrong: `sweep_candidates` filters on no source, so the sweep always picked

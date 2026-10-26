@@ -588,8 +588,8 @@ Binding for every agent working in this repo:
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
   **685** Rust unit tests via `just test`, **779** integration via
-  `just test-integration`, **758** frontend (37 files) via
-  `npm run test:unit` (re-measured 2026-10-27; frontend unchanged). **These go stale within a
+  `just test-integration`, **773** frontend (38 files) via
+  `npm run test:unit` (all re-measured 2026-10-27). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph
   explaining the mismatch, so refresh this line in the same commit that adds
   tests, and treat a small discrepancy as a stale baseline rather than as
