@@ -800,3 +800,24 @@ export interface CounterpartyBreakdown {
 	other: CounterpartyBreakdownRow | null;
 	currency: string;
 }
+
+export interface C24FileResult {
+	/** Position in the `files` argument, from 0. */
+	index: number;
+	/** Rows read from the file; 0 when it was rejected. */
+	rowCount: number;
+	/** Column names and line numbers only; never a cell. */
+	error: string | null;
+}
+
+export interface C24UploadResult {
+	files: C24FileResult[];
+	newTransactions: number;
+	unchangedTransactions: number;
+	updatedTransactions: number;
+	newAccounts: number;
+	updatedAccounts: number;
+	accountCount: number;
+	earliestBookingDate: DateString | null;
+	latestBookingDate: DateString | null;
+}

@@ -38,6 +38,7 @@ import {
 	mockUndoPurchaseOrderSplit,
 	mockUploadPurchaseOrders
 } from '$lib/graphql/amazonMock';
+import { mockUploadC24Transactions } from '$lib/graphql/c24Mock';
 import { withMockRuleLabel } from '$lib/graphql/ruleLabelMock';
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
@@ -948,6 +949,12 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 			return {
 				status: 200,
 				body: { data: mockUploadPurchaseOrders(body.variables) },
+				setCookies: []
+			};
+		case 'UploadC24Transactions':
+			return {
+				status: 200,
+				body: { data: mockUploadC24Transactions(body.variables) },
 				setCookies: []
 			};
 		case 'SavingsSummary':
