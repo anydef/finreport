@@ -32,7 +32,9 @@ function member(over: Partial<TransactionLinkMember>): TransactionLinkMember {
 	};
 }
 
-function link(over: Partial<TransactionLink> & { members: TransactionLinkMember[] }): TransactionLink {
+function link(
+	over: Partial<TransactionLink> & { members: TransactionLinkMember[] }
+): TransactionLink {
 	return {
 		id: 'l1',
 		kind: 'REIMBURSEMENT',
@@ -260,7 +262,9 @@ describe('summaryLine and filter values', () => {
 				},
 				'EUR'
 			)
-		).toBe('Linked expenses: 1,400.00 EUR paid, 1,000.00 EUR reimbursed, 400.00 EUR net. 1 of 2 only partly.');
+		).toBe(
+			'Linked expenses: 1,400.00 EUR paid, 1,000.00 EUR reimbursed, 400.00 EUR net. 1 of 2 only partly.'
+		);
 	});
 
 	it('maps the panel choice onto the GraphQL enum, with include meaning absent', () => {

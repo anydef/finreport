@@ -29,10 +29,11 @@
 
 	let { data }: { data: PageData } = $props();
 
-	let preset = $state(data.preset);
-	$effect(() => {
-		preset = data.preset;
-	});
+	// Writable `$derived` (Svelte >= 5.25): it follows `data.preset` when the
+	// page's data changes, and a local assignment holds until it does. The
+	// `$state` + `$effect` pair this replaces did the same thing a frame later,
+	// and could clobber a local edit whenever the effect re-ran.
+	let preset = $derived(data.preset);
 
 	function go(params: URLSearchParams) {
 		goto(`${page.url.pathname}?${params.toString()}`, { keepFocus: true, noScroll: true });

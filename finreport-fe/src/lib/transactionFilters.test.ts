@@ -227,7 +227,10 @@ describe('layerSelection', () => {
 	it('layers an exact-category selection over the panel without replacing its categories', () => {
 		// AND-ed with the panel's own category filter, which stays.
 		expect(
-			layerSelection({ categorySlugs: ['food', 'food.groceries'] }, { categorySlugsExact: ['food'] })
+			layerSelection(
+				{ categorySlugs: ['food', 'food.groceries'] },
+				{ categorySlugsExact: ['food'] }
+			)
 		).toEqual({ categorySlugs: ['food', 'food.groceries'], categorySlugsExact: ['food'] });
 		// An exact category contradicts a panel "Uncategorized".
 		expect(layerSelection({ uncategorized: true }, { categorySlugsExact: ['food'] })).toEqual({

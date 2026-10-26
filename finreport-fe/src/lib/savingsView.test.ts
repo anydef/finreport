@@ -97,7 +97,8 @@ describe('savingsCardState', () => {
 	it('degrades the mixed-currency VALIDATION error to an explanation', () => {
 		const state = savingsCardState(null, {
 			code: 'VALIDATION',
-			message: 'savings accounts span several currencies (EUR, USD); select accounts of one currency'
+			message:
+				'savings accounts span several currencies (EUR, USD); select accounts of one currency'
 		});
 		expect(state).toEqual({ kind: 'mixed-currency', message: MIXED_CURRENCY_MESSAGE });
 		expect(MIXED_CURRENCY_MESSAGE).toContain('Narrow the account filter');

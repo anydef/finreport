@@ -50,11 +50,11 @@ describe('the reimbursement filter', () => {
 		const kept = applyReimbursementFilter(items, 'EXCLUDE').map((i) => i.counterpartyName);
 		expect(kept).not.toContain('AOK Krankenkasse');
 		expect(kept).toContain('Zahnarzt Dr. Mueller');
-		expect(applyReimbursementFilter(items, 'ONLY').map((i) => i.counterpartyName).sort()).toEqual([
-			'AOK Krankenkasse',
-			'Anna Schmidt',
-			'Debeka Erstattung'
-		]);
+		expect(
+			applyReimbursementFilter(items, 'ONLY')
+				.map((i) => i.counterpartyName)
+				.sort()
+		).toEqual(['AOK Krankenkasse', 'Anna Schmidt', 'Debeka Erstattung']);
 	});
 });
 
@@ -91,8 +91,21 @@ describe('mock mutations and queries', () => {
 
 	it('suggests unlinked opposite-sign rows, best first, and honours a search', () => {
 		const extra = [
-			{ ...byName('Anna Schmidt'), id: 'free-1', link: null, amount: '990.00', bookingDate: '2024-02-20' },
-			{ ...byName('Anna Schmidt'), id: 'free-2', link: null, amount: '5.00', bookingDate: '2024-02-21', counterpartyName: 'Kiosk' }
+			{
+				...byName('Anna Schmidt'),
+				id: 'free-1',
+				link: null,
+				amount: '990.00',
+				bookingDate: '2024-02-20'
+			},
+			{
+				...byName('Anna Schmidt'),
+				id: 'free-2',
+				link: null,
+				amount: '5.00',
+				bookingDate: '2024-02-21',
+				counterpartyName: 'Kiosk'
+			}
 		];
 		const base = { ...byName('Praxis Dr. Meyer'), id: 'base', link: null, amount: '-1000.00' };
 		const all = [...extra, base];

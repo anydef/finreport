@@ -19,7 +19,7 @@
 		type SavingsCardState
 	} from '$lib/savingsView';
 	import { decimalToNumber } from '$lib/chartShaping';
-	
+
 	interface Props {
 		state: SavingsCardState;
 	}

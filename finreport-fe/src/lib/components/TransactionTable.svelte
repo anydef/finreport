@@ -145,10 +145,14 @@
 
 	// Linking works on ticked rows (not "all matching", which can span pages).
 	const ticked = $derived(
-		selection.mode === 'ids' ? rows.filter((r) => selection.mode === 'ids' && selection.ids.includes(r.id)) : []
+		selection.mode === 'ids'
+			? rows.filter((r) => selection.mode === 'ids' && selection.ids.includes(r.id))
+			: []
 	);
 	const linkable = $derived(
-		ticked.length >= 2 ? linkabilityOfSelection(ticked) : { ok: true as const, expenses: [], offsets: [] }
+		ticked.length >= 2
+			? linkabilityOfSelection(ticked)
+			: { ok: true as const, expenses: [], offsets: [] }
 	);
 	const linkBlocked = $derived(
 		selection.mode !== 'ids'
