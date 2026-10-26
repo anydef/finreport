@@ -15,17 +15,18 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::message::{BorrowedMessage, Message};
 use rdkafka::topic_partition_list::{Offset, TopicPartitionList};
-use rdkafka::ClientConfig;
+use rdkafka::{ClientConfig, Timestamp};
 use sea_orm::{ConnectionTrait, DatabaseConnection, DbErr, TransactionTrait};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use categorizer::provider::{CategoryCatalog, LabelProvider, LabelRequest};
 
+use crate::kafka::c24::TOPIC_C24_TRANSACTION;
 use crate::kafka::envelope::{Envelope, TOPIC_TRANSACTION};
 use crate::kafka::labeling::{
     learned_narrow_rule_uuid, learned_rule_uuid, CacheRecord, LabelRecord, LabelSource, LabelStatus, LabelRequestRecord,
@@ -42,10 +43,15 @@ use crate::projection::labeling as proj;
 use crate::projection::labeling::TransactionForLabeling;
 use crate::projection::offsets;
 
-/// The four topics the labeler consumes (§2.3) — distinct from
+/// The topics the labeler consumes (§2.3) — distinct from
 /// `projection::INGEST_TOPICS`, which the main `projector` binary owns.
-pub const LABELER_INPUT_TOPICS: [&str; 4] = [
+///
+/// Both transaction topics are here: a C24 row needs a label exactly as a
+/// Comdirect one does, and nothing in this module is source-specific — the
+/// `source` header tells the two apart where it matters.
+pub const LABELER_INPUT_TOPICS: [&str; 5] = [
     TOPIC_TRANSACTION,
+    TOPIC_C24_TRANSACTION,
     TOPIC_USER_LABEL,
     TOPIC_RULE,
     TOPIC_LABEL_REQUEST,
@@ -1107,7 +1113,6 @@ pub async fn check_projection_lag(
     brokers: &str,
     max_lag: u64,
 ) -> Result<(), Vec<ProjectionLag>> {
-    use crate::kafka::envelope::{TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE};
 
     let stored = offsets::load_offsets(db, group_id)
         .await
@@ -1119,9 +1124,15 @@ pub async fn check_projection_lag(
         .create()
         .map_err(|e| vec![ProjectionLag { topic: format!("<kafka client error: {e}>"), committed: 0, high_watermark: 0 }])?;
 
-    // The three ingest topics, checked under the *main projector's* own
+    // Every ingest topic, checked under the *main projector's* own
     // (unsuffixed) offset keys: the labeler must not run ahead of it.
-    let ingest_checks: Vec<(String, String)> = [TOPIC_ACCOUNT, TOPIC_ACCOUNT_BALANCE, TOPIC_TRANSACTION]
+    //
+    // Derived from `projection::INGEST_TOPICS` rather than listing the
+    // Comdirect three by hand, which is what it used to do: a topic added
+    // there (the two C24 ones were) would otherwise be silently exempt from
+    // the guard, and the labeler would happily resolve against a projection
+    // that had not caught up on it.
+    let ingest_checks: Vec<(String, String)> = crate::projection::INGEST_TOPICS
         .into_iter()
         .map(|t| (t.to_string(), t.to_string()))
         .collect();
@@ -1236,15 +1247,28 @@ struct ConsumedLabelingRecord {
     offset: i64,
     key: Option<String>,
     payload: Vec<u8>,
+    /// The §2.2 envelope, carried for the same reason the projector's
+    /// `ConsumedRecord` carries it: `source` is a **header**, not part of a
+    /// transaction record's key, and the labeler needs it to look the
+    /// projected row back up. Parsing applies the §2.2 defaults, so a
+    /// phase-1 record with no headers still reports `comdirect`.
+    envelope: Envelope,
 }
 
 impl ConsumedLabelingRecord {
     fn from_message(message: &BorrowedMessage<'_>) -> Self {
+        let message_timestamp = match message.timestamp() {
+            Timestamp::CreateTime(ms) | Timestamp::LogAppendTime(ms) => {
+                DateTime::from_timestamp_millis(ms).unwrap_or_else(Utc::now)
+            }
+            Timestamp::NotAvailable => Utc::now(),
+        };
         Self {
             topic: message.topic().to_string(),
             offset: message.offset(),
             key: message.key().map(|k| String::from_utf8_lossy(k).into_owned()),
             payload: message.payload().map(|p| p.to_vec()).unwrap_or_default(),
+            envelope: Envelope::parse(message.headers(), message_timestamp),
         }
     }
 }
@@ -1407,20 +1431,52 @@ async fn process_record(
     cost_guard: &CostGuard,
     record: &ConsumedLabelingRecord,
 ) -> Result<(), LabelerError> {
-    match record.topic.as_str() {
-        t if t == TOPIC_TRANSACTION => {
+    match record_kind(record.topic.as_str()) {
+        Some(RecordKind::Transaction) => {
             handle_transaction_record(db, publisher, ops, provider, catalog, config, cost_guard, record).await
         }
-        t if t == TOPIC_USER_LABEL => handle_user_label_record(db, publisher, ops, provider, catalog, config, cost_guard, record).await,
-        t if t == TOPIC_RULE => handle_rule_record(db, publisher, ops, provider, catalog, config, cost_guard, record).await,
-        t if t == TOPIC_LABEL_REQUEST => {
+        Some(RecordKind::UserLabel) => handle_user_label_record(db, publisher, ops, provider, catalog, config, cost_guard, record).await,
+        Some(RecordKind::Rule) => handle_rule_record(db, publisher, ops, provider, catalog, config, cost_guard, record).await,
+        Some(RecordKind::LabelRequest) => {
             handle_label_request_record(db, publisher, ops, provider, catalog, config, cost_guard, record).await
         }
-        other => {
-            warn!(topic = other, "labeler: record on an unrecognized topic, skipped");
+        None => {
+            warn!(topic = %record.topic, "labeler: record on an unrecognized topic, skipped");
             Ok(())
         }
     }
+}
+
+/// Which handler a consumed record goes to. Separated from [`process_record`]
+/// so the dispatch itself is testable: the invariant that matters is that
+/// **every** [`LABELER_INPUT_TOPICS`] entry maps to a handler, and a topic
+/// added to that list but not here would otherwise consume records, advance
+/// its offset and silently do nothing with them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecordKind {
+    Transaction,
+    UserLabel,
+    Rule,
+    LabelRequest,
+}
+
+fn record_kind(topic: &str) -> Option<RecordKind> {
+    // Both transaction topics share a handler: the record's `source` header,
+    // not its topic, is what distinguishes them downstream.
+    match topic {
+        t if t == TOPIC_TRANSACTION || t == TOPIC_C24_TRANSACTION => Some(RecordKind::Transaction),
+        t if t == TOPIC_USER_LABEL => Some(RecordKind::UserLabel),
+        t if t == TOPIC_RULE => Some(RecordKind::Rule),
+        t if t == TOPIC_LABEL_REQUEST => Some(RecordKind::LabelRequest),
+        _ => None,
+    }
+}
+
+/// `(source, external_id)` for a consumed transaction record: `source` from
+/// the §2.2 header, `external_id` from the key, which is **bare**. See
+/// [`handle_transaction_record`] for why this is not `<source>:<external_id>`.
+fn transaction_identity(record: &ConsumedLabelingRecord) -> Option<(&str, &str)> {
+    Some((record.envelope.source.as_str(), record.key.as_deref()?))
 }
 
 fn parse_source_external_id(key: &str) -> Option<(&str, &str)> {
@@ -1472,14 +1528,27 @@ async fn handle_transaction_record(
     // The main projector's `MapperRegistry` has already normalized this
     // transaction by the time the labeler sees it (the labeler contains no
     // per-source code, §2.3) — only its already-projected identity is
-    // needed here, so the key (`<source>:<external_id>`) is enough to look
-    // it back up rather than re-mapping the payload ourselves.
-    let Some(key) = record.key.as_deref() else {
+    // needed here, so it is looked back up rather than re-mapped here.
+    //
+    // **A transaction record's key is the bare `external_id`**, and `source`
+    // comes from the §2.2 `source` header. This used to parse the key as
+    // `<source>:<external_id>`, which no producer has ever written on a
+    // transaction topic: the importer publishes Comdirect's bare
+    // `reference` (`import_transactions.rs`) and C24 publishes its bare
+    // derived id. `<source>:<external_id>` is the key form of
+    // `user-label`/`transaction-label` (see `publish_user_label`) — those
+    // arms are right, this one was not, and because no test drove this
+    // consume loop it skipped every record it was ever handed. Labelling
+    // still happened, via the source-agnostic sweep, so the only visible
+    // symptom was a warning per record and labels arriving at the next
+    // sweep instead of on arrival.
+    //
+    // Reading `source` from the header is also what makes this work for a
+    // second source without per-source code here: `Envelope::parse` defaults
+    // a header-less phase-1 record to `comdirect` (§2.2) and a C24 record
+    // says `c24` for itself.
+    let Some((source, external_id)) = transaction_identity(record) else {
         warn!("labeler: transaction record with no key, skipped");
-        return Ok(());
-    };
-    let Some((source, external_id)) = parse_source_external_id(key) else {
-        warn!(key, "labeler: transaction record key not in <source>:<external_id> form, skipped");
         return Ok(());
     };
     resolve_and_publish_by_source_external_id(
@@ -1691,6 +1760,93 @@ fn is_caught_up(next_offsets: &HashMap<String, i64>, high_watermarks: &HashMap<S
 // used only by `#[cfg(test)]` helpers in sibling integration tests, not here.
 #[allow(unused_imports)]
 use Envelope as _EnvelopeReexportForTests;
+
+#[cfg(test)]
+mod dispatch_tests {
+    //! The consume loop's two decisions, which nothing exercised before: which
+    //! handler a topic goes to, and what `(source, external_id)` a transaction
+    //! record resolves to. The second of these was wrong from the start — it
+    //! parsed the key as `<source>:<external_id>`, a form no transaction
+    //! producer has ever written — and because no test drives `run`'s consume
+    //! loop, every transaction record was skipped with a warning while the
+    //! source-agnostic sweep quietly did the labelling instead.
+
+    use super::*;
+
+    fn record(topic: &str, key: Option<&str>, source: &str) -> ConsumedLabelingRecord {
+        ConsumedLabelingRecord {
+            topic: topic.to_string(),
+            offset: 0,
+            key: key.map(str::to_string),
+            payload: Vec::new(),
+            envelope: Envelope {
+                source: source.to_string(),
+                source_account_id: None,
+                origin: crate::kafka::envelope::ORIGIN_SOURCE.to_string(),
+                schema_version: 1,
+                imported_at: Utc::now(),
+                comdirect_account_key: None,
+                comdirect_account_name: None,
+            },
+        }
+    }
+
+    #[test]
+    fn every_subscribed_topic_has_a_handler() {
+        // The invariant that would have caught adding a topic to the
+        // subscription list without teaching the dispatch about it: such a
+        // topic consumes records, advances its offset and does nothing.
+        for topic in LABELER_INPUT_TOPICS {
+            assert!(record_kind(topic).is_some(), "no handler for {topic}");
+        }
+        assert_eq!(record_kind("finreport.something-else"), None);
+    }
+
+    #[test]
+    fn both_transaction_topics_share_the_transaction_handler() {
+        assert_eq!(record_kind(TOPIC_TRANSACTION), Some(RecordKind::Transaction));
+        assert_eq!(
+            record_kind(TOPIC_C24_TRANSACTION),
+            Some(RecordKind::Transaction)
+        );
+    }
+
+    #[test]
+    fn a_comdirect_reference_is_the_whole_external_id() {
+        // The regression. A Comdirect `reference` carries no colon (the
+        // importer publishes it bare), so the old `<source>:<external_id>`
+        // parse returned `None` here and the record was dropped.
+        let r = record(TOPIC_TRANSACTION, Some("ACC1-01-SALARY"), "comdirect");
+        assert_eq!(
+            transaction_identity(&r),
+            Some(("comdirect", "ACC1-01-SALARY"))
+        );
+    }
+
+    #[test]
+    fn a_reference_containing_a_colon_is_not_split_on_it() {
+        // Stronger than the case above: a key that *looks* splittable must
+        // still be taken whole, or the source would come from the payload's
+        // own text instead of the header.
+        let r = record(TOPIC_TRANSACTION, Some("REF:WITH:COLONS"), "comdirect");
+        assert_eq!(
+            transaction_identity(&r),
+            Some(("comdirect", "REF:WITH:COLONS"))
+        );
+    }
+
+    #[test]
+    fn a_c24_record_takes_its_source_from_the_header() {
+        let r = record(TOPIC_C24_TRANSACTION, Some("abc123-1"), "c24");
+        assert_eq!(transaction_identity(&r), Some(("c24", "abc123-1")));
+    }
+
+    #[test]
+    fn a_keyless_record_has_no_identity() {
+        let r = record(TOPIC_TRANSACTION, None, "comdirect");
+        assert_eq!(transaction_identity(&r), None);
+    }
+}
 
 #[cfg(test)]
 mod tests {
