@@ -793,9 +793,27 @@ pub async fn run(db: DatabaseConnection, config: ProjectorConfig) -> Result<(), 
     let high_watermarks = if config.until_caught_up {
         let mut marks = HashMap::new();
         for topic in INGEST_TOPICS.into_iter().chain(LABELING_PROJECTION_TOPICS) {
-            let (low, high) = consumer
+            // A topic that does not exist yet reads as empty, not as a
+            // failure: `(0, 0)` makes it trivially caught up. The topic list
+            // lives in code, so a newly added topic exists in this binary
+            // before `terraform apply` creates it on the broker, and an
+            // opaque Kafka error here would be a confusing way to find that
+            // out. Any other error still fails the run — see
+            // `kafka::topic_absent` for why the distinction is narrow.
+            //
+            // Only `--until-caught-up` reaches this; the always-on projector
+            // never fetches watermarks, so this is consistency with the
+            // labeler's startup guard rather than a fix for a live outage.
+            let (low, high) = match consumer
                 .fetch_watermarks(topic, INGEST_PARTITION, Duration::from_secs(10))
-                .map_err(ProjectorError::Kafka)?;
+            {
+                Ok(w) => w,
+                Err(e) if crate::kafka::topic_absent(&e) => {
+                    info!(topic, "projector: topic does not exist yet, treating as empty");
+                    (0, 0)
+                }
+                Err(e) => return Err(ProjectorError::Kafka(e)),
+            };
             marks.insert(topic.to_string(), high);
             let starting = stored_offsets
                 .get(&(topic.to_string(), INGEST_PARTITION))

@@ -1109,22 +1109,6 @@ pub struct ProjectionLag {
 /// broker high watermark. `Ok(())` only when every topic is within
 /// `max_lag` records of caught up; otherwise the labeler must refuse to
 /// start (§2.3) — calling this is the caller's job, not this function's.
-/// Does this `fetch_watermarks` failure mean "the topic is not there" rather
-/// than "the broker could not tell us"? Only the former is safe to skip in
-/// [`check_projection_lag`]; see the comment at its call site.
-fn topic_absent(e: &rdkafka::error::KafkaError) -> bool {
-    use rdkafka::error::KafkaError;
-    use rdkafka::types::RDKafkaErrorCode::{
-        UnknownPartition, UnknownTopic, UnknownTopicOrPartition,
-    };
-    matches!(
-        e,
-        KafkaError::MetadataFetch(
-            UnknownTopic | UnknownTopicOrPartition | UnknownPartition
-        )
-    )
-}
-
 pub async fn check_projection_lag(
     db: &DatabaseConnection,
     group_id: &str,
@@ -1180,7 +1164,7 @@ pub async fn check_projection_lag(
             // noticed. Any *other* error still blocks: if we cannot reach the
             // broker we cannot know the lag, and guessing "fine" is the one
             // answer that loses data.
-            Err(e) if topic_absent(&e) => {
+            Err(e) if crate::kafka::topic_absent(&e) => {
                 info!(%topic, "labeler: topic does not exist yet, nothing to lag behind");
                 continue;
             }
@@ -1847,7 +1831,7 @@ mod dispatch_tests {
             RDKafkaErrorCode::UnknownPartition,
         ] {
             assert!(
-                topic_absent(&KafkaError::MetadataFetch(code)),
+                crate::kafka::topic_absent(&KafkaError::MetadataFetch(code)),
                 "{code:?} should read as an absent topic"
             );
         }
@@ -1861,11 +1845,11 @@ mod dispatch_tests {
             RDKafkaErrorCode::Authentication,
         ] {
             assert!(
-                !topic_absent(&KafkaError::MetadataFetch(code)),
+                !crate::kafka::topic_absent(&KafkaError::MetadataFetch(code)),
                 "{code:?} must still block the labeler"
             );
         }
-        assert!(!topic_absent(&KafkaError::NoMessageReceived));
+        assert!(!crate::kafka::topic_absent(&KafkaError::NoMessageReceived));
     }
 
     #[test]
