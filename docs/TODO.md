@@ -1080,6 +1080,42 @@ are unchanged, but the landscape around them moved today):
   and needs no PayPal credentials at all. It still needs a FinTS client,
   which this repo does not have.
 
+**BLOCKED 2026-10-27 on one thing only: the actual header set.** The parser
+cannot be written responsibly without it, and guessing it is likely to be
+wrong in a *specific* way: PayPal localises its export, so a German account
+exports `Datum, Uhrzeit, Zeitzone, Name, Typ, Status, Waehrung, Brutto,
+Gebuehr, Netto, ...` rather than the English names, and the column set also
+depends on which report the user downloads (balance-affecting vs. all
+activity, and a customisable column list). A parser built on the English
+guess would reject the user's real file outright - and this file's own note
+on the API path says exactly this about hand-made fixtures: they prove our
+logic self-consistent, not that the provider behaves as documented.
+
+**Unblocking it costs the user one command**, added 2026-10-27:
+
+    just csv-shape local-data/paypal-export.csv
+
+`scripts/csv_shape.py` prints the delimiter, the encoding, the header names
+verbatim, the row count, the distinct field counts (exports are routinely
+ragged) and a per-column classification of every cell - empty / integer /
+decimal in four notations / date / datetime / IBAN-shaped / email-shaped /
+money-with-symbol / text with a length range - as **counts only, never a
+value**. Column names are a format description; cell contents are not, and
+none are printed. So the output can be pasted into chat while the export
+itself stays in the gitignored `local-data/`.
+
+Validated against the C24 fixtures, where the answer is independently known:
+it recovers the 14-column header, the ragged 13/14 field counts, the
+`dd.MM.yyyy` booking date, the `dd.MM.yyyy HH:mm` card timestamp, the
+money-with-symbol amounts and the fact that IBAN/BIC/Verwendungszweck are
+populated only on non-card rows - every format fact the `c24-csv` crate
+documents.
+
+Once that output exists, the parser is a short slice: PayPal's export carries
+a **Transaction ID**, so the identity problem C24 had (no id, hence a content
+hash plus an occurrence ordinal scoped to the booking day) does not arise -
+it keys on its own id, as Amazon keys on `order_id`.
+
 **DECIDED by the user, 2026-10-25: CSV first, API later.** Their words:
 *"lets do the CSV fisrt and the API later. but still add it to the backlog"*.
 So the CSV import is the scheduled work (after C24, before cash accounts),
