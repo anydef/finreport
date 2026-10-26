@@ -304,6 +304,23 @@ impl MutationRoot {
         crate::graphql::purchase_orders::upload_purchase_orders(db, publisher(ctx), settings, budget, user, files).await
     }
 
+    /// `uploadC24Transactions`: import C24 CSV account exports (the full text
+    /// of each file). A file with an unrecognised header or an unreadable
+    /// cell is rejected whole and reported by position; the others still
+    /// import. Idempotent: rows already stored are counted as unchanged and
+    /// publish nothing, so overlapping exports never duplicate. Imported
+    /// accounts are linked to the caller. Open to any authenticated user: it
+    /// is their own bank statement.
+    async fn upload_c24_transactions(
+        &self,
+        ctx: &Context<'_>,
+        files: Vec<String>,
+    ) -> GqlResult<crate::graphql::c24_upload::C24UploadResult> {
+        let user = current_user(ctx)?;
+        let db: &DatabaseConnection = ctx.data::<Arc<DatabaseConnection>>()?;
+        crate::graphql::c24_upload::upload_c24_transactions(db, publisher(ctx), user, files).await
+    }
+
     /// `applyPurchaseOrderSplit`: **changes transactions.** Splits each bank
     /// charge of an order the matcher still reports as `APPLY` into one part
     /// per item (plus a shipping-and-adjustments part), in the categories the

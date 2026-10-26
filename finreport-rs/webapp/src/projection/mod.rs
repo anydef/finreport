@@ -221,7 +221,7 @@ pub struct BatchStats {
     pub skipped: usize,
 }
 
-enum ApplyError {
+pub(crate) enum ApplyError {
     Map(MapError),
     Db(DbErr),
 }
@@ -326,7 +326,7 @@ pub async fn process_batch(
     Ok(stats)
 }
 
-async fn apply_account(
+pub(crate) async fn apply_account(
     txn: &DatabaseTransaction,
     mapper: &dyn SourceMapper,
     input: &MapperInput<'_>,
@@ -379,7 +379,7 @@ async fn apply_balance(
     Ok(())
 }
 
-async fn apply_transaction(
+pub(crate) async fn apply_transaction(
     txn: &DatabaseTransaction,
     mapper: &dyn SourceMapper,
     input: &MapperInput<'_>,
