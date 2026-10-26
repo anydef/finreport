@@ -4,14 +4,23 @@
 //! Every mutation publishes to Kafka (awaiting the broker ack — a publish
 //! failure fails the mutation) and applies the identical upsert to its own
 //! projection table in the same request, both carrying the same `revision`.
-//! This builds the §2.2 header set directly rather than going through
-//! `envelope::RecordMeta`, which used to be comdirect-shaped (it *required* a
-//! `comdirect_account_key`). That is no longer true — `RecordMeta` now takes a
-//! `SourceContext`, and `Unattributed` is exactly this case — so these topics
-//! could go through it and would then also carry the `source` and
-//! `imported_at` headers they currently lack. Deliberately not done here: it
-//! changes what is written to five live compacted topics, so it is its own
-//! slice with its own replay check (tracked in `docs/TODO.md`).
+//! This builds its two-header set (`origin`, `schema_version`) directly rather
+//! than going through `envelope::RecordMeta`, and that is **correct, not a
+//! shortcut** — the reasoning, since it reads like an omission:
+//!
+//! * **`source` has no right value here.** §2.2 defines it as a stable
+//!   *provider* id (`comdirect`, `c24`). A user-authored label, rule or
+//!   category came from no provider; `origin = user` is what carries that, and
+//!   those are deliberately separate axes. A `user-label` record is moreover
+//!   *about* a transaction whose own source lives in the record key, so no
+//!   single header value would describe the record itself.
+//! * **Nothing reads it.** `projection::process_batch` resolves a mapper from
+//!   `(envelope.source, envelope.origin)` only after the `labeling_topic_for`
+//!   branch has returned, so no record published here reaches that lookup.
+//! * **`imported_at` is already covered, better.** `Envelope::parse` falls
+//!   back to the Kafka message timestamp, which is in the log and so
+//!   replay-stable; a producer-set clock would be worse for determinism.
+//!
 //! `origin` is always [`ORIGIN_USER`] here, since every WP4-published record
 //! is human-edited, never labeler output.
 

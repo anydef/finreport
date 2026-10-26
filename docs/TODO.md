@@ -494,14 +494,29 @@ guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
    wrong: `sweep_candidates` filters on no source, so the sweep always picked
    them up. The real gap was the event-driven path, now fixed.)
 
-   **Still open, and smaller than it was:** `graphql/events.rs` builds its own
-   two-header set (`origin`, `schema_version`) for the WP4 topics, bypassing
-   `RecordMeta` precisely because of the Comdirect shape that (c) just
-   removed. It can now go through `RecordMeta` with
-   `SourceContext::Unattributed`, which would also give those records the
-   `source` and `imported_at` headers they currently lack. Worth doing, but it
-   changes what is written to five live topics, so it is its own slice with
-   its own replay check — not a drive-by.
+   **Reconsidered 2026-10-27, and the earlier recommendation here was wrong.**
+   This used to say `graphql/events.rs` should be routed through `RecordMeta`
+   with `SourceContext::Unattributed`, now that the Comdirect-shaped
+   requirement is gone, to gain the `source` and `imported_at` headers those
+   records lack. Having checked, **don't**:
+
+   * **`source` has no correct value for a WP4 record.** §2.2 defines it as a
+     stable *provider* id (`comdirect`, `c24`). A user-authored label, rule or
+     category came from no provider, and `origin = user` already carries that
+     — they are deliberately separate axes. A `user-label` record is moreover
+     *about* a transaction whose own source lives in the record key, so no
+     single header value would describe the record itself.
+   * **Nothing reads it.** `projection/mod.rs` resolves a mapper from
+     `(envelope.source, envelope.origin)` only *after* the
+     `labeling_topic_for` branch has returned, so no WP4 record ever reaches
+     that lookup.
+   * **`imported_at` is already covered, and better.** `Envelope::parse` falls
+     back to the record's **Kafka message timestamp**, which is in the log and
+     therefore replay-stable; a producer-set clock is strictly worse for
+     determinism.
+
+   So the two-header set is right rather than a shortcut, and the module doc
+   now says so instead of apologising for it. Left alone on purpose.
 2. **Securities, not just cash.** Scalable's export includes buys, sells and
    corporate actions, which do not fit `transaction` (an amount and a
    currency). A narrow first answer: import only the **cash** movements
