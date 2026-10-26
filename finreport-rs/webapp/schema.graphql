@@ -135,6 +135,64 @@ type BulkEditResult {
 	splitsCleared: Int!
 }
 
+type C24FileResult {
+	"""
+	Position in the `files` argument, from 0.
+	"""
+	index: Int!
+	"""
+	Rows read from the file; 0 when it was rejected.
+	"""
+	rowCount: Int!
+	"""
+	Why the file was rejected: column names and line numbers, never a
+	cell. `null` when the file was read.
+	"""
+	error: String
+}
+
+type C24UploadResult {
+	"""
+	One entry per uploaded file, in order.
+	"""
+	files: [C24FileResult!]!
+	"""
+	Transactions not seen before.
+	"""
+	newTransactions: Int!
+	"""
+	Transactions already stored exactly as uploaded; nothing was published
+	for them. An overlapping export lands mostly here.
+	"""
+	unchangedTransactions: Int!
+	"""
+	Transactions seen before whose content changed (C24 re-categorised a
+	row, say). The identity hash ignores those fields, so the id is kept.
+	"""
+	updatedTransactions: Int!
+	"""
+	Accounts not seen before.
+	"""
+	newAccounts: Int!
+	"""
+	Accounts seen before whose record changed (a renamed account).
+	"""
+	updatedAccounts: Int!
+	"""
+	Distinct accounts across the readable files.
+	"""
+	accountCount: Int!
+	"""
+	Earliest booking date across the readable files; `null` when no file
+	was readable or all were empty.
+	"""
+	earliestBookingDate: Date
+	"""
+	Latest booking date across the readable files.
+	"""
+	latestBookingDate: Date
+}
+
 type CashflowBucket {
 	"""
 	Inclusive.
@@ -867,6 +925,16 @@ type Mutation {
 	separate, explicit mutation.
 	"""
 	uploadPurchaseOrders(files: [String!]!): PurchaseOrderUploadResult!
+	"""
+	`uploadC24Transactions`: import C24 CSV account exports (the full text
+	of each file). A file with an unrecognised header or an unreadable
+	cell is rejected whole and reported by position; the others still
+	import. Idempotent: rows already stored are counted as unchanged and
+	publish nothing, so overlapping exports never duplicate. Imported
+	accounts are linked to the caller. Open to any authenticated user: it
+	is their own bank statement.
+	"""
+	uploadC24Transactions(files: [String!]!): C24UploadResult!
 	"""
 	`applyPurchaseOrderSplit`: **changes transactions.** Splits each bank
 	charge of an order the matcher still reports as `APPLY` into one part

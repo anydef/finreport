@@ -270,8 +270,8 @@ the excess of an over-reimbursement reported as `surplus`.
 ## C24 CSV import
 
 The `c24-csv` crate parses C24's CSV account export. **Parser, topics, wire
-records and projection exist; the upload mutation does not** (no resolver, no
-frontend yet, and nothing publishes to the topics outside tests). C24 records
+records, projection and the upload mutation exist; the frontend and the
+labeler do not.** C24 records
 go on **their own topics** `finreport.c24-account` and
 `finreport.c24-transaction` (compacted, `prevent_destroy`, keyed by the account
 number / the row's derived `external_id`, mirrored in `terraform/kafka/main.tf`
@@ -312,6 +312,29 @@ Same shape and the same two binding properties as
   data (amount, counterparty, IBAN, purpose), so `ParseError` holds a column, a
   line and a *static* reason only. `csv::Error` is reduced to its class and
   position, because its own `Display` quotes the record it choked on.
+
+**`uploadC24Transactions(files: [String!]!)`** (`graphql/c24_upload.rs`, mirrors
+`uploadPurchaseOrders`): parse each file, merge, publish only what is new or
+changed, project what reached the broker, link, report per file.
+
+- **Not admin-gated, deliberately**: importing your own statement is your own
+  data (boundary settled 2026-10-25). Do not add `require_admin`.
+- **Publishes through `RecordMeta` + the ack-awaiting `EventPublisher::publish`,
+  never `events::publish_event`**: that helper omits `source_account_id`, which
+  `C24Mapper::map_transaction` reads off the envelope, so every record would
+  skip on replay. The integration test feeds each scanned record back through
+  the mapper.
+- **Idempotent**: each record is compared with the stored row's `raw_payload`
+  (ids are `transaction_uuid("c24", external_id)`); identical means unchanged
+  and nothing is published. A changed `Kategorie`/`Kontoname` keeps the id and
+  counts as updated. Projection calls `apply_account`/`apply_transaction`
+  directly, not `process_batch` (which would write projector offsets).
+- **Every imported account is linked to the caller** in `user_account`
+  (idempotent, every upload), or the import would be invisible.
+- **An account already linked to other users and not the caller refuses the
+  whole upload** (`VALIDATION`): account ids derive from the account number
+  alone, so otherwise knowing a number would grant access to its transactions.
+- Errors and logs carry no cell, row or account number.
 
 Format facts, all verified against a real export (14-column header
 `Transaktionstyp,Buchungsdatum,Karteneinsatz,Betrag,Zahlungsempfänger,IBAN,BIC,Verwendungszweck,Beschreibung,Kontonummer,Kontoname,Kategorie,Unterkategorie,Bargeldabhebung`):
@@ -564,9 +587,9 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **672** Rust unit tests via `just test`, **760** integration via
+  **679** Rust unit tests via `just test`, **773** integration via
   `just test-integration`, **758** frontend (37 files) via
-  `npm run test:unit` (re-measured 2026-10-26; frontend unchanged). **These go stale within a
+  `npm run test:unit` (re-measured 2026-10-27; frontend unchanged). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph
   explaining the mismatch, so refresh this line in the same commit that adds
   tests, and treat a small discrepancy as a stale baseline rather than as

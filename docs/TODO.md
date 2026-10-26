@@ -450,9 +450,14 @@ guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
    tests and `tests/projector_c24.rs` (rows land with `source = "c24"`,
    re-projection and overlapping exports change nothing). Keys are the bare
    `external_id` / account number, not `<source>:<external_id>` as (a) above
-   said: `source` is already in the id derivation. **Remaining:** the
-   `uploadC24Csv`-style mutation (parse, merge, publish) and its resolver; the
-   frontend; teaching the labeler to read `finreport.c24-transaction` (until
+   said: `source` is already in the id derivation. **Slice 3 landed 2026-10-27** (branch
+   `feat/c24-upload-mutation`): `uploadC24Transactions(files)` in
+   `graphql/c24_upload.rs` - parse, merge, publish through `RecordMeta`,
+   project, link to the caller; idempotent against stored rows, a changed row
+   counts as updated, a bad file is rejected whole by position, and an account
+   already owned by another user refuses the upload. **Remaining:** the
+   frontend (upload page; the SDL already serves the mutation, no operation
+   exists yet); teaching the labeler to read `finreport.c24-transaction` (until
    then C24 rows are projected but never categorised) and its lag guard the
    two new topics; `terraform apply` for the two topics on the central broker.
 
