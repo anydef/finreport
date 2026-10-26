@@ -32,7 +32,6 @@
 	let { categories, goal = null, busy = false, error = '', onsubmit, oncancel }: Props = $props();
 
 	// The form is mounted fresh per open (inside a conditional `Modal`), so a one-time seed is intended.
-	// svelte-ignore state_referenced_locally
 	let form = $state<GoalFormState>(goal ? goalToForm(goal) : emptyGoalForm());
 	let errors = $state<GoalFormErrors>({});
 

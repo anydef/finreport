@@ -11,3 +11,10 @@ src/lib/graphql/mocks/
 src/stories/
 .storybook/
 svelte.config.js
+
+# Generated, and byte-identical by contract. `schema.graphql` is written by
+# the Rust SDL exporter (`graphql_schema_exporter`) and must match
+# `finreport-rs/webapp/schema.graphql` exactly — the `sdl_drift` integration
+# test fails otherwise. Formatting it here would break that test on the next
+# backend run, so prettier must leave it alone; the exporter owns its layout.
+src/lib/graphql/schema.graphql

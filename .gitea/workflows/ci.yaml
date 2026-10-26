@@ -58,13 +58,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Informational only for now: the current frontend tree already has
-      # pre-existing prettier/eslint violations (tracked separately, not
-      # introduced here) — continue-on-error keeps this step visible in CI
-      # output without blocking merges on debt WP6 isn't fixing.
+      # Enforcing again as of 2026-10-27. This was `continue-on-error: true`
+      # because the tree carried pre-existing prettier/eslint violations, which
+      # meant `prettier --check` failed first and **eslint never ran at all** —
+      # so the step reported known debt and hid anything new behind it. The
+      # debt is cleared (11 files formatted, the generated `schema.graphql`
+      # moved to `.prettierignore`, 5 eslint errors fixed), so the step can
+      # block again and a new violation is now visible instead of buried.
       - name: Lint
         run: npm run lint
-        continue-on-error: true
 
       - name: Unit tests
         run: npm run test:unit

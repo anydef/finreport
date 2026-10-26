@@ -293,7 +293,7 @@
 									>
 										{formatDeltaPercent(view.uncategorized.delta)}
 									</td>
-									{#each view.periods as p, i (p.start)}
+									{#each view.periods as p (p.start)}
 										<td class="px-2 py-2 text-right whitespace-nowrap">
 											<a
 												href={transactionsHref(p, data.today, { uncategorized: true })}

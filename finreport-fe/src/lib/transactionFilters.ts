@@ -239,7 +239,8 @@ export function activeFilters(filters: PanelFilters, labels: Labels): ActiveFilt
 	if (filters.reimbursements) {
 		out.push({
 			id: 'reimbursements',
-			label: filters.reimbursements === 'exclude' ? 'Reimbursements left out' : 'Reimbursements only'
+			label:
+				filters.reimbursements === 'exclude' ? 'Reimbursements left out' : 'Reimbursements only'
 		});
 	}
 	for (const key of FLAG_KEYS) {

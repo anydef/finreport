@@ -147,7 +147,10 @@
 					<div class="flex flex-col">
 						<span class="flex items-center gap-2 font-medium text-slate-900">
 							{alias.alias}
-							<Badge text={kindLabel(alias.kind)} variant={alias.kind === 'ACCOUNT' ? 'info' : 'neutral'} />
+							<Badge
+								text={kindLabel(alias.kind)}
+								variant={alias.kind === 'ACCOUNT' ? 'info' : 'neutral'}
+							/>
 						</span>
 						<span class="text-xs text-slate-500">{describeAliasTarget(alias)}</span>
 					</div>

@@ -71,7 +71,6 @@
 </script>
 
 <!-- The counterparty button below is the keyboard/AT equivalent of this row click. -->
-<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <tr
 	class="cursor-pointer border-b border-slate-100 last:border-0 focus-within:bg-slate-50 hover:bg-slate-50 {expanded
 		? 'border-b-0 bg-slate-50'

@@ -81,8 +81,14 @@ export function mockSaveLink(
 		offsets.map((o) => o.amount)
 	);
 	const reimbursed = cents(preview.reimbursed);
-	const expenseShares = share(reimbursed, expenses.map((e) => cents(e.amount)));
-	const offsetShares = share(reimbursed, offsets.map((o) => cents(o.amount)));
+	const expenseShares = share(
+		reimbursed,
+		expenses.map((e) => cents(e.amount))
+	);
+	const offsetShares = share(
+		reimbursed,
+		offsets.map((o) => cents(o.amount))
+	);
 	const member = (
 		item: LinkableMock,
 		role: 'EXPENSE' | 'OFFSET',
@@ -131,7 +137,8 @@ export function mockLinkCandidates(
 		.filter((i) => i.id !== base.id && !linkOf(i) && Number(i.amount) < 0 === wantNegative)
 		.filter(
 			(i) =>
-				!search || `${i.counterpartyName ?? ''} ${i.description ?? ''}`.toLowerCase().includes(search)
+				!search ||
+				`${i.counterpartyName ?? ''} ${i.description ?? ''}`.toLowerCase().includes(search)
 		)
 		.map((i) => ({
 			score: candidateScore(base.amount, base.bookingDate, i.amount, i.bookingDate),
