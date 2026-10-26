@@ -119,6 +119,13 @@ services:
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic create finreport.c24-transaction \
           --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        # Cash accounts (user-authored): account keyed by its generated external_id,
+        # transaction likewise; both compacted, a tombstone deletes. No balance
+        # topic on purpose: a cash balance is derived from the account's own rows.
+        $$RPK topic create finreport.cash-account \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
+        $$RPK topic create finreport.cash-transaction \
+          --partitions 1 --replicas 1 --topic-config cleanup.policy=compact || true
         $$RPK topic list
 
   finreport-be:

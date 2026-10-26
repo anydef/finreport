@@ -7,6 +7,7 @@
 //! `StreamConsumer` and feeds it batches.
 
 pub mod c24;
+pub mod cash;
 pub mod comdirect;
 pub mod account_savings;
 pub mod display_alias;
@@ -38,6 +39,7 @@ use crate::kafka::envelope::{
     TOPIC_TRANSACTION,
 };
 use crate::kafka::c24::{TOPIC_C24_ACCOUNT, TOPIC_C24_TRANSACTION};
+use crate::kafka::cash::{TOPIC_CASH_ACCOUNT, TOPIC_CASH_TRANSACTION};
 use crate::kafka::labeling::{
     CacheRecord, CategoryRecord, LabelRecord, RuleRecord, UserLabelRecord,
 };
@@ -63,13 +65,16 @@ pub const DEFAULT_MAX_CONSECUTIVE_WRITE_FAILURES: u32 = 5;
 /// `finreport.import-watermark`, which is importer-private (§2.3). All are
 /// single-partition (§2.1's ordering guarantee), so partition 0 is the only
 /// partition that ever exists. The two C24 topics have no balance sibling:
-/// the C24 export carries no balance.
-pub const INGEST_TOPICS: [&str; 5] = [
+/// the C24 export carries no balance, and nor do the two cash topics (a cash
+/// balance is derived from the account's own transactions).
+pub const INGEST_TOPICS: [&str; 7] = [
     TOPIC_ACCOUNT,
     TOPIC_ACCOUNT_BALANCE,
     TOPIC_TRANSACTION,
     TOPIC_C24_ACCOUNT,
     TOPIC_C24_TRANSACTION,
+    TOPIC_CASH_ACCOUNT,
+    TOPIC_CASH_TRANSACTION,
 ];
 const INGEST_PARTITION: i32 = 0;
 
@@ -114,6 +119,8 @@ fn entity_kind_for_topic(topic: &str) -> Option<EntityKind> {
         TOPIC_TRANSACTION => Some(EntityKind::Transaction),
         TOPIC_C24_ACCOUNT => Some(EntityKind::Account),
         TOPIC_C24_TRANSACTION => Some(EntityKind::Transaction),
+        TOPIC_CASH_ACCOUNT => Some(EntityKind::Account),
+        TOPIC_CASH_TRANSACTION => Some(EntityKind::Transaction),
         _ => None,
     }
 }
@@ -270,6 +277,27 @@ pub async fn process_batch(
             stats.skipped += 1;
             continue;
         };
+
+        // Cash records are user-authored and can be tombstoned, so they do not
+        // take the generic path below (no default owner, deletes): see
+        // `projection::cash`.
+        if cash::is_cash_topic(&record.topic) {
+            match cash::apply_record(&txn, registry, record).await {
+                Ok(()) => stats.applied += 1,
+                Err(ApplyError::Map(map_err)) => {
+                    error!(
+                        topic = %record.topic,
+                        partition = record.partition,
+                        offset = record.offset,
+                        error = %map_err,
+                        "projector: poison record skipped"
+                    );
+                    stats.skipped += 1;
+                }
+                Err(ApplyError::Db(db_err)) => return Err(db_err),
+            }
+            continue;
+        }
 
         let Some(mapper) = registry.resolve(&record.envelope.source, &record.envelope.origin) else {
             error!(

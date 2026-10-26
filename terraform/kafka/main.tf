@@ -373,3 +373,44 @@ resource "kafka_topic" "c24_transaction" {
     prevent_destroy = true
   }
 }
+
+# Cash accounts (user-authored, no bank): keyed by the account's generated
+# external_id (a UUID, never derived from the name); compacted. The payload is
+# `webapp::kafka::cash::CashAccountRecord`, a frozen wire contract that carries
+# its owner's `user_id` so the log alone rebuilds the account AND its
+# user_account link. A tombstone (null payload) deletes the account, its
+# transactions and their transfer pairings. Mirrored in
+# docker-compose.local.yml's finreport-redpanda-init.
+resource "kafka_topic" "cash_account" {
+  name               = "finreport.cash-account"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Cash accounts, transaction side: keyed by the transaction's generated
+# external_id; compacted; a tombstone deletes the row (and un-pairs a transfer
+# it was part of). Payload is `CashTransactionRecord`, a frozen wire contract.
+# There is deliberately NO cash-account-balance topic: no bank reports a
+# balance for a wallet, and it is the running sum of the account's own
+# transactions, derived on read. Mirrored in docker-compose.local.yml.
+resource "kafka_topic" "cash_transaction" {
+  name               = "finreport.cash-transaction"
+  partitions         = 1
+  replication_factor = 1
+
+  config = {
+    "cleanup.policy" = "compact"
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}

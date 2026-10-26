@@ -679,8 +679,12 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
 
   **Rough slicing** (each independently mergeable): ~~(1) the envelope /
   wire-contract generalisation, shared with C24~~ **(done 2026-10-25)**;
-  (2) topic + record + the
-  projection for cash accounts; (3) mutations for the account lifecycle;
+  ~~(2) topic + record + the
+  projection for cash accounts~~ **(done 2026-10-27, branch
+  `feat/cash-accounts-storage`; see CLAUDE.md "Cash accounts" - two topics, no
+  balance topic, generated-UUID `external_id`, the record carries `user_id` and
+  the projection links `user_account`, deletion is a tombstone that also
+  un-pairs a transfer's bank leg)**; (3) mutations for the account lifecycle;
   (4) mutations for its transactions; (5) the UI. Labelling comes free -
   manual rows flow through the labeler like any other, and the user can set a
   category directly via the existing user-override precedence.

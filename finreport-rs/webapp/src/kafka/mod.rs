@@ -7,6 +7,7 @@
 
 pub mod decimal_compat;
 pub mod c24;
+pub mod cash;
 pub mod envelope;
 pub mod events;
 pub mod goals;
