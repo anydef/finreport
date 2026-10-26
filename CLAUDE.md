@@ -297,18 +297,10 @@ because the export has no balance column. They project into the same
   `iban` is `None` on purpose: the export's `IBAN` column is the
   *counterparty's*. C24's own `Kategorie`/`Unterkategorie` live in
   `raw_payload` only.
-- **Labelling works, but only via the sweep.** `LABELER_INPUT_TOPICS` lists
-  `finreport.transaction` and not `finreport.c24-transaction`, so a C24 row
-  arriving does not *trigger* label resolution. It still gets one:
-  `projection::labeling::sweep_candidates` selects any `transaction` with no
-  `transaction_label` and **filters on no source at all**, and the labeler runs
-  that sweep at startup and after every caught-up pass — so
-  `just dev-labeler --until-caught-up` labels C24 rows too. What is missing is
-  the event-driven path (a C24 row waits for the next sweep,
-  `APP_labeler_sweep_interval_secs`, instead of being labelled on arrival) and
-  lag-guard coverage: `check_projection_lag` hardcodes the three Comdirect
-  ingest topics rather than deriving from `INGEST_TOPICS`, so it will not hold
-  the labeler back when the projector trails on a C24 topic.
+- **Labelled like any other source.** `finreport.c24-transaction` is in
+  `LABELER_INPUT_TOPICS` and shares the transaction handler with
+  `finreport.transaction`; the `source` header, not the topic, is what tells
+  them apart. The labeler holds no per-source code (§2.3).
 
 Same shape and the same two binding properties as
 `amazon-orders`:
@@ -595,7 +587,7 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **679** Rust unit tests via `just test`, **773** integration via
+  **685** Rust unit tests via `just test`, **779** integration via
   `just test-integration`, **758** frontend (37 files) via
   `npm run test:unit` (re-measured 2026-10-27; frontend unchanged). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph

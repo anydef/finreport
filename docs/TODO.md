@@ -457,19 +457,13 @@ guide](https://www.openbankingtracker.com/guides/free-open-banking-apis).
    counts as updated, a bad file is rejected whole by position, and an account
    already owned by another user refuses the upload. **Remaining:** the
    frontend (upload page; the SDL already serves the mutation, no operation
-   exists yet); teaching the labeler to read `finreport.c24-transaction` and its
-   lag guard the two new topics; `terraform apply` for the two topics on the
-   central broker.
+   exists yet); `terraform apply` for the two topics on the central broker. The
+   labeler wiring is **done** (2026-10-27), and fixing it uncovered a bug of
+   its own - see "The labeler's event-driven path never worked" below.
 
-   **Not** "C24 rows are never categorised" - that was the first reading and it
-   is wrong. `sweep_candidates` filters on no source, so the labeler's sweep
-   picks up any unlabelled `transaction` row whatever wrote it, and the sweep
-   runs at startup and after every caught-up pass. The gap is narrower:
-   labelling is not event-driven for C24 (a row waits for the next sweep rather
-   than being labelled on arrival), and `check_projection_lag` hardcodes the
-   three Comdirect topics instead of deriving from `INGEST_TOPICS`, so it will
-   not hold the labeler back when the projector trails on a C24 topic. Worth
-   its own small slice; it does not block the import from being usable.
+   (An earlier note here said C24 rows would "never be categorised". That was
+   wrong: `sweep_candidates` filters on no source, so the sweep always picked
+   them up. The real gap was the event-driven path, now fixed.)
 
    **Still open, and smaller than it was:** `graphql/events.rs` builds its own
    two-header set (`origin`, `schema_version`) for the WP4 topics, bypassing
@@ -1448,3 +1442,56 @@ they were written in whichever form was current. A record type that predates
 2026-10-23 and gains a `Decimal` field needs these deserializers;
 `amazon-orders`' own types and the new C24 records do not, having only ever
 been written as strings.
+
+## The labeler's event-driven path never worked (found + fixed 2026-10-27)
+
+**Found while wiring C24 into the labeler, which is the only reason it
+surfaced:** wiring a new topic into a dead code path would have done nothing,
+so the path had to be read first.
+
+`handle_transaction_record` parsed the Kafka record key as
+`<source>:<external_id>`. **No transaction producer has ever written that
+form.** The importer publishes Comdirect's bare `reference`
+(`import_transactions.rs`), the fixture corpus has 69 transaction records and
+not one contains a colon, and C24 publishes its bare derived id.
+`<source>:<external_id>` is the key form of `user-label` and
+`transaction-label` (see `publish_user_label`) - those arms were right, this
+one was not. So `split_once(':')` returned `None` for every transaction record
+the labeler ever consumed, and it logged
+`transaction record key not in <source>:<external_id> form, skipped` and
+dropped it.
+
+**Severity: latency and log noise, not loss.** `run_sweep` is source-agnostic
+and runs at startup, after every caught-up pass and on
+`APP_labeler_sweep_interval_secs`, so labels still arrived - just at the next
+sweep instead of on arrival. That is also why nothing looked broken: the
+deployed labeler is always on and sweeping, and `just dev-demo`'s assertion
+that a learned rule exists passes either way.
+
+**Why no test caught it:** nothing drives the labeler's Kafka consume loop.
+Every labeler test calls `label_one_transaction`, `run_sweep` or the
+resolution functions directly, so `process_record` and
+`handle_transaction_record` had no coverage at all.
+
+**Fixed.** `source` now comes from the §2.2 `source` **header** (carried on
+`ConsumedLabelingRecord` as a parsed `Envelope`, as the projector's
+`ConsumedRecord` already did) and the key is taken whole as the
+`external_id`. `Envelope::parse` defaults a header-less phase-1 record to
+`comdirect`, so vintage records resolve too, and a C24 record names `c24`
+itself - which is what lets one handler serve both topics with no per-source
+code in the labeler (§2.3).
+
+The dispatch and the identity decision are now separate pure functions
+(`record_kind`, `transaction_identity`) with tests, including the invariant
+that **every** `LABELER_INPUT_TOPICS` entry maps to a handler - a topic added
+to the subscription list but not the dispatch would otherwise consume records,
+advance its offset and silently do nothing. Also: `check_projection_lag` now
+derives its ingest list from `projection::INGEST_TOPICS` instead of naming the
+Comdirect three, so a newly added ingest topic cannot be silently exempt from
+the guard.
+
+**Still not covered, deliberately:** no test drives the real consume loop over
+a broker. The two decisions it used to get wrong are now pure and tested,
+which is the cheap 90%; an end-to-end "publish a record, see a label without a
+sweep" test needs the loop and a fake provider wired together and is worth its
+own slice.
