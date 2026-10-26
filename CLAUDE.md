@@ -96,9 +96,18 @@ APP_accounts__1__...
   mostly useful locally. `init-session` drives a single login interactively, so
   it requires the flag when several accounts are configured.
 - `__name` is a free-text, human-readable label for the login, persisted to
-  the nullable `account.account_name` on every account it imports (migration
-  `m20260820_000001_account_name`, exposed as the nullable `Account.accountName`
-  in GraphQL). It is **display only**: nothing resolves an account through it,
+  the nullable **`account.label`** on every account it imports, and exposed as
+  the nullable **`Account.label`** in GraphQL (with `Account.displayName`
+  deriving a non-null name from it, the IBAN or the display id).
+  *Corrected 2026-10-27: this used to say `account.account_name` and
+  `Account.accountName`, which describe the pre-§2.8 world. Migration
+  `m20260820_000001_account_name` did add `account_name`, but to the table the
+  legacy reshape renamed to `legacy_account` — where the column still is. The
+  source-agnostic `account` table that replaced it
+  (`m20261006_000001_source_agnostic_read_model`) carries `label`, and the SDL
+  has never served an `accountName` field, so a query written from the old
+  sentence fails validation.* It is **display only**: nothing resolves an
+  account through it,
   it has no default (unset stays NULL rather than borrowing the key), and it is
   refreshed on re-import so renaming a login propagates on its next run.
   Accounts are referenced by the account key in config and by `account_id` in

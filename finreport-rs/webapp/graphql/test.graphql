@@ -1,11 +1,16 @@
-query MyQuery {
-#    hello
-    reports(month: "10", year: "2025") {
-        __typename,
-        month,
-        year,
-        category,
-        totalIncome,
-        totalExpenses
+# Scratch document for the IDE's GraphQL plugin, validated against
+# ../schema.graphql by graphql.config.yml.
+#
+# The previous query here asked for `reports(month:, year:)`, a field the
+# schema has not served for a long time — so this file reported errors that
+# were about the query, not the server. Replaced with a query that is valid
+# today; edit freely, nothing depends on it.
+query Accounts {
+    accounts {
+        id
+        label
+        displayName
+        iban
+        currency
     }
 }

@@ -1,4 +1,15 @@
-schema: schema.graphql
+# IDE GraphQL tooling (schema-aware completion for the scratch documents in
+# this directory). It points at the *live* SDL one level up, which the
+# `sdl_drift` integration test keeps in step with
+# `finreport-fe/src/lib/graphql/schema.graphql`.
+#
+# It used to point at a `schema.graphql` copy *in this directory* — a third
+# copy that nothing regenerated and no test checked, last touched 2026-08-20
+# and 53 lines against the live schema's 1985. It still described `Account.id`
+# as `Int!`, from before ids became UUIDs, so IDE completion here was
+# confidently wrong. The copy is deleted; this file is the only reason it
+# existed.
+schema: ../schema.graphql
 documents: '**/*.graphql'
 extensions:
   endpoints:
