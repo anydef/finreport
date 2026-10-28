@@ -13,6 +13,7 @@ import {
 	toUnits,
 	validateAccountForm,
 	validateCashForm,
+	transferNote,
 	withRunningBalance
 } from './cashView';
 import type { Account, Transaction } from './graphql/types';
@@ -45,6 +46,54 @@ describe('decimal units', () => {
 		expect(toUnits('abc')).toBeNull();
 		expect(toUnits('1.23456')).toBeNull();
 		expect(toUnits('')).toBeNull();
+	});
+});
+
+describe('transferNote', () => {
+	it('is null for an ordinary cash row', () => {
+		expect(transferNote(tx('1', '2026-09-01', '-5.00'))).toBeNull();
+	});
+
+	it('names amount-and-date matching, which is the only kind a cash row can get', () => {
+		// A cash row has no IBAN, so the detector can only ever rank this pair
+		// in its amount+date bucket. Saying so is honest about how the link was
+		// made — and about two identical same-day amounts being separable only
+		// by an arbitrary-but-deterministic id order.
+		const paired = tx('1', '2026-09-01', '150.00', {
+			transfer: {
+				counterpartTransactionId: 'bank-leg',
+				counterpartAccountId: 'bank-account',
+				match: 'AMOUNT_DATE'
+			}
+		});
+		expect(transferNote(paired)).toBe('Linked as a transfer (matched by amount and date)');
+	});
+
+	it('names IBAN matching when the detector used it', () => {
+		const paired = tx('1', '2026-09-01', '150.00', {
+			transfer: {
+				counterpartTransactionId: 'bank-leg',
+				counterpartAccountId: 'bank-account',
+				match: 'IBAN'
+			}
+		});
+		expect(transferNote(paired)).toBe('Linked as a transfer (matched by IBAN)');
+	});
+
+	it('is carried onto the ledger row, so the page can show it', () => {
+		const rows = withRunningBalance([
+			tx('1', '2026-09-01', '150.00', {
+				transfer: {
+					counterpartTransactionId: 'bank-leg',
+					counterpartAccountId: 'bank-account',
+					match: 'AMOUNT_DATE'
+				}
+			}),
+			tx('2', '2026-09-02', '-5.00')
+		]);
+		// Newest first.
+		expect(rows[0].transferNote).toBeNull();
+		expect(rows[1].transferNote).toBe('Linked as a transfer (matched by amount and date)');
 	});
 });
 

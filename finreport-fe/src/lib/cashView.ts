@@ -52,6 +52,36 @@ export interface CashRow {
 	transaction: Transaction;
 	/** Balance of the account immediately after this row, chronologically. */
 	balance: string;
+	/**
+	 * Set when the transfer detector has paired this row with a transaction on
+	 * another of the user's accounts — the ATM case: money leaves the bank
+	 * account, the user enters the matching cash row, and the detector links
+	 * the two on its next pass.
+	 *
+	 * Worth surfacing rather than leaving implicit. The pairing is what stops
+	 * the withdrawal being counted as both spending on the bank account and
+	 * income on the wallet, and it happens *asynchronously* — so without a
+	 * marker the user has no way to tell a row that has been linked from one
+	 * that is still waiting for the next detector pass, and no reason to
+	 * believe the feature works at all.
+	 */
+	transferNote: string | null;
+}
+
+/**
+ * The ledger's wording for a paired row. `match` is the detector's own ranking
+ * bucket: `IBAN` means one side's counterparty IBAN matched the other's
+ * account IBAN, `AMOUNT_DATE` means it matched on an exact opposite amount
+ * within the date window. **A cash row can only ever be `AMOUNT_DATE`**, since
+ * it has no IBAN — so saying so plainly is honest about how the link was made,
+ * and about the fact that two identical same-day amounts could in principle
+ * have been paired the other way round.
+ */
+export function transferNote(t: Transaction): string | null {
+	if (!t.transfer) return null;
+	return t.transfer.match === 'IBAN'
+		? 'Linked as a transfer (matched by IBAN)'
+		: 'Linked as a transfer (matched by amount and date)';
 }
 
 /** Oldest first; rows on one day are ordered by id, so the order is stable though not "time of day". */
@@ -71,7 +101,11 @@ export function withRunningBalance(rows: Transaction[]): CashRow[] {
 	let running = 0n;
 	const out = chronological(rows).map((transaction) => {
 		running += toUnits(transaction.amount) ?? 0n;
-		return { transaction, balance: fromUnits(running) };
+		return {
+			transaction,
+			balance: fromUnits(running),
+			transferNote: transferNote(transaction)
+		};
 	});
 	return out.reverse();
 }

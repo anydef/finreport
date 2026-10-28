@@ -29,6 +29,13 @@ interface MockCashTransaction {
 	currency: string;
 	counterpartyName: string | null;
 	description: string | null;
+	/**
+	 * Set on the seeded ATM row so the ledger's "Linked as a transfer" marker
+	 * is reviewable in mock mode. The real pairing is made asynchronously by
+	 * the transfer detector on its next pass — there is no mutation for it, so
+	 * a mock that never set it would leave the marker impossible to see.
+	 */
+	pairedWithBankLeg?: boolean;
 }
 
 const WALLET_ID = 'c0a5b000-0000-4000-8000-000000000001';
@@ -36,7 +43,9 @@ const WALLET_ID = 'c0a5b000-0000-4000-8000-000000000001';
 let accounts: MockCashAccount[] = [{ id: WALLET_ID, label: 'Wallet', currency: 'EUR' }];
 
 let transactions: MockCashTransaction[] = [
-	tx('1', '2026-09-01', '200.00', 'Cash withdrawal', 'ATM'),
+	// The case the user described: money leaves the bank account, this row is
+	// entered by hand, and the detector links the two.
+	{ ...tx('1', '2026-09-01', '200.00', 'Cash withdrawal', 'ATM'), pairedWithBankLeg: true },
 	tx('2', '2026-09-03', '-23.40', 'Weekly market', 'Farmers market'),
 	tx('3', '2026-09-07', '-8.50', 'Lunch', 'Corner bakery'),
 	tx('4', '2026-09-12', '-60.00', 'Haircut and tip', null),
@@ -114,7 +123,14 @@ function transactionShape(t: MockCashTransaction) {
 		splits: [],
 		tags: [],
 		note: null,
-		transfer: null,
+		// A cash row has no IBAN, so a real pair can only ever be `AMOUNT_DATE`.
+		transfer: t.pairedWithBankLeg
+			? {
+					counterpartTransactionId: 'c0a5b000-0000-4000-8000-00000000bank',
+					counterpartAccountId: 'c0a5b000-0000-4000-8000-00000000acct',
+					match: 'AMOUNT_DATE'
+				}
+			: null,
 		recurring: {
 			isRecurring: false,
 			source: 'AUTO',
