@@ -366,6 +366,21 @@
 										? ` · ${row.transaction.description}`
 										: ''}
 								</p>
+								{#if row.transferNote}
+									<!--
+										The transfer detector pairs a cash row with the bank leg of
+										the same movement (an ATM withdrawal, say) on its next pass.
+										Shown because the pairing is what stops the money being
+										counted as both bank spending and cash income — and because
+										it happens asynchronously, so without this the user cannot
+										tell a linked row from one still waiting.
+									-->
+									<p
+										class="mt-1 inline-flex items-center rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
+									>
+										{row.transferNote}
+									</p>
+								{/if}
 							</div>
 							<div class="flex items-baseline justify-between gap-4 sm:justify-end">
 								<span class="text-sm font-medium text-slate-900">
