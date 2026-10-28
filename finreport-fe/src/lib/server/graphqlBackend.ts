@@ -39,6 +39,11 @@ import {
 	mockUploadPurchaseOrders
 } from '$lib/graphql/amazonMock';
 import { mockUploadC24Transactions } from '$lib/graphql/c24Mock';
+import {
+	mockCashAccountRows,
+	mockCashMutation,
+	mockCashTransactionsPage
+} from '$lib/graphql/cashMock';
 import { withMockRuleLabel } from '$lib/graphql/ruleLabelMock';
 import accountsMock from '$lib/graphql/mocks/accounts.json';
 import cashflowSummaryMock from '$lib/graphql/mocks/cashflow-summary.json';
@@ -926,7 +931,7 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 		case 'Accounts':
 			return {
 				status: 200,
-				body: { data: { accounts: mockAccountsWithSavings() } },
+				body: { data: { accounts: [...mockAccountsWithSavings(), ...mockCashAccountRows()] } },
 				setCookies: []
 			};
 		case 'PurchaseOrderMatches':
@@ -979,7 +984,24 @@ function mockResponse(event: RequestEvent, body: GraphqlRequestBody): GraphqlBac
 					};
 		}
 		case 'Transactions':
-			return { status: 200, body: { data: mockTransactions(body.variables) }, setCookies: [] };
+			return {
+				status: 200,
+				body: {
+					data: mockCashTransactionsPage(body.variables) ?? mockTransactions(body.variables)
+				},
+				setCookies: []
+			};
+		case 'CreateCashAccount':
+		case 'RenameCashAccount':
+		case 'DeleteCashAccount':
+		case 'CreateCashTransaction':
+		case 'UpdateCashTransaction':
+		case 'DeleteCashTransaction':
+			return {
+				status: 200,
+				body: mockCashMutation(operationNameOf(body) ?? '', body.variables) ?? { data: null },
+				setCookies: []
+			};
 		case 'CashflowSummary':
 			return { status: 200, body: { data: cashflowSummaryMock.data }, setCookies: [] };
 		case 'CashflowGraph':

@@ -12,7 +12,8 @@
 		{ label: 'Accounts', href: '/admin/accounts' },
 		{ label: 'Users', href: '/admin/users' },
 		{ label: 'Amazon', href: '/admin/amazon' },
-		{ label: 'C24', href: '/admin/c24' }
+		{ label: 'C24', href: '/admin/c24' },
+		{ label: 'Cash', href: '/admin/cash' }
 	];
 
 	// Cosmetic: the server-side gate is the control (see `$lib/adminAccess`).
