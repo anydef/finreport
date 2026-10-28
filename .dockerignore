@@ -10,3 +10,13 @@ finreport-rs/target/
 *.iml
 finreport-rs/.session.json
 finreport-rs/.env
+
+# Real, unredacted exports (see /local-data and .gitignore). The backend image
+# COPYs only `prompts/` and `finreport-rs/`, so nothing here reaches it today,
+# and the frontend builds from the `finreport-fe/` context, which excludes this
+# path entirely. Listed anyway for two reasons: the directory is still part of
+# the backend build context, so its contents are uploaded to the Docker daemon
+# and cached there for no benefit; and the day someone adds a `COPY . .` to the
+# backend Dockerfile, personal bank data would be baked into a published image
+# with nothing to stop it.
+local-data/
