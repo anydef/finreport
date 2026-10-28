@@ -42,6 +42,7 @@ npm run storybook          # component dev server
   - `/transactions` — a paged transaction list with the same `TransactionFilters` panel (plus a period select), no charts.
   - `/compare` — month-over-month comparison: `categoryComparison` for the last 3/6/12 months (ending this month or a past one; `months`/`end` params), a total-per-month bar chart, and a category table (per-month amounts, change and %, `new`/`gone` instead of a percentage) between two chosen months (`base`/`to` params, defaulting to the last two complete months). Cells link to `/transactions` for that month and category. Shaping lives in `comparisonView.ts`; the mock is `graphql/comparisonMock.ts` (honours the requested range).
   - `/admin/c24` — upload C24 CSV exports (`uploadC24Transactions`); not admin-only. Shaping in `c24UploadView.ts`, operation in `graphql/adminC24Queries.ts`, mock `graphql/c24Mock.ts`. Rejected files are shown by position with the server's value-free message; file text is never logged or rendered.
+  - `/admin/cash` — hand-kept cash accounts (`source == "cash"` rows of `accounts`; transactions via `transactions(filter: {accountIds})`), with add/edit/delete rows, a running balance, rename and a confirmed delete; not admin-only. Shaping (running balance, form validation, error wording) in `cashView.ts`, mutations in `graphql/adminCashQueries.ts`, stateful in-session mock `graphql/cashMock.ts`. The edit form pre-fills every field because `updateCashTransaction` replaces the record.
 - `/login` — public.
 - `/api/graphql` — the proxy (see above).
 

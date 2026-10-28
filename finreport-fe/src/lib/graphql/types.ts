@@ -821,3 +821,13 @@ export interface C24UploadResult {
 	earliestBookingDate: DateString | null;
 	latestBookingDate: DateString | null;
 }
+
+/** What the user types for a cash transaction. `updateCashTransaction` replaces all of it. */
+export interface CashTransactionInput {
+	bookingDate: DateString;
+	/** Signed: negative is spent, positive is received. Never zero. */
+	amount: Decimal;
+	currency: string;
+	description?: string | null;
+	counterpartyName?: string | null;
+}
