@@ -29,6 +29,18 @@ Personal-finance reporting: a Rust Comdirect API client + GraphQL backend, feedi
 - Logging via `tracing`, not `log`/`println!`.
 - Secrets wrapped in `secrecy` (`ExposeSecret`), never held as plain `String`.
 - Env vars are `APP_*`, loaded through `utils::settings::Settings`; local secrets come from 1Password via `.env.tpl` (`op run --env-file .env.tpl -- ...`).
+- **Real exports go in `local-data/`, never into a tracked fixture.** That
+  directory is gitignored wholesale (nested paths included) and excluded from
+  the Docker build context; `local-data/.gitkeep` is the only tracked file in
+  it. Every export this project reads is unredacted personal data — a C24 or
+  Comdirect CSV carries IBANs, counterparty names and payment purposes, and
+  the Amazon order export carries recipient addresses the parser is forbidden
+  to even store. Test fixtures are **synthetic by rule**, so the natural move
+  of dropping a real file next to a parser's fixtures is the one to avoid.
+  `just csv-shape <file>` describes such a file's format well enough to build
+  a parser against — header names, delimiter, encoding, raggedness, per-column
+  cell classification — as counts only, never a value, so its output is safe
+  to paste into a chat or an issue while the file itself stays put.
 - The root `README.md`'s `sqlx-cli` install/migrate instructions are stale — this project uses **sea-orm-cli**, not sqlx-cli (see Commands below).
 
 ## Commands
@@ -61,6 +73,12 @@ just redpanda-console [broker] # Redpanda Console UI (http://localhost:8090); de
 make migrate                 # sea-orm-cli migrate
 make generate-entities       # regenerate entity/src/entities from DB schema
 make generate-migrations TARGET=<name>
+
+# Describe a real export's shape without disclosing its contents: header
+# names, delimiter, encoding, raggedness, and a per-column classification of
+# every cell as counts only (never a value). For writing a parser against a
+# real bank/PayPal/marketplace file while the file stays on this machine.
+just csv-shape local-data/paypal-export.csv
 
 # Frontend — thin `just` wrappers around the npm scripts in finreport-fe/CLAUDE.md
 just dev-fe                  # local profile
