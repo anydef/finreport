@@ -633,7 +633,7 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
      cross-user ownership check.
   5. **The funding transfer is paired by the existing detector** - option 1 of
      the two below, and now **proven rather than assumed** (branch
-     `test/cash-cash-transfer`, `webapp/tests/detect_cash_transfer.rs`). The
+     commit `df2d52b`, `webapp/tests/detect_cash_transfer.rs`). The
      detector's four hard rules do not filter on `source`; `load_txn_facts`
      selects every transaction and account with no source filter and takes
      owners from `user_account`, which the cash projection populates. Two
