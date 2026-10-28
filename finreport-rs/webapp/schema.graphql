@@ -193,6 +193,36 @@ type C24UploadResult {
 	latestBookingDate: Date
 }
 
+"""
+The fields of a cash transaction the user types in. `updateCashTransaction`
+takes the same input and **replaces** all of them.
+"""
+input CashTransactionInput {
+	"""
+	The day the money moved.
+	"""
+	bookingDate: Date!
+	"""
+	Signed: negative is money spent, positive is money received. Not zero.
+	At most four decimal places.
+	"""
+	amount: Decimal!
+	"""
+	ISO 4217 code, e.g. `EUR`. Must equal the account's currency: a cash
+	account is single-currency, and its balance is the running sum of its
+	transactions.
+	"""
+	currency: String!
+	"""
+	What it was for. `null` or blank stores none.
+	"""
+	description: String
+	"""
+	Who was paid, or who paid. `null` or blank stores none.
+	"""
+	counterpartyName: String
+}
+
 type CashflowBucket {
 	"""
 	Inclusive.
@@ -935,6 +965,45 @@ type Mutation {
 	is their own bank statement.
 	"""
 	uploadC24Transactions(files: [String!]!): C24UploadResult!
+	"""
+	`createCashAccount`: a wallet, cash tin or other hand-kept account.
+	The id is generated (never derived from the label), so two users can
+	each have a "Wallet". The account is the caller's own. Open to any
+	authenticated user: it is their own data, not shared state.
+	"""
+	createCashAccount(label: String!, currency: String!): Account!
+	"""
+	`renameCashAccount`: change a cash account's label. Refused as
+	`NOT_FOUND` (indistinguishable from an unknown id) for a bank account
+	or any account that is not the caller's own cash account.
+	"""
+	renameCashAccount(accountId: UUID!, label: String!): Account!
+	"""
+	`deleteCashAccount`: permanently deletes a cash account **and every
+	transaction on it**, with their labels, tags, splits and links. Any
+	transfer pairing a bank transaction had with one of them is undone.
+	Cannot be undone. Refused (`NOT_FOUND`) for a bank account, so it can
+	never delete imported data. Returns `true`.
+	"""
+	deleteCashAccount(accountId: UUID!): Boolean!
+	"""
+	`createCashTransaction`: add a hand-typed transaction to one of the
+	caller's cash accounts. The currency must equal the account's.
+	"""
+	createCashTransaction(accountId: UUID!, input: CashTransactionInput!): Transaction!
+	"""
+	`updateCashTransaction`: **replaces** the date, amount, currency,
+	description and counterparty of a cash transaction (omitting
+	`description` or `counterpartyName` clears it). The transaction cannot
+	move to another account. Labels, tags, splits and links are kept.
+	"""
+	updateCashTransaction(transactionId: UUID!, input: CashTransactionInput!): Transaction!
+	"""
+	`deleteCashTransaction`: permanently deletes one cash transaction. If
+	it was paired as a transfer with a bank transaction, that bank
+	transaction stops being a transfer. Returns `true`.
+	"""
+	deleteCashTransaction(transactionId: UUID!): Boolean!
 	"""
 	`applyPurchaseOrderSplit`: **changes transactions.** Splits each bank
 	charge of an order the matcher still reports as `APPLY` into one part

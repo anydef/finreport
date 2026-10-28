@@ -390,9 +390,8 @@ zahlungsempfaenger, iban, verwendungszweck, beschreibung, transaktionstyp)`
 ## Cash accounts
 
 User-created accounts for cash spending, with hand-entered transactions.
-**Storage only so far** (topics, wire records, mapper, projection incl.
-tombstones): no GraphQL mutation, query or UI yet - those are later slices
-(`docs/TODO.md`).
+Storage (topics, wire records, mapper, projection incl. tombstones) and the
+**mutations** are built; no cash-specific query, balance or UI yet (`docs/TODO.md`).
 
 - Two compacted `prevent_destroy` topics, `finreport.cash-account` and
   `finreport.cash-transaction`, in `terraform/kafka/main.tf` **and**
@@ -427,16 +426,50 @@ tombstones): no GraphQL mutation, query or UI yet - those are later slices
   `transfer_match`), not the whole row: the recurring columns describe the bank
   leg on its own history and stay true; `revision` is untouched. Residual
   limit: the old insight *record* remains on its compacted topic, so a full
-  replay can briefly re-project the pairing until the detector's next run; and
-  the delete mutation (later slice) should tombstone an account's transactions
-  too, since a compacted topic keeps them and a replay would otherwise project
-  them under a stub account.
+  replay can briefly re-project the pairing until the detector's next run.
+  `deleteCashAccount` tombstones every transaction the account owns on the
+  topic as well as the account, since a compacted topic keeps them and a
+  replay would otherwise project them under a stub account.
 - Errors are value-free (`InvalidPayload` with a static string): amount and
   description are the user's own financial data.
 - The labeler consumes `finreport.cash-transaction` like any transaction topic
   (`source` from the header) and ignores tombstones; the projector subscribes
   to both via `INGEST_TOPICS`.
-- Not admin-gated (later slices): a cash account is the caller's own data.
+- Not admin-gated: a cash account is the caller's own data.
+
+**Mutations** (`graphql/cash.rs`): `createCashAccount(label, currency)`,
+`renameCashAccount`, `deleteCashAccount`, `createCashTransaction`,
+`updateCashTransaction`, `deleteCashTransaction`. Publish through `RecordMeta`
+(ack-awaiting), then project through `projection::cash::apply_record` - the
+projector's own function - in one DB transaction.
+
+- **Scoping (`owned_cash_account`)** demands `source = 'cash'` AND a
+  `user_account` link AND the caller being the `user_id` in the account's own
+  record. The third check matters: `user-admin link --all` and the admin
+  bootstrap link *every* account to the admin, and a rename republishes the
+  record, which would hand the wallet to the admin on replay. A missing id, a
+  bank account (even one the caller owns - else `deleteCashAccount` deletes
+  imported data), someone else's account and an unlinked one all return the
+  same `NOT_FOUND` ("cash account not found" / "cash transaction not found").
+  It reads the DB, not `AuthenticatedUser::account_ids`, which is fixed at the
+  start of the request.
+- **`updateCashTransaction` is a full replacement** of date, amount, currency,
+  description and counterparty (omitting an optional field clears it); the
+  account cannot change. The records carry no `revision`: a republish of the
+  key replaces the previous one, with one writer (the owner) to order against.
+- **`createCashAccount` refuses a currency the caller's existing accounts do not use** (VALIDATION, names the expected code): `cashflow::first_currency` sums mixed currencies and labels the total with the first, so a CHF wallet next to EUR accounts would silently add the two. The aggregation is unchanged; this keeps the state from being created. No accounts yet: any currency.
+- **Currency must equal the account's** (VALIDATION): an account is
+  single-currency and its balance is a running sum. Amount: non-zero, at most
+  4 decimals (the column is `numeric(20,4)`), below 10^12. Text is trimmed;
+  blank optional text stores none.
+- **Deleting a paired cash transaction needs no mutation-side work**: the
+  projection tombstone already un-pairs the bank leg (integration-tested end to
+  end through the mutation). `deleteCashAccount` tombstones transactions first,
+  the account last, so a mid-way publish failure leaves it retryable.
+- Errors name a field, never a value; `DbErr` is logged by class and returned
+  as a static message. Known limit: a transaction create racing a delete of its
+  account can leave a stub account (the owner check and the publish are not one
+  atomic step).
 
 ## Amazon purchase orders
 
@@ -647,7 +680,7 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **697** Rust unit tests via `just test`, **799** integration via
+  **705** Rust unit tests via `just test`, **820** integration via
   `just test-integration`, **773** frontend (38 files) via
   `npm run test:unit` (all re-measured 2026-10-27). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph

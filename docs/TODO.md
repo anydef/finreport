@@ -684,8 +684,14 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
   `feat/cash-accounts-storage`; see CLAUDE.md "Cash accounts" - two topics, no
   balance topic, generated-UUID `external_id`, the record carries `user_id` and
   the projection links `user_account`, deletion is a tombstone that also
-  un-pairs a transfer's bank leg)**; (3) mutations for the account lifecycle;
-  (4) mutations for its transactions; (5) the UI. Labelling comes free -
+  un-pairs a transfer's bank leg)**; ~~(3) mutations for the account lifecycle;
+  (4) mutations for its transactions~~ **(done 2026-10-27, branch
+  `feat/cash-accounts-mutations`; `graphql/cash.rs`, see CLAUDE.md "Cash
+  accounts" - full-replacement update, currency must match the account, scoping
+  requires source=cash + link + the record's own `user_id`, deletes tombstone
+  the account's transactions too, no mutation-side work needed for a paired
+  transfer)**; (5) the UI - **what remains**, together with a derived cash
+  balance on read, which no query serves yet. Labelling comes free -
   manual rows flow through the labeler like any other, and the user can set a
   category directly via the existing user-override precedence.
 

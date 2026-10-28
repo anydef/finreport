@@ -5,6 +5,7 @@ mod comparison;
 mod bulk;
 pub(crate) mod cashflow;
 pub mod c24_upload;
+pub mod cash;
 pub mod categories;
 pub mod cookies;
 mod counterparty_breakdown;
