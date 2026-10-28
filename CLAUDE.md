@@ -457,6 +457,7 @@ projector's own function - in one DB transaction.
   description and counterparty (omitting an optional field clears it); the
   account cannot change. The records carry no `revision`: a republish of the
   key replaces the previous one, with one writer (the owner) to order against.
+- **`createCashAccount` refuses a currency the caller's existing accounts do not use** (VALIDATION, names the expected code): `cashflow::first_currency` sums mixed currencies and labels the total with the first, so a CHF wallet next to EUR accounts would silently add the two. The aggregation is unchanged; this keeps the state from being created. No accounts yet: any currency.
 - **Currency must equal the account's** (VALIDATION): an account is
   single-currency and its balance is a running sum. Amount: non-zero, at most
   4 decimals (the column is `numeric(20,4)`), below 10^12. Text is trimmed;
@@ -679,7 +680,7 @@ Binding for every agent working in this repo:
   review UI on mocks (it also runs `npm ci` when `node_modules` is stale); a
   raw `npx vite dev` skips that. Same for `just test` / `just lint`.
 - **Test baselines**, so a delegated run can be checked rather than trusted:
-  **703** Rust unit tests via `just test`, **814** integration via
+  **705** Rust unit tests via `just test`, **820** integration via
   `just test-integration`, **773** frontend (38 files) via
   `npm run test:unit` (all re-measured 2026-10-27). **These go stale within a
   session** - five earlier pairs did, and each one cost an agent a paragraph

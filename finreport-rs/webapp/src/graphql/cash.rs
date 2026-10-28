@@ -212,6 +212,28 @@ pub fn amount(value: RustDecimal) -> async_graphql::Result<RustDecimal> {
     Ok(value)
 }
 
+/// Refuses a currency the caller's existing accounts do not already use.
+///
+/// The cashflow aggregations sum amounts across the scoped accounts and label
+/// the total with the first account's currency (`cashflow::first_currency`),
+/// logging only a warning on a mixed set. A wallet in a second currency would
+/// therefore silently add CHF to EUR. Keeping the mixed state from being
+/// created is the cheap fix; the aggregation is a separate decision. With no
+/// accounts yet there is nothing to disagree with. A currency code is not
+/// sensitive, so the message names the expected one.
+pub fn check_account_currency(existing: &[String], requested: &str) -> async_graphql::Result<()> {
+    let mut known: Vec<&str> = existing.iter().map(String::as_str).collect();
+    known.sort_unstable();
+    known.dedup();
+    if known.is_empty() || known.contains(&requested) {
+        return Ok(());
+    }
+    Err(validation_error(format!(
+        "currency must be {}: your accounts use it, and totals are not converted between currencies",
+        known.join(" or ")
+    )))
+}
+
 /// Builds the record for a transaction on an account of `account_currency`.
 pub fn build_transaction_record(
     external_id: String,
@@ -418,13 +440,24 @@ pub async fn create_cash_account(
     currency: String,
 ) -> async_graphql::Result<Account> {
     let publisher = publisher.ok_or_else(kafka_unavailable_error)?;
+    let currency = currency_code(&currency)?;
+    let existing: Vec<String> = account::Entity::find()
+        .inner_join(user_account::Entity)
+        .filter(user_account::Column::UserId.eq(user.user_id))
+        .all(db)
+        .await
+        .map_err(db_failed)?
+        .into_iter()
+        .map(|a| a.currency)
+        .collect();
+    check_account_currency(&existing, &currency)?;
     let record = CashAccountRecord {
         schema_version: CURRENT_SCHEMA_VERSION,
         // Generated, never derived from the label: see `kafka::cash`.
         external_id: Uuid::new_v4().to_string(),
         user_id: user.user_id,
         label: required_text("label", &label, MAX_LABEL_CHARS)?,
-        currency: currency_code(&currency)?,
+        currency,
     };
     let payload = serialize(&record)?;
     publish_and_project(db, publisher, TOPIC_CASH_ACCOUNT, record.topic_key(), payload, None)
@@ -593,6 +626,15 @@ mod tests {
         for bad in ["", "EU", "EURO", "E1R", "€€€"] {
             assert!(currency_code(bad).is_err(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_new_account_must_use_a_currency_the_caller_already_has() {
+        let eur = vec!["EUR".to_string(), "EUR".to_string()];
+        assert!(check_account_currency(&[], "CHF").is_ok(), "no accounts: anything goes");
+        assert!(check_account_currency(&eur, "EUR").is_ok());
+        let err = check_account_currency(&eur, "CHF").unwrap_err();
+        assert!(err.message.contains("EUR") && !err.message.contains("CHF"));
     }
 
     #[test]

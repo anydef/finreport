@@ -379,3 +379,22 @@ async fn without_a_broker_the_mutations_fail_cleanly() {
     let r = run(&schema, &me, CREATE_ACCOUNT, json!({"l": "Wallet", "c": "EUR"})).await;
     assert_eq!(code(&r), "\"KAFKA_UNAVAILABLE\"");
 }
+
+#[tokio::test]
+async fn a_cash_account_must_share_the_currency_of_the_callers_accounts() {
+    let db = common::db().await;
+    let kafka = TestKafka::start().await;
+    let schema = schema_for(db.clone(), Some(&kafka));
+    let me = user(&db).await;
+    bank_account_for(&db, &me).await; // EUR
+
+    let r = run(&schema, &me, CREATE_ACCOUNT, json!({"l": "Franken", "c": "CHF"})).await;
+    assert_eq!(code(&r), "\"VALIDATION\"");
+    assert!(r.errors[0].message.contains("EUR"), "{}", r.errors[0].message);
+    assert_eq!(topic_len(&kafka, TOPIC_CASH_ACCOUNT), 0, "a refused account publishes nothing");
+
+    // A matching currency is accepted; so is anything for a user with no accounts.
+    ok(&schema, &me, CREATE_ACCOUNT, json!({"l": "Wallet", "c": "eur"})).await;
+    let fresh = user(&db).await;
+    ok(&schema, &fresh, CREATE_ACCOUNT, json!({"l": "Franken", "c": "CHF"})).await;
+}
