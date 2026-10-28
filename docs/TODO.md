@@ -605,11 +605,66 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
   anually. I should be able to link \"transfer\" transactions from my normal
   account to my cash account."*
 
-  **Ambiguity to settle before starting:** "anually" is almost certainly
-  **manually** (it follows "add/remove update transactions", and the whole
-  request is about hand-entered cash spending). If it really means
-  *annually* - a yearly bulk edit or cleanup - the UI is a different shape.
-  Ask.
+  **READ AS "manually" (decided 2026-10-28, during the overnight run, without
+  asking - the user was asleep).** It follows "add/remove update
+  transactions" and the whole request is about hand-entered cash spending.
+  The alternative reading, *annually* - a yearly bulk edit - would give the UI
+  a different shape. **If that was the intent, say so: slices 2-4 are
+  unaffected (storage and mutations are the same either way) and only the UI
+  would change.**
+
+  ### Every decision made on the user's behalf, 2026-10-28
+
+  Recorded together so they can be overturned individually.
+
+  1. **"anually" = manually.** Above.
+  2. **"ephemeral" = the user may delete an account and its transactions at
+     will.** The topics are compacted and `prevent_destroy`, so deletion is a
+     tombstone, not transient storage. See the tombstone cascade below.
+  3. **Balance = the running sum of the account's own transactions**, computed
+     on read. No `account_balance` rows and no balance topic: there is no bank
+     to report one. Verified harmless: `Account.latestBalance` is
+     `Option<Balance>` on the backend and **nothing in the UI renders that
+     field today**, so a balance-less account breaks no existing screen.
+  4. **`external_id` is a generated UUID, never derived from the label.** Two
+     users may each have a "Wallet", and nobody can address another's by
+     guessing a name. Contrast the C24 import, where ids derive from the
+     bank's account number and the upload therefore needs an explicit
+     cross-user ownership check.
+  5. **The funding transfer is paired by the existing detector** - option 1 of
+     the two below, and now **proven rather than assumed** (branch
+     `test/cash-cash-transfer`, `webapp/tests/detect_cash_transfer.rs`). The
+     detector's four hard rules do not filter on `source`; `load_txn_facts`
+     selects every transaction and account with no source filter and takes
+     owners from `user_account`, which the cash projection populates. Two
+     tests: the ATM case pairs both legs pointing at each other with
+     `transfer_match = amount_date`, and a wallet owned by someone else does
+     **not** pair with this user's bank line. **Caveat, unchanged:** a cash row
+     has no IBAN, so such a pair is always `amount_date`, which ranks *below*
+     any IBAN-confirmed candidate competing for the same bank leg, and two
+     identical same-day amounts are resolved arbitrarily-but-deterministically
+     by id order.
+  6. **A new account's currency must match the caller's existing accounts**
+     (`VALIDATION`; a caller with no accounts may pick any). Not arbitrary
+     strictness: `cashflow::first_currency` takes the *first* currency of the
+     scoped set, logs a `warn!` on a mixed set, and then **sums without
+     converting anyway**. Until cash accounts existed this was nearly
+     unreachable - every account came from Comdirect in EUR - but
+     `createCashAccount(label, currency)` would let a CHF wallet silently
+     corrupt every dashboard total with only a server log line. Keeping the
+     bad state uncreatable is the cheap fix; making the aggregation itself
+     reject a mixed set is a **separate decision for the user**, and not one
+     to take lightly, since `cashflowSummary` backs the whole dashboard and
+     failing it would blank every card.
+  7. **Ownership is the record's own `user_id`, not the `user_account` link.**
+     The link alone is insufficient: `auth::bootstrap` calls
+     `link_all_accounts`, so the admin is linked to *every* account. A
+     link-only check would let the admin rename or delete another user's
+     wallet - and a rename republishes `user_id`, handing it over on the next
+     replay. Both are required. Every refusal is a uniform `NOT_FOUND`, so the
+     message never reveals whether an account exists.
+  8. **Not admin-gated**, per the boundary settled 2026-10-25: the caller's
+     own data, like a goal or a display alias.
 
   **Why this is architecturally new.** Every `transaction` row today is
   projected from a bank-sourced event; Kafka is the source of truth and the
@@ -661,13 +716,20 @@ export](https://de.scalable.capital/en/product-news/transactions-export).
   has landed (see that entry), so a cash account selected on its own now reads
   its funding transfers as income. This no longer blocks the work.
 
-  **"Ephemeral" needs a definition.** Compacted topics with
-  `prevent_destroy` are the opposite of ephemeral; deletion is a tombstone,
-  as with purchase orders. So "ephemeral" presumably means the user can
-  delete a cash account and its transactions at will. That needs a rule for
-  the case where a cash transaction is **paired as a transfer** with a real
-  bank transaction: deleting it must not leave the bank leg flagged as a
-  transfer pointing at a row that no longer exists. Decide this deliberately.
+  **"Ephemeral" - settled, and the dangling-transfer trap is handled.**
+  Deletion is a tombstone (decision 2 above). The trap this entry warned
+  about is closed: deleting a cash transaction that was paired as a transfer
+  clears `is_transfer`, `transfer_counterpart_id` and `transfer_match` on the
+  **surviving bank leg**, not just on the deleted row, so no bank line is left
+  flagged as a transfer pointing at nothing - which the cashflow exclusion
+  reads. The recurring columns are deliberately left alone: they describe the
+  bank leg's own history and are still true. Un-pairing works by counterpart
+  pointer, so it catches every row pointing at a deleted one. A transaction
+  tombstone also removes its insight, label, user label, tags, splits and link
+  memberships (a link left with no members is deleted); an account tombstone
+  does all of that for every transaction it owned, plus its `account_savings`
+  flags and `user_account` links. None of these tables has a foreign key, so
+  without the cascade a replay would leave orphan rows.
 
   **Also to decide:** the cash account's balance. There is no bank to report
   one, so it is either absent or a running sum of its own transactions
@@ -1617,3 +1679,69 @@ a broker. The two decisions it used to get wrong are now pure and tested,
 which is the cheap 90%; an end-to-end "publish a record, see a label without a
 sweep" test needs the loop and a fake provider wired together and is worth its
 own slice.
+
+## Overnight run, 2026-10-27 into 2026-10-28: verification results that found nothing
+
+The user said *"cotinue until limit reached. I am going to bed."* Several
+checks were run that turned up **no** problem. They are recorded because a
+negative result is only worth having once, and the next person to wonder
+should not have to re-derive it.
+
+- **A balance-less account breaks no screen.** `Account.latestBalance` is
+  `Option<Balance>` and `loaders::latest_balances` yields `None` for an
+  account with no `account_balance` rows. Nothing under `finreport-fe/src`
+  renders that field at all today - only `types.ts`, `queries.ts` and the
+  mocks mention it. So a cash account needs no null-handling work anywhere,
+  and the running-sum balance is a free choice rather than a constrained one.
+- **A cash account marked as savings works correctly.** `CLAUDE.md` describes
+  the savings figure as "net balance change", which reads as though it needs
+  `account_balance`. It does not: `webapp/src/savings/` and
+  `graphql/savings.rs` import `entity::entities::transaction` and never touch
+  `account_balance`, so the figure is derived from transactions and a
+  hand-entered cash row contributes normally.
+- **`terraform/kafka/main.tf` and `docker-compose.local.yml` are in step**, by
+  name *and* by config, for all 21 topics - including the four added
+  independently by two different agents. Both lists: 21 topics, identical
+  names; all four new ones `cleanup.policy=compact`, 1 partition, and
+  `prevent_destroy = true` on the terraform side. `terraform fmt -check
+  -recursive` exits 0. These two files are kept in step **by hand**, which is
+  exactly why this was worth checking.
+- **The `<source>:<external_id>` key-parse bug has no sibling.** After fixing
+  the labeler's transaction arm, every other publisher of a record whose key
+  is parsed that way was checked: `publish_user_label`,
+  `graphql/insights.rs`, the labeler's own label publish and
+  `detect/processor.rs` all build `format!("{}:{}", source, external_id)`. The
+  transaction topics were the unique case, where the key is bare.
+- **Every `Type.field` reference in the docs matches the live SDL.** All
+  backticked `Type.field` mentions across the root `CLAUDE.md`,
+  `docs/TODO.md` and `finreport-fe/CLAUDE.md` were validated against
+  `schema.graphql` with `graphql-js`. `Account.accountName` was the only
+  mismatch and is fixed; the only remaining hits are the corrective prose
+  explaining that it does not exist.
+- **`local-data/` cannot reach a published image.** The backend Dockerfile
+  COPYs only `prompts/` and `finreport-rs/`; the frontend builds from the
+  `finreport-fe/` context, which excludes the path entirely. Added to
+  `.dockerignore` anyway, so it is not uploaded to the Docker daemon and so a
+  later `COPY . .` cannot bake personal data into an image.
+- **`just csv-shape` holds up on the shapes a real export arrives in.**
+  Hand-checked against CRLF endings, a semicolon delimiter, cp1252 umlauts,
+  UTF-8 with a BOM, quoted fields containing an embedded delimiter *or* an
+  embedded newline (which would otherwise inflate the row count and make a
+  ragged-file diagnosis wrong), and German grouped decimals distinguished
+  from plain comma decimals. The verified list is in the script's docstring,
+  since the repo has no Python test runner to hold it.
+
+### Branch inventory (nothing deleted - the user's call)
+
+153 local branches. **127 are fully merged into `main`** and can be deleted
+with no risk. Of the 26 that are not:
+
+- 4 `feat/*` branches (`fe-display-nicknames`, `fe-review-bulk-select`,
+  `goals-fe`, `learning-exemption`) are each 1-2 commits ahead, but their
+  features are **live in `main`** - the goals route exists, and the SDL serves
+  `learningExemption` and the display-alias mutations - so they were merged
+  under different commits and are superseded, not lost work.
+- 1, `worktree-agent-a079872cd80f0ce44`, is the **PayPal API skeleton this
+  file says to keep and review line by line** rather than merge. Do not
+  delete that one.
+- the rest are agent worktree branches.
