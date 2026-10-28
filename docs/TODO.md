@@ -187,7 +187,29 @@ against the tree on 2026-10-24, not from memory:
 
 ### Deployment / data actions outstanding (user)
 
+- **`terraform apply` for the four new topics, and do it BEFORE (or with) the
+  next deploy.** `finreport.c24-account`, `.c24-transaction`,
+  `.cash-account` and `.cash-transaction` exist in `terraform/kafka/main.tf`
+  and in `docker-compose.local.yml`, but not yet on the central broker.
+  Ordering matters more than it looks: the labeler's startup guard derives
+  its topic list from `projection::INGEST_TOPICS`, so it asks the broker about
+  all four. A missing topic *used* to count as projector lag, and the guard's
+  failure mode is to exit non-zero - which would have crash-looped
+  `finreport-be-labeler` until someone connected "labeler won't start" to
+  "unapplied terraform". **That is fixed** (an absent topic now reads as
+  empty, while a broker outage still blocks), so the deploy is safe in either
+  order - but the topics still have to exist before any C24 or cash record can
+  be published. `terraform fmt -check` is clean and all four carry
+  `prevent_destroy`; the apply is additive.
 - Redeploy for the labeler, bulk-edit, goals, rules and sort changes.
+  **Also now carries the labeler fix** (2026-10-27): its event-driven path
+  parsed a transaction record's key as `<source>:<external_id>`, which no
+  producer ever wrote, so it skipped every transaction record and logged
+  `transaction record key not in <source>:<external_id> form, skipped`.
+  Labelling still happened via the source-agnostic sweep, so the symptom was
+  latency and log noise rather than missing labels. **If the deployed
+  labeler's logs carry that line, this is it, and it stops after the
+  redeploy.**
 - `finreport-be-category-reslug` now applies on deploy and repairs the six
   categories whose slug lacks their parent's prefix (and the 18 user overrides
   attached to them). Verify afterwards with the detection SQL in
