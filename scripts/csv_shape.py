@@ -20,6 +20,23 @@ is not.
 Usage:
     python3 scripts/csv_shape.py local-data/paypal-export.csv
     just csv-shape local-data/paypal-export.csv
+
+Verified by hand against the shapes a real export actually arrives in (this
+repo has no Python test runner, so this list is the record):
+
+* the C24 fixtures, where the answer is independently known from a real
+  export — it recovers the 14-column header, the ragged 13/14 field counts,
+  `dd.MM.yyyy` dates, `dd.MM.yyyy HH:mm` card timestamps, money-with-symbol
+  amounts, and that IBAN/BIC/Verwendungszweck are populated only on non-card
+  rows;
+* UTF-8 with a BOM (what C24 sends) and **cp1252** (what a German export
+  often sends) — umlauts in header names decode correctly in both;
+* **CRLF** line endings, which do not leak a stray `\r` into the last column;
+* a **semicolon** delimiter, which German tooling emits as readily as a comma;
+* quoted fields containing an embedded delimiter *or* an embedded newline —
+  neither splits a row, so the row count stays right;
+* German grouped decimals (`1.234,56`) distinguished from plain comma
+  decimals (`-9,99`).
 """
 
 from __future__ import annotations
